@@ -2,6 +2,7 @@ package graph
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -29,5 +30,27 @@ func TestTopoSortCycle(t *testing.T) {
 	}
 	if _, err := TopoSort(nodes); err == nil {
 		t.Fatal("expected cycle error")
+	}
+}
+
+func TestTopoSortUnknownDependency(t *testing.T) {
+	nodes := []Node{
+		{Address: "mock_child.c", DependsOn: []string{"mock_thing.missing"}},
+	}
+	_, err := TopoSort(nodes)
+	if err == nil {
+		t.Fatal("expected unknown-dependency error")
+	}
+	if !strings.Contains(err.Error(), "unknown resource mock_thing.missing") {
+		t.Fatalf("error should name the unknown dependency, got: %v", err)
+	}
+}
+
+func TestReverse(t *testing.T) {
+	if got := Reverse([]string{"a", "b", "c"}); !reflect.DeepEqual(got, []string{"c", "b", "a"}) {
+		t.Fatalf("got %v", got)
+	}
+	if got := Reverse(nil); len(got) != 0 {
+		t.Fatalf("reverse of nil should be empty, got %v", got)
 	}
 }
