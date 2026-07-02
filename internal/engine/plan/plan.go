@@ -60,12 +60,13 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 		byAddr[d.Address()] = d
 		nodes = append(nodes, graph.Node{Address: d.Address(), DependsOn: d.DependsOn})
 	}
-	// deletions: in state, not desired.
+	// deletions: in state, not desired. Carry the recorded dependency edges so
+	// deletes are ordered by real (reverse) dependency order, not lexical luck.
 	deletes := map[string]state.Resource{}
 	for _, r := range s.Resources {
 		if _, ok := byAddr[r.Address()]; !ok {
 			deletes[r.Address()] = r
-			nodes = append(nodes, graph.Node{Address: r.Address()})
+			nodes = append(nodes, graph.Node{Address: r.Address(), DependsOn: r.Dependencies})
 		}
 	}
 	order, err := graph.TopoSort(nodes)
