@@ -22,8 +22,23 @@ func New() *Provider {
 	return &Provider{store: map[string]provider.Attributes{}}
 }
 
-func (p *Provider) Seed(id string, a provider.Attributes) { p.store[id] = a }
-func (p *Provider) Store() map[string]provider.Attributes { return p.store }
+func (p *Provider) Seed(id string, a provider.Attributes) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.store[id] = clone(a)
+}
+
+// Store returns a deep copy of the remote store for test assertions, so callers
+// cannot mutate provider state through the returned map.
+func (p *Provider) Store() map[string]provider.Attributes {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make(map[string]provider.Attributes, len(p.store))
+	for id, a := range p.store {
+		out[id] = clone(a)
+	}
+	return out
+}
 
 func (p *Provider) Resources() map[string]provider.Resource {
 	return map[string]provider.Resource{
@@ -87,7 +102,7 @@ func (r *res) Dependencies(desired provider.Attributes) []provider.Ref {
 		return nil
 	}
 	v, ok := desired["parent"]
-	if !ok || v.IsNull() {
+	if !ok || v.IsNull() || v.Type() != cty.String {
 		return nil
 	}
 	s := v.AsString()
