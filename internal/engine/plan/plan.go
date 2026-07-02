@@ -37,6 +37,7 @@ type Change struct {
 	Desired   provider.Attributes
 	Actual    provider.Attributes
 	AttrDiffs []AttrDiff
+	DependsOn []string
 }
 
 type Plan struct {
@@ -87,14 +88,14 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 		st, inState := s.Find(addr)
 		if !inState {
 			pl.Changes = append(pl.Changes, Change{
-				Address: addr, Type: d.Type, Action: provider.ActionCreate, Desired: d.Attributes,
+				Address: addr, Type: d.Type, Action: provider.ActionCreate, Desired: d.Attributes, DependsOn: d.DependsOn,
 			})
 			continue
 		}
 		actual, err := resources[d.Type].Read(ctx, st.ID)
 		if errors.Is(err, provider.ErrNotFound) {
 			pl.Changes = append(pl.Changes, Change{
-				Address: addr, Type: d.Type, Action: provider.ActionCreate, Desired: d.Attributes,
+				Address: addr, Type: d.Type, Action: provider.ActionCreate, Desired: d.Attributes, DependsOn: d.DependsOn,
 			})
 			continue
 		}
@@ -108,7 +109,7 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 		}
 		pl.Changes = append(pl.Changes, Change{
 			Address: addr, Type: d.Type, ID: st.ID, Action: action,
-			Desired: d.Attributes, Actual: actual, AttrDiffs: diffs,
+			Desired: d.Attributes, Actual: actual, AttrDiffs: diffs, DependsOn: d.DependsOn,
 		})
 	}
 	// deletes must run in reverse dependency order; re-sort delete block.

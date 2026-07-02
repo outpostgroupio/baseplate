@@ -67,3 +67,41 @@ func TestBuildDeleteReverseDependencyOrder(t *testing.T) {
 			pl.Changes[0].Address, pl.Changes[1].Address)
 	}
 }
+
+func TestBuildUpdateWhenAttrChanged(t *testing.T) {
+	p := mock.New()
+	p.Seed("mock_thing/1", provider.Attributes{"name": cty.StringVal("old")})
+	s := state.New()
+	s.Upsert(state.Resource{Type: "mock_thing", Name: "a", ID: "mock_thing/1"})
+
+	desired := []DesiredResource{
+		{Type: "mock_thing", Name: "a", Attributes: provider.Attributes{"name": cty.StringVal("new")}},
+	}
+	pl, err := Build(context.Background(), p, s, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pl.Changes) != 1 || pl.Changes[0].Action != provider.ActionUpdate {
+		t.Fatalf("expected 1 update, got %+v", pl.Changes)
+	}
+	if len(pl.Changes[0].AttrDiffs) != 1 || pl.Changes[0].AttrDiffs[0].Name != "name" {
+		t.Fatalf("expected a name diff, got %+v", pl.Changes[0].AttrDiffs)
+	}
+}
+
+func TestBuildDriftRecreatesWhenRemoteMissing(t *testing.T) {
+	p := mock.New() // provider store is EMPTY → Read returns ErrNotFound
+	s := state.New()
+	s.Upsert(state.Resource{Type: "mock_thing", Name: "a", ID: "mock_thing/1"})
+
+	desired := []DesiredResource{
+		{Type: "mock_thing", Name: "a", Attributes: provider.Attributes{"name": cty.StringVal("root")}},
+	}
+	pl, err := Build(context.Background(), p, s, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pl.Changes) != 1 || pl.Changes[0].Action != provider.ActionCreate {
+		t.Fatalf("expected drift → recreate (ActionCreate), got %+v", pl.Changes)
+	}
+}

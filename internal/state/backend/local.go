@@ -39,7 +39,7 @@ func (l *Local) Put(s *state.State) error {
 	if err := os.MkdirAll(filepath.Dir(l.path), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, l.path)

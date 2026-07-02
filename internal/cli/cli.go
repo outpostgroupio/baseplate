@@ -40,7 +40,7 @@ func run(args []string, stdout io.Writer) int {
 		if err != nil {
 			return nil, err
 		}
-		return filterTarget(res, target), nil
+		return res, nil
 	}
 
 	root.AddCommand(&cobra.Command{Use: "validate", RunE: func(_ *cobra.Command, _ []string) error {
@@ -65,6 +65,7 @@ func run(args []string, stdout io.Writer) int {
 		if err != nil {
 			return err
 		}
+		filterPlanByTarget(pl, target)
 		if jsonOut {
 			out, _ := pl.RenderJSON()
 			fmt.Fprintln(stdout, string(out))
@@ -98,7 +99,7 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy bo
 		if err != nil {
 			return err
 		}
-		desired = filterTarget(res, target)
+		desired = res
 	}
 	b := backend.NewLocal(statePath)
 	unlock, err := b.Lock()
@@ -114,6 +115,7 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy bo
 	if err != nil {
 		return err
 	}
+	filterPlanByTarget(pl, target)
 	if err := apply.Apply(context.Background(), p, b, s, pl); err != nil {
 		return err
 	}
@@ -121,15 +123,17 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy bo
 	return nil
 }
 
-func filterTarget(res []plan.DesiredResource, target string) []plan.DesiredResource {
+// filterPlanByTarget restricts the plan to a single resource address when
+// --target is set, so targeted operations never touch (or delete) other resources.
+func filterPlanByTarget(pl *plan.Plan, target string) {
 	if target == "" {
-		return res
+		return
 	}
-	var out []plan.DesiredResource
-	for _, r := range res {
-		if r.Address() == target {
-			out = append(out, r)
+	var out []plan.Change
+	for _, c := range pl.Changes {
+		if c.Address == target {
+			out = append(out, c)
 		}
 	}
-	return out
+	pl.Changes = out
 }

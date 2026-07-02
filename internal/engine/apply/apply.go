@@ -63,7 +63,7 @@ func stateResource(c plan.Change, id string, attrs provider.Attributes) state.Re
 			enc[k] = raw
 		}
 	}
-	return state.Resource{Type: c.Type, Name: name(c.Address), ID: id, Attributes: enc}
+	return state.Resource{Type: c.Type, Name: name(c.Address), ID: id, Attributes: enc, Dependencies: c.DependsOn}
 }
 
 func name(address string) string {
