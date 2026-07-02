@@ -36,3 +36,40 @@ func TestApplyCreatesAndPersists(t *testing.T) {
 		t.Fatal("state not persisted after apply")
 	}
 }
+
+// TestApplyThenReplanConverges is the end-to-end Phase 0 proof: after applying,
+// a fresh plan against the SAME (persistent) provider + resulting state must
+// report no changes — idempotent reconciliation with no spurious diffs. It also
+// exercises a cross-resource dependency (mock_child.c → mock_thing.a).
+func TestApplyThenReplanConverges(t *testing.T) {
+	ctx := context.Background()
+	p := mock.New()
+	s := state.New()
+	desired := []plan.DesiredResource{
+		{Type: "mock_thing", Name: "a", Attributes: provider.Attributes{"name": cty.StringVal("root")}},
+		{Type: "mock_child", Name: "c", DependsOn: []string{"mock_thing.a"}, Attributes: provider.Attributes{
+			"name": cty.StringVal("child"), "parent": cty.StringVal("mock_thing.a")}},
+	}
+
+	first, err := plan.Build(ctx, p, s, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.HasChanges() {
+		t.Fatal("first plan should have changes")
+	}
+
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.tfstate"))
+	if err := Apply(ctx, p, b, s, first); err != nil {
+		t.Fatal(err)
+	}
+
+	// Re-plan against the same provider (store persisted) and the post-apply state.
+	second, err := plan.Build(ctx, p, s, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.HasChanges() {
+		t.Fatalf("re-plan after apply must converge to no changes, got: %s", second.RenderText(false))
+	}
+}
