@@ -12,7 +12,14 @@ config, backed by a state file. A maintained, Go-native successor to Mantle. Mod
 - **Phase 1 COMPLETE (on main):** real Roblox provider, **proven live** (plan→apply→converge→
   destroy against a real universe). Resources: `roblox_experience`, `roblox_asset`,
   `roblox_developer_product`, with apply-time reference resolution.
-- Next: **Phase 2** (see Roadmap below).
+- **Phase 2 slice 1 COMPLETE (robustness hardening):** 404→`provider.ErrNotFound` across all
+  resources (out-of-band deletes drift-recreate); non-string reference convergence fixed by
+  type-preserving state marshal (`Marshal(v, cty.DynamicPseudoType)` — the write side previously
+  emitted bare JSON that every `DynamicPseudoType` read silently dropped); gated live
+  `roblox_asset` test, **proven live**. Live-discovered + fixed: `assetId` is a wire **string**
+  (not int64); Image/Decal assets are **not archivable** → `asset.Delete` unmanages-in-place.
+  See `docs/superpowers/specs/2026-07-03-baseplate-phase2-robustness-design.md`.
+- Next: **Phase 2** remaining slices (see Roadmap below).
 
 Read `docs/superpowers/specs/2026-07-03-baseplate-phase1-roblox-provider-design.md` for the
 Phase 1 design + rationale, and `docs/superpowers/plans/` for the executed task-by-task plans.
@@ -80,6 +87,11 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
 - Assets are **user- or group-owned** (`creationContext.creator.{userId|groupId}`), not
   universe-owned. Create = multipart (`request` JSON part + `fileContent` file) → async
   Operation → poll `/v1/operations/{id}`. Base `https://apis.roblox.com/assets`.
+  - `assetId` comes back as a JSON **string**, not the int64 the spec declares (Roblox serializes
+    64-bit ids as strings — decode as `string`). Verified live.
+  - **Image/Decal assets are NOT archivable** (`:archive` → 400 "not an archivable asset type"),
+    so there's no Open Cloud delete path; `roblox_asset` destroy unmanages-in-place (drops from
+    state, leaves the asset), like a dev product that can't be hard-deleted. Verified live.
 - Developer products: create/update are **multipart form fields** (`name`, `price`, `isForSale`,
   `imageFile`, ...). The icon is a **direct file upload** (`imageFile`), NOT an assetId
   reference. Can't hard-delete → destroy sets `isForSale=false`. Base `https://apis.roblox.com`.
@@ -87,18 +99,21 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
 
 ## Roadmap & tracked deferrals (from the review loops)
 **Phase 2 — coverage + robustness:**
+- **DONE (slice 1):** 404→`provider.ErrNotFound` across all resources; live `roblox_asset` test;
+  non-string reference convergence (root cause was a state wire-format mismatch — write emitted
+  bare JSON, reads used `DynamicPseudoType` wrapper and silently dropped every non-`id` attr;
+  fixed by marshaling state against `cty.DynamicPseudoType`).
 - `roblox_place` (.rbxl publish + versioning) — the deferred half of the original v1 slice.
 - More resources: game passes, badges, thumbnails/icons, social links, notifications, localization.
-- **Map HTTP 404 → `provider.ErrNotFound`** in the Roblox resources' `Read`, so out-of-band
-  deletion drift-recreates instead of hard-erroring the plan (currently NOT mapped).
-- **Add a live end-to-end test for `roblox_asset`** (only unit-tested with a fake client today;
-  the real `/v1/assets` multipart + operation-poll shape is unverified live).
 - `baseplate import` / adopt existing resources; richer env overlays; config modules.
-- **Non-string referenced-attribute convergence gap:** apply resolves refs from in-memory
-  `cty.Value`, but plan resolves from state via `ctyjson.Unmarshal(raw, DynamicPseudoType)`. For
-  numbers/objects the round-trip can change the concrete type and break `RawEquals` → spurious
-  perpetual diff. Our current refs are strings (`.id`) so it's latent; add a test + fix before
-  any numeric/object reference ships.
+- **NEW deferrals (from slice-1 review):**
+  - `stateResource` (apply.go) silently drops an attribute on a `ctyjson.Marshal` error
+    (`if err == nil {…}`, no error surfaced) — the write-side mirror of the read-side bug slice 1
+    fixed. Unreachable today (values are known provider outputs); surface the error anyway.
+  - `opencloud.IsNotArchivable` matches the 400 message substring `"archivable"` (Open Cloud gives
+    no structured code); pin it with a Phase 4 contract test.
+  - **State on-disk wire format changed** this slice (bare → `{value,type}` wrapper); a
+    version-gate / migration for old state files is deferred to Phase 3.
 
 **Phase 3 — CI layer:** prebuilt GitHub Actions (plan-on-PR comment, apply-on-merge), remote
 state backend + CI locking, `--json`/exit-code hardening, non-interactive mode.
