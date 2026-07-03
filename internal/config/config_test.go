@@ -61,6 +61,26 @@ func TestLoadCapturesReferences(t *testing.T) {
 	}
 }
 
+func TestLoadOmitsUnsetOptionalAttrs(t *testing.T) {
+	// mock_child has an optional "parent" attribute; when the user doesn't write
+	// it, hcldec decodes it as null. Load must omit it from Attributes so it is
+	// not treated as a declared attribute (which would diff as null forever).
+	_, resources, err := Load(filepath.Join("..", "..", "testdata", "optional.bp.hcl"), mock.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(resources))
+	}
+	attrs := resources[0].Attributes
+	if _, ok := attrs["name"]; !ok {
+		t.Fatal("declared attribute 'name' should be present")
+	}
+	if _, ok := attrs["parent"]; ok {
+		t.Fatalf("unset optional attribute 'parent' must be omitted, got attrs=%+v", attrs)
+	}
+}
+
 func TestLoadRejectsWrappedReference(t *testing.T) {
 	_, _, err := Load(filepath.Join("..", "..", "testdata", "badref.bp.hcl"), mock.New())
 	if err == nil {

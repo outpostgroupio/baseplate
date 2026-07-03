@@ -85,6 +85,17 @@ func Load(path string, p provider.Provider) (ProviderConfig, []plan.DesiredResou
 			for k := range refNames {
 				delete(attrs, k)
 			}
+			// hcldec decodes UNSET optional attributes as present-but-null. Keep
+			// only attributes the user actually wrote in the HCL body, so unset
+			// optional fields aren't treated as declared (which would make them
+			// diff as null-vs-real-value forever). References were already removed
+			// above; what remains must be genuine literals the user authored.
+			written := bodyAttrNames(b.Body)
+			for k := range attrs {
+				if !written[k] {
+					delete(attrs, k)
+				}
+			}
 			// After removing bare references, any remaining unknown attribute is a
 			// reference used in an unsupported form (e.g. inside a string template
 			// or a function call). Reject it loudly rather than silently dropping it.
@@ -156,6 +167,18 @@ func resourceRefs(body hcl.Body) (map[string]provider.Ref, map[string]bool) {
 		}
 	}
 	return refAttrs, refNames
+}
+
+// bodyAttrNames returns the set of attribute names the user actually wrote in
+// the resource body (as opposed to optional attributes hcldec defaults to null).
+func bodyAttrNames(body hcl.Body) map[string]bool {
+	out := map[string]bool{}
+	if syn, ok := body.(*hclsyntax.Body); ok {
+		for name := range syn.Attributes {
+			out[name] = true
+		}
+	}
+	return out
 }
 
 func traversalIndexName(tr hcl.Traversal, i int) (string, bool) {
