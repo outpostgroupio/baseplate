@@ -118,5 +118,8 @@ func TestLiveAssetLifecycle(t *testing.T) {
 		t.Fatalf("expected convergence, got changes:\n%s", pl2.RenderText(false))
 	}
 
-	t.Log("live asset lifecycle OK: uploaded via multipart+operation-poll, read back, converged, archived")
+	// NOTE: destroy runs in t.Cleanup. Image assets are not archivable via Open
+	// Cloud, so destroy unmanages the asset in place (drops it from state) and
+	// leaves it in the account — one orphaned test image per live run, by design.
+	t.Log("live asset lifecycle OK: uploaded via multipart+operation-poll, read back, converged; destroy unmanages (image assets aren't archivable)")
 }

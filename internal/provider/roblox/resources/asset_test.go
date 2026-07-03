@@ -14,10 +14,11 @@ import (
 )
 
 type fakeAsset struct {
-	created opencloud.AssetCreate
-	gotFile []byte
-	store   map[string]opencloud.Asset
-	getErr  error
+	created   opencloud.AssetCreate
+	gotFile   []byte
+	store     map[string]opencloud.Asset
+	getErr    error
+	deleteErr error
 }
 
 func (f *fakeAsset) CreateAndAwait(_ context.Context, req opencloud.AssetCreate, _, _ string, data []byte) (opencloud.Asset, error) {
@@ -40,7 +41,28 @@ func (f *fakeAsset) Update(_ context.Context, a opencloud.Asset) (opencloud.Asse
 	f.store[a.ID] = a
 	return a, nil
 }
-func (f *fakeAsset) Delete(_ context.Context, id string) error { delete(f.store, id); return nil }
+func (f *fakeAsset) Delete(_ context.Context, id string) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	delete(f.store, id)
+	return nil
+}
+
+func TestAssetDeleteUnmanagesNonArchivable(t *testing.T) {
+	r := Asset(&fakeAsset{deleteErr: &opencloud.APIError{
+		Status: 400, Message: "Asset 1 is not an archivable asset type."}})
+	if err := r.Delete(context.Background(), "1"); err != nil {
+		t.Fatalf("destroy of a non-archivable asset must succeed (unmanage), got %v", err)
+	}
+}
+
+func TestAssetDeletePropagatesOtherErrors(t *testing.T) {
+	r := Asset(&fakeAsset{deleteErr: &opencloud.APIError{Status: 500, Message: "boom"}})
+	if err := r.Delete(context.Background(), "1"); err == nil {
+		t.Fatal("a delete error unrelated to archivability must propagate")
+	}
+}
 
 func TestAssetCreateReadsFileAndUploads(t *testing.T) {
 	dir := t.TempDir()

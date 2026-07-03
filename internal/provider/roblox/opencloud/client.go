@@ -60,6 +60,15 @@ func IsNotFound(err error) bool {
 	return errors.As(err, &e) && e.Status == http.StatusNotFound
 }
 
+// IsNotArchivable reports whether err is a Roblox API 400 that rejected an
+// archive because the asset's type cannot be archived (e.g. Image/Decal). Such
+// assets have no Open Cloud delete path, so destroy unmanages them in place.
+func IsNotArchivable(err error) bool {
+	var e *APIError
+	return errors.As(err, &e) && e.Status == http.StatusBadRequest &&
+		strings.Contains(strings.ToLower(e.Message), "archivable")
+}
+
 func (c *Client) Do(ctx context.Context, method, path string, body, out any) (*http.Response, error) {
 	var reqBody []byte
 	contentType := ""
