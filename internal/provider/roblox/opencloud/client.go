@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -49,6 +50,14 @@ func (e *APIError) Error() string {
 		return fmt.Sprintf("Roblox API %d: %s", e.Status, e.Message)
 	}
 	return fmt.Sprintf("Roblox API %d", e.Status)
+}
+
+// IsNotFound reports whether err is, or wraps, a Roblox API 404 response.
+// It lets resources translate an out-of-band deletion into provider.ErrNotFound
+// without the opencloud core depending on internal/provider.
+func IsNotFound(err error) bool {
+	var e *APIError
+	return errors.As(err, &e) && e.Status == http.StatusNotFound
 }
 
 func (c *Client) Do(ctx context.Context, method, path string, body, out any) (*http.Response, error) {

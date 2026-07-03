@@ -3,6 +3,8 @@ package opencloud
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -93,5 +95,23 @@ func TestPollOperationWaitsForDone(t *testing.T) {
 	}
 	if out.AssetID != "123" {
 		t.Fatalf("got %q", out.AssetID)
+	}
+}
+
+func TestIsNotFound(t *testing.T) {
+	if !IsNotFound(&APIError{Status: 404}) {
+		t.Fatal("a 404 APIError should be not-found")
+	}
+	if !IsNotFound(fmt.Errorf("get universe: %w", &APIError{Status: 404})) {
+		t.Fatal("a wrapped 404 APIError should be not-found")
+	}
+	if IsNotFound(&APIError{Status: 500}) {
+		t.Fatal("a 500 must not be not-found")
+	}
+	if IsNotFound(errors.New("boom")) {
+		t.Fatal("a non-APIError must not be not-found")
+	}
+	if IsNotFound(nil) {
+		t.Fatal("nil must not be not-found")
 	}
 }
