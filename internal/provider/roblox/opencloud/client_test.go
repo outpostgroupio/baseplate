@@ -115,3 +115,18 @@ func TestIsNotFound(t *testing.T) {
 		t.Fatal("nil must not be not-found")
 	}
 }
+
+func TestIsNotArchivable(t *testing.T) {
+	if !IsNotArchivable(&APIError{Status: 400, Message: "Asset 139540647219649 is not an archivable asset type."}) {
+		t.Fatal("a 400 not-archivable APIError should match")
+	}
+	if IsNotArchivable(&APIError{Status: 400, Message: "some other bad request"}) {
+		t.Fatal("an unrelated 400 must not match")
+	}
+	if IsNotArchivable(&APIError{Status: 404, Message: "archivable"}) {
+		t.Fatal("a non-400 status must not match")
+	}
+	if IsNotArchivable(errors.New("boom")) {
+		t.Fatal("a non-APIError must not match")
+	}
+}
