@@ -10,9 +10,10 @@ import (
 	"net/textproto"
 )
 
-// Part is one part of a multipart/form-data request. If JSON is non-nil the part
-// is a JSON value (content-type application/json); otherwise it is a file/data
-// part with the given Filename and ContentType.
+// Part is one part of a multipart/form-data request:
+//   - JSON != nil            → a JSON value part (content-type application/json)
+//   - Filename != ""         → a file part with the given Filename/ContentType
+//   - otherwise              → a plain text form field with value string(Data)
 type Part struct {
 	Name        string
 	Filename    string
@@ -41,6 +42,17 @@ func (c *Client) DoMultipart(ctx context.Context, method, path string, parts []P
 				return nil, err
 			}
 			if _, err := w.Write(b); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if p.Filename == "" {
+			// Plain text form field (e.g. name=..., price=...).
+			w, err := mw.CreateFormField(p.Name)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := w.Write(p.Data); err != nil {
 				return nil, err
 			}
 			continue

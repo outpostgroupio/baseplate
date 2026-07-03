@@ -36,7 +36,7 @@ func (e *experience) DecodeSpec() hcldec.Spec {
 	return spec
 }
 
-func (e *experience) Computed() []string                             { return []string{"id"} }
+func (e *experience) Computed() []string                              { return []string{"id"} }
 func (e *experience) Dependencies(provider.Attributes) []provider.Ref { return nil }
 
 func (e *experience) Create(ctx context.Context, desired provider.Attributes) (string, provider.Attributes, error) {
