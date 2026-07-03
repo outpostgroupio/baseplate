@@ -3,6 +3,7 @@ package opencloud
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -90,18 +91,25 @@ func (ac *assetClient) CreateAndAwait(ctx context.Context, req AssetCreate, file
 		return Asset{}, err
 	}
 	var res assetResponse
-	if op.Done {
+	switch {
+	case op.Done:
 		if len(op.Response) > 0 {
 			if err := json.Unmarshal(op.Response, &res); err != nil {
 				return Asset{}, err
 			}
 		}
-	} else if op.Path != "" {
+	case op.Path != "":
 		if err := ac.c.PollOperation(ctx, assetsPollPath(op.Path), &res); err != nil {
 			return Asset{}, err
 		}
+	default:
+		return Asset{}, fmt.Errorf("asset create: response was neither a completed operation nor a pollable operation path")
 	}
-	return res.toAsset(""), nil
+	a := res.toAsset("")
+	if a.ID == "" {
+		return Asset{}, fmt.Errorf("asset create: operation completed without an assetId")
+	}
+	return a, nil
 }
 
 func (ac *assetClient) Get(ctx context.Context, assetID string) (Asset, error) {
