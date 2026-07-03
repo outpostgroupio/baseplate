@@ -87,27 +87,9 @@ func resolveRefs(c plan.Change, outputs map[string]provider.Attributes) (provide
 		if !ok {
 			return nil, fmt.Errorf("%s: referenced attribute %s.%s not found in applied output", c.Address, ref.Address, ref.Attr)
 		}
-		desired[attr] = normalizeRefValue(v)
+		desired[attr] = v
 	}
 	return desired, nil
-}
-
-// normalizeRefValue canonicalizes a resolved reference value through the same
-// ctyjson round-trip plan uses when reconstructing references from state
-// (Unmarshal against DynamicPseudoType). This keeps the concrete cty type
-// identical on both sides — e.g. a list persisted to state reloads as a tuple,
-// so apply must store the tuple form too — otherwise RawEquals fails and the
-// reference diffs against itself forever. Strings (our .id refs) are unchanged.
-func normalizeRefValue(v cty.Value) cty.Value {
-	raw, err := ctyjson.Marshal(v, v.Type())
-	if err != nil {
-		return v
-	}
-	n, err := ctyjson.Unmarshal(raw, cty.DynamicPseudoType)
-	if err != nil {
-		return v
-	}
-	return n
 }
 
 func withID(a provider.Attributes, id string) provider.Attributes {
@@ -139,7 +121,14 @@ func commit(b backend.Backend, s *state.State, r state.Resource) error {
 func stateResource(c plan.Change, id string, attrs provider.Attributes) state.Resource {
 	enc := map[string]json.RawMessage{}
 	for k, v := range attrs {
-		raw, err := ctyjson.Marshal(v, v.Type())
+		// Marshal against DynamicPseudoType so the concrete cty type travels in
+		// the JSON wrapper ({"value":...,"type":...}). Reads use
+		// Unmarshal(raw, DynamicPseudoType), which requires that wrapper and
+		// recovers the exact type — so a list reloads as a list, not a tuple, and
+		// non-string references round-trip and diff correctly. Marshaling against
+		// v.Type() produced bare JSON that the reads could not decode (they
+		// errored and silently dropped the attribute).
+		raw, err := ctyjson.Marshal(v, cty.DynamicPseudoType)
 		if err == nil {
 			enc[k] = raw
 		}
