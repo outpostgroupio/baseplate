@@ -45,6 +45,7 @@ func (p *Provider) Resources() map[string]provider.Resource {
 		"mock_thing":    &res{p: p, typ: "mock_thing"},
 		"mock_child":    &res{p: p, typ: "mock_child"},
 		"mock_computed": &res{p: p, typ: "mock_computed"},
+		"mock_ref":      &res{p: p, typ: "mock_ref"},
 	}
 }
 
@@ -61,6 +62,9 @@ func (r *res) DecodeSpec() hcldec.Spec {
 	}
 	if r.typ == "mock_child" {
 		spec["parent"] = &hcldec.AttrSpec{Name: "parent", Type: cty.String, Required: false}
+	}
+	if r.typ == "mock_ref" {
+		spec["target"] = &hcldec.AttrSpec{Name: "target", Type: cty.String, Required: false}
 	}
 	return spec
 }

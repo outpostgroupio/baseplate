@@ -77,9 +77,17 @@ func Load(path string, p provider.Provider) (ProviderConfig, []plan.DesiredResou
 			for k, v := range val.AsValueMap() {
 				attrs[k] = v
 			}
+			// Attributes whose value is a reference to another resource carry an
+			// unknown placeholder here; move them out of literal Attributes into
+			// Refs (resolved at apply time). 2-part resource refs (used purely as
+			// a dependency) are dropped from literal attrs entirely.
+			refAttrs, refNames := resourceRefs(b.Body)
+			for k := range refNames {
+				delete(attrs, k)
+			}
 			out = append(out, plan.DesiredResource{
 				Type: typ, Name: name, Attributes: attrs,
-				DependsOn: extractDeps(b.Body),
+				DependsOn: extractDeps(b.Body), Refs: refAttrs,
 			})
 		}
 	}
@@ -87,7 +95,10 @@ func Load(path string, p provider.Provider) (ProviderConfig, []plan.DesiredResou
 }
 
 // buildRefObject makes each resource block referenceable in expressions as
-// `<type>.<name>`, evaluating to the address string (Phase 0 reference model).
+// `<type>.<name>`. Each reference is an UNKNOWN dynamic value: attribute access
+// like `roblox_asset.gem_icon.id` yields another unknown, which decodes cleanly
+// to any target type. The real value is unknown until apply — config only needs
+// to record the Ref (see resourceRefs); the unknown is discarded.
 func buildRefObject(blocks hcl.Blocks) map[string]cty.Value {
 	byType := map[string]map[string]cty.Value{}
 	for _, b := range blocks {
@@ -98,13 +109,55 @@ func buildRefObject(blocks hcl.Blocks) map[string]cty.Value {
 		if byType[typ] == nil {
 			byType[typ] = map[string]cty.Value{}
 		}
-		byType[typ][name] = cty.StringVal(typ + "." + name)
+		byType[typ][name] = cty.DynamicVal
 	}
 	out := map[string]cty.Value{}
 	for typ, names := range byType {
 		out[typ] = cty.ObjectVal(names)
 	}
 	return out
+}
+
+// resourceRefs inspects a resource body and classifies attributes whose value
+// is a single reference to another resource. It returns:
+//   - refAttrs: attr name -> Ref, for 3-part references `<type>.<name>.<attr>`
+//     (resolved at apply time).
+//   - refNames: the set of ALL attr names that are pure resource references
+//     (2-part `<type>.<name>` or 3-part), so the caller drops them from literal
+//     attributes.
+func resourceRefs(body hcl.Body) (map[string]provider.Ref, map[string]bool) {
+	refAttrs := map[string]provider.Ref{}
+	refNames := map[string]bool{}
+	syn, ok := body.(*hclsyntax.Body)
+	if !ok {
+		return refAttrs, refNames
+	}
+	for name, attr := range syn.Attributes {
+		te, ok := attr.Expr.(*hclsyntax.ScopeTraversalExpr)
+		if !ok {
+			continue
+		}
+		tr := te.Traversal
+		resName, ok := traversalIndexName(tr, 1)
+		if !ok {
+			continue
+		}
+		refNames[name] = true
+		if attrName, ok := traversalIndexName(tr, 2); ok {
+			refAttrs[name] = provider.Ref{Address: tr.RootName() + "." + resName, Attr: attrName}
+		}
+	}
+	return refAttrs, refNames
+}
+
+func traversalIndexName(tr hcl.Traversal, i int) (string, bool) {
+	if len(tr) <= i {
+		return "", false
+	}
+	if a, ok := tr[i].(hcl.TraverseAttr); ok {
+		return a.Name, true
+	}
+	return "", false
 }
 
 // extractDeps finds `<type>.<name>` traversals used in a resource body and

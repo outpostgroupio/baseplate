@@ -19,6 +19,10 @@ type DesiredResource struct {
 	Name       string
 	Attributes provider.Attributes
 	DependsOn  []string
+	// Refs maps an attribute name to the resource output it references
+	// (e.g. "icon" -> roblox_asset.gem_icon.id). Referenced attributes are
+	// resolved at apply time and are NOT present in Attributes.
+	Refs map[string]provider.Ref
 }
 
 func (d DesiredResource) Address() string { return d.Type + "." + d.Name }
@@ -38,6 +42,7 @@ type Change struct {
 	Actual    provider.Attributes
 	AttrDiffs []AttrDiff
 	DependsOn []string
+	Refs      map[string]provider.Ref
 }
 
 type Plan struct {
@@ -88,33 +93,63 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 		st, inState := s.Find(addr)
 		if !inState {
 			pl.Changes = append(pl.Changes, Change{
-				Address: addr, Type: d.Type, Action: provider.ActionCreate, Desired: d.Attributes, DependsOn: d.DependsOn,
+				Address: addr, Type: d.Type, Action: provider.ActionCreate, Desired: d.Attributes, DependsOn: d.DependsOn, Refs: d.Refs,
 			})
 			continue
 		}
 		actual, err := resources[d.Type].Read(ctx, st.ID)
 		if errors.Is(err, provider.ErrNotFound) {
 			pl.Changes = append(pl.Changes, Change{
-				Address: addr, Type: d.Type, Action: provider.ActionCreate, Desired: d.Attributes, DependsOn: d.DependsOn,
+				Address: addr, Type: d.Type, Action: provider.ActionCreate, Desired: d.Attributes, DependsOn: d.DependsOn, Refs: d.Refs,
 			})
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
-		diffs := diffAttrs(actual, d.Attributes, resources[d.Type].Computed())
+		// Resolve references from existing state so a referenced attribute
+		// (e.g. an id) diffs against its real resolved value, not null — this
+		// keeps re-plans convergent after apply.
+		effectiveDesired := mergeRefsFromState(d, s)
+		diffs := diffAttrs(actual, effectiveDesired, resources[d.Type].Computed())
 		action := provider.ActionNoop
 		if len(diffs) > 0 {
 			action = provider.ActionUpdate
 		}
 		pl.Changes = append(pl.Changes, Change{
 			Address: addr, Type: d.Type, ID: st.ID, Action: action,
-			Desired: d.Attributes, Actual: actual, AttrDiffs: diffs, DependsOn: d.DependsOn,
+			Desired: d.Attributes, Actual: actual, AttrDiffs: diffs, DependsOn: d.DependsOn, Refs: d.Refs,
 		})
 	}
 	// deletes must run in reverse dependency order; re-sort delete block.
 	reorderDeletes(pl)
 	return pl, nil
+}
+
+// mergeRefsFromState returns d.Attributes with referenced attributes resolved
+// from already-applied state, so the diff compares against real resolved values
+// (keeping re-plans convergent). Unresolvable refs are left absent.
+func mergeRefsFromState(d DesiredResource, s *state.State) provider.Attributes {
+	out := make(provider.Attributes, len(d.Attributes)+len(d.Refs))
+	for k, v := range d.Attributes {
+		out[k] = v
+	}
+	for attr, ref := range d.Refs {
+		target, ok := s.Find(ref.Address)
+		if !ok {
+			continue
+		}
+		if ref.Attr == "id" {
+			out[attr] = cty.StringVal(target.ID)
+			continue
+		}
+		if raw, ok := target.Attributes[ref.Attr]; ok {
+			if v, err := ctyjson.Unmarshal(raw, cty.DynamicPseudoType); err == nil {
+				out[attr] = v
+			}
+		}
+	}
+	return out
 }
 
 func diffAttrs(actual, desired provider.Attributes, computed []string) []AttrDiff {
