@@ -2,6 +2,7 @@ package resources
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/zclconf/go-cty/cty"
@@ -14,9 +15,13 @@ type fakeUniverse struct {
 	store   map[string]opencloud.Universe
 	updates []opencloud.Universe
 	masks   [][]string
+	getErr  error
 }
 
 func (f *fakeUniverse) Get(_ context.Context, id string) (opencloud.Universe, error) {
+	if f.getErr != nil {
+		return opencloud.Universe{}, f.getErr
+	}
 	return f.store[id], nil
 }
 func (f *fakeUniverse) Update(_ context.Context, u opencloud.Universe, mask []string) (opencloud.Universe, error) {
@@ -51,5 +56,23 @@ func TestExperienceCreateAdoptsAndConfigures(t *testing.T) {
 	}
 	if attrs["voice_chat_enabled"].True() != true {
 		t.Fatalf("attrs = %+v", attrs)
+	}
+}
+
+func TestExperienceReadMapsNotFound(t *testing.T) {
+	e := Experience(&fakeUniverse{getErr: &opencloud.APIError{Status: 404}})
+	if _, err := e.Read(context.Background(), "123"); !errors.Is(err, provider.ErrNotFound) {
+		t.Fatalf("want provider.ErrNotFound, got %v", err)
+	}
+}
+
+func TestExperienceReadPassesThroughOtherErrors(t *testing.T) {
+	e := Experience(&fakeUniverse{getErr: &opencloud.APIError{Status: 500}})
+	_, err := e.Read(context.Background(), "123")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if errors.Is(err, provider.ErrNotFound) {
+		t.Fatalf("a 500 must not map to ErrNotFound, got %v", err)
 	}
 }
