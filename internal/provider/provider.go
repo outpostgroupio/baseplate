@@ -55,4 +55,7 @@ type Resource interface {
 	Update(ctx context.Context, id string, desired Attributes) (Attributes, error)
 	Delete(ctx context.Context, id string) error
 	Dependencies(desired Attributes) []Ref
+	// Computed returns attribute names that are set by the provider (IDs,
+	// timestamps, etc.) and must be excluded from desired-vs-actual diffing.
+	Computed() []string
 }

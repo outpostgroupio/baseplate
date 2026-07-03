@@ -1,0 +1,4 @@
+package: assets
+output: gen/assets/types.gen.go
+generate:
+  models: true
