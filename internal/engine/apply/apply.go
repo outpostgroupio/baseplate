@@ -39,8 +39,12 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 			if err != nil {
 				return err
 			}
+			trigs, err := computeTriggers(r, desired)
+			if err != nil {
+				return err
+			}
 			outputs[c.Address] = withID(out, id)
-			if err := commit(b, s, stateResource(c, id, out)); err != nil {
+			if err := commit(b, s, stateResource(c, id, out, trigs)); err != nil {
 				return err
 			}
 		case provider.ActionUpdate:
@@ -52,8 +56,12 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 			if err != nil {
 				return err
 			}
+			trigs, err := computeTriggers(r, desired)
+			if err != nil {
+				return err
+			}
 			outputs[c.Address] = withID(out, c.ID)
-			if err := commit(b, s, stateResource(c, c.ID, out)); err != nil {
+			if err := commit(b, s, stateResource(c, c.ID, out, trigs)); err != nil {
 				return err
 			}
 		case provider.ActionDelete:
@@ -118,22 +126,44 @@ func commit(b backend.Backend, s *state.State, r state.Resource) error {
 	return b.Put(s)
 }
 
-func stateResource(c plan.Change, id string, attrs provider.Attributes) state.Resource {
+func computeTriggers(r provider.Resource, desired provider.Attributes) (map[string]json.RawMessage, error) {
+	t, ok := r.(provider.Triggerable)
+	if !ok {
+		return nil, nil
+	}
+	vals, err := t.Triggers(desired)
+	if err != nil {
+		return nil, err
+	}
+	if len(vals) == 0 {
+		return nil, nil
+	}
+	return encodeValues(vals), nil
+}
+
+// encodeValues marshals against DynamicPseudoType so the concrete cty type
+// travels in the JSON wrapper ({"value":...,"type":...}). Reads use
+// Unmarshal(raw, DynamicPseudoType), which requires that wrapper and recovers
+// the exact type — so a list reloads as a list, not a tuple, and non-string
+// references round-trip and diff correctly. Marshaling against v.Type()
+// produced bare JSON that the reads could not decode (they errored and
+// silently dropped the attribute).
+func encodeValues(attrs provider.Attributes) map[string]json.RawMessage {
 	enc := map[string]json.RawMessage{}
 	for k, v := range attrs {
-		// Marshal against DynamicPseudoType so the concrete cty type travels in
-		// the JSON wrapper ({"value":...,"type":...}). Reads use
-		// Unmarshal(raw, DynamicPseudoType), which requires that wrapper and
-		// recovers the exact type — so a list reloads as a list, not a tuple, and
-		// non-string references round-trip and diff correctly. Marshaling against
-		// v.Type() produced bare JSON that the reads could not decode (they
-		// errored and silently dropped the attribute).
 		raw, err := ctyjson.Marshal(v, cty.DynamicPseudoType)
 		if err == nil {
 			enc[k] = raw
 		}
 	}
-	return state.Resource{Type: c.Type, Name: name(c.Address), ID: id, Attributes: enc, Dependencies: c.DependsOn}
+	return enc
+}
+
+func stateResource(c plan.Change, id string, attrs provider.Attributes, triggers map[string]json.RawMessage) state.Resource {
+	return state.Resource{
+		Type: c.Type, Name: name(c.Address), ID: id,
+		Attributes: encodeValues(attrs), Triggers: triggers, Dependencies: c.DependsOn,
+	}
 }
 
 func name(address string) string {

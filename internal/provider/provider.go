@@ -59,3 +59,12 @@ type Resource interface {
 	// timestamps, etc.) and must be excluded from desired-vs-actual diffing.
 	Computed() []string
 }
+
+// Triggerable is an optional Resource capability. Triggers returns values
+// computed from the resolved desired config that force an Update when any of
+// them changes, independent of the desired-vs-actual attribute diff. Used for
+// opaque uploads (e.g. a place file's content hash) that can't be read back and
+// compared. The values are persisted in state and compared on plan.
+type Triggerable interface {
+	Triggers(desired Attributes) (map[string]cty.Value, error)
+}
