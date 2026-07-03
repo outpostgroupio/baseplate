@@ -87,9 +87,27 @@ func resolveRefs(c plan.Change, outputs map[string]provider.Attributes) (provide
 		if !ok {
 			return nil, fmt.Errorf("%s: referenced attribute %s.%s not found in applied output", c.Address, ref.Address, ref.Attr)
 		}
-		desired[attr] = v
+		desired[attr] = normalizeRefValue(v)
 	}
 	return desired, nil
+}
+
+// normalizeRefValue canonicalizes a resolved reference value through the same
+// ctyjson round-trip plan uses when reconstructing references from state
+// (Unmarshal against DynamicPseudoType). This keeps the concrete cty type
+// identical on both sides — e.g. a list persisted to state reloads as a tuple,
+// so apply must store the tuple form too — otherwise RawEquals fails and the
+// reference diffs against itself forever. Strings (our .id refs) are unchanged.
+func normalizeRefValue(v cty.Value) cty.Value {
+	raw, err := ctyjson.Marshal(v, v.Type())
+	if err != nil {
+		return v
+	}
+	n, err := ctyjson.Unmarshal(raw, cty.DynamicPseudoType)
+	if err != nil {
+		return v
+	}
+	return n
 }
 
 func withID(a provider.Attributes, id string) provider.Attributes {
