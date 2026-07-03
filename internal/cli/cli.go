@@ -13,10 +13,20 @@ import (
 	"github.com/outpostgroup/baseplate/internal/engine/plan"
 	"github.com/outpostgroup/baseplate/internal/provider"
 	"github.com/outpostgroup/baseplate/internal/provider/mock"
+	"github.com/outpostgroup/baseplate/internal/provider/roblox"
 	"github.com/outpostgroup/baseplate/internal/state/backend"
 )
 
-func newProvider() provider.Provider { return mock.New() }
+// newProvider selects the real Roblox provider when ROBLOX_API_KEY is set,
+// otherwise the in-memory mock (so tests and demos work without credentials).
+func newProvider() provider.Provider {
+	if key := os.Getenv("ROBLOX_API_KEY"); key != "" {
+		if p, err := roblox.New(key); err == nil {
+			return p
+		}
+	}
+	return mock.New()
+}
 
 func Execute() { os.Exit(run(os.Args[1:], os.Stdout)) }
 

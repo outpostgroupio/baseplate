@@ -3,12 +3,32 @@ package plan
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zclconf/go-cty/cty"
 
 	"github.com/outpostgroup/baseplate/internal/provider"
 )
+
+func TestRenderNumbersBoolsAndKnownAfterApply(t *testing.T) {
+	pl := &Plan{Changes: []Change{
+		{Address: "roblox_developer_product.gems", Type: "roblox_developer_product",
+			Action: provider.ActionCreate,
+			Desired: provider.Attributes{
+				"price":       cty.NumberIntVal(99),
+				"is_for_sale": cty.True,
+			},
+			Refs: map[string]provider.Ref{"universe_id": {Address: "roblox_experience.main", Attr: "id"}},
+		},
+	}}
+	got := pl.RenderText(false)
+	for _, want := range []string{"price = 99", "is_for_sale = true", "universe_id = (known after apply)"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("render missing %q:\n%s", want, got)
+		}
+	}
+}
 
 func TestRenderTextGolden(t *testing.T) {
 	pl := &Plan{Changes: []Change{

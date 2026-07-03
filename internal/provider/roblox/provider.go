@@ -1,0 +1,39 @@
+package roblox
+
+import (
+	"errors"
+
+	"github.com/outpostgroup/baseplate/internal/provider"
+	"github.com/outpostgroup/baseplate/internal/provider/roblox/opencloud"
+	"github.com/outpostgroup/baseplate/internal/provider/roblox/resources"
+)
+
+const (
+	// rootBase serves the cloud (universe) and developer-products APIs.
+	rootBase = "https://apis.roblox.com"
+	// assetsBase serves the assets API (paths are /v1/assets...).
+	assetsBase = "https://apis.roblox.com/assets"
+)
+
+// Provider is the real Roblox Open Cloud provider.
+type Provider struct {
+	resources map[string]provider.Resource
+}
+
+// New builds the Roblox provider from an Open Cloud API key. The key must be
+// non-empty; it is used as the x-api-key on every request.
+func New(apiKey string) (*Provider, error) {
+	if apiKey == "" {
+		return nil, errors.New(`roblox: ROBLOX_API_KEY is required (provide it via env and reference it with env("ROBLOX_API_KEY"))`)
+	}
+	root := opencloud.New(apiKey, rootBase)
+	assets := opencloud.New(apiKey, assetsBase)
+	return &Provider{resources: map[string]provider.Resource{
+		"roblox_experience":        resources.Experience(opencloud.NewUniverseClient(root)),
+		"roblox_asset":             resources.Asset(opencloud.NewAssetClient(assets)),
+		"roblox_developer_product": resources.DeveloperProduct(opencloud.NewDeveloperProductClient(root)),
+	}}, nil
+}
+
+// Resources implements provider.Provider.
+func (p *Provider) Resources() map[string]provider.Resource { return p.resources }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/zclconf/go-cty/cty"
@@ -38,13 +39,27 @@ func (p *Plan) RenderText(color bool) string {
 		if c.Action == provider.ActionDelete {
 			attrs = c.Actual
 		}
-		var keys []string
+		keyset := map[string]bool{}
 		for k := range attrs {
+			keyset[k] = true
+		}
+		if c.Action != provider.ActionDelete {
+			for k := range c.Refs {
+				keyset[k] = true
+			}
+		}
+		var keys []string
+		for k := range keyset {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			fmt.Fprintf(&b, "    %s = %s\n", k, ctyString(attrs[k]))
+			if v, ok := attrs[k]; ok {
+				fmt.Fprintf(&b, "    %s = %s\n", k, ctyString(v))
+			} else {
+				// referenced attribute — value not known until apply
+				fmt.Fprintf(&b, "    %s = (known after apply)\n", k)
+			}
 		}
 	}
 	fmt.Fprintf(&b, "\nPlan: %d to add, %d to change, %d to destroy.\n", add, chg, del)
@@ -74,11 +89,28 @@ func (p *Plan) RenderJSON() ([]byte, error) {
 }
 
 func ctyString(v cty.Value) string {
+	if !v.IsKnown() {
+		return "(known after apply)"
+	}
 	if v.IsNull() {
 		return "null"
 	}
-	if v.Type() == cty.String {
+	switch v.Type() {
+	case cty.String:
 		return v.AsString()
+	case cty.Bool:
+		if v.True() {
+			return "true"
+		}
+		return "false"
+	case cty.Number:
+		bf := v.AsBigFloat()
+		if bf.IsInt() {
+			i, _ := bf.Int64()
+			return strconv.FormatInt(i, 10)
+		}
+		return bf.Text('f', -1)
+	default:
+		return v.GoString()
 	}
-	return v.GoString()
 }

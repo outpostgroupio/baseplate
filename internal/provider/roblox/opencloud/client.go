@@ -53,26 +53,34 @@ func (e *APIError) Error() string {
 
 func (c *Client) Do(ctx context.Context, method, path string, body, out any) (*http.Response, error) {
 	var reqBody []byte
+	contentType := ""
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
 			return nil, err
 		}
 		reqBody = b
+		contentType = "application/json"
 	}
+	return c.send(ctx, method, path, contentType, reqBody, out)
+}
 
+// send performs the request with retry/backoff on 429/5xx and error translation.
+// A fresh body reader is created each attempt so retries are safe. It is the
+// shared transport for both JSON (Do) and multipart (DoMultipart) requests.
+func (c *Client) send(ctx context.Context, method, path, contentType string, body []byte, out any) (*http.Response, error) {
 	var lastErr error
 	for attempt := 0; attempt < c.maxTry; attempt++ {
 		if attempt > 0 {
 			c.sleep(backoff(attempt))
 		}
-		req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(reqBody))
+		req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(body))
 		if err != nil {
 			return nil, err
 		}
 		req.Header.Set("x-api-key", c.apiKey)
-		if reqBody != nil {
-			req.Header.Set("Content-Type", "application/json")
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
 		}
 		resp, err := c.http.Do(req)
 		if err != nil {
