@@ -64,7 +64,9 @@ func (r *res) DecodeSpec() hcldec.Spec {
 		spec["parent"] = &hcldec.AttrSpec{Name: "parent", Type: cty.String, Required: false}
 	}
 	if r.typ == "mock_ref" {
-		spec["target"] = &hcldec.AttrSpec{Name: "target", Type: cty.String, Required: false}
+		// Required on purpose: exercises that a REQUIRED attribute which is a
+		// reference (unknown until apply) still decodes cleanly.
+		spec["target"] = &hcldec.AttrSpec{Name: "target", Type: cty.String, Required: true}
 	}
 	return spec
 }

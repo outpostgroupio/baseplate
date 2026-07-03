@@ -2,6 +2,7 @@ package config
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/outpostgroup/baseplate/internal/engine/plan"
@@ -57,5 +58,15 @@ func TestLoadCapturesReferences(t *testing.T) {
 	}
 	if len(b.DependsOn) != 1 || b.DependsOn[0] != "mock_thing.a" {
 		t.Fatalf("expected dependency on mock_thing.a, got %v", b.DependsOn)
+	}
+}
+
+func TestLoadRejectsWrappedReference(t *testing.T) {
+	_, _, err := Load(filepath.Join("..", "..", "testdata", "badref.bp.hcl"), mock.New())
+	if err == nil {
+		t.Fatal("expected an error for a reference wrapped in a string template")
+	}
+	if !strings.Contains(err.Error(), "unsupported way") {
+		t.Fatalf("error should explain the unsupported reference form, got: %v", err)
 	}
 }

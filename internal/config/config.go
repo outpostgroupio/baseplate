@@ -85,6 +85,14 @@ func Load(path string, p provider.Provider) (ProviderConfig, []plan.DesiredResou
 			for k := range refNames {
 				delete(attrs, k)
 			}
+			// After removing bare references, any remaining unknown attribute is a
+			// reference used in an unsupported form (e.g. inside a string template
+			// or a function call). Reject it loudly rather than silently dropping it.
+			for k, v := range attrs {
+				if !v.IsKnown() {
+					return pc, nil, fmt.Errorf("%s: %s.%s: attribute %q references another resource in an unsupported way; use a bare reference like type.name.attr", path, typ, name, k)
+				}
+			}
 			out = append(out, plan.DesiredResource{
 				Type: typ, Name: name, Attributes: attrs,
 				DependsOn: extractDeps(b.Body), Refs: refAttrs,
