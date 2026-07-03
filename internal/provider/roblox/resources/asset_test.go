@@ -2,6 +2,7 @@ package resources
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,6 +17,7 @@ type fakeAsset struct {
 	created opencloud.AssetCreate
 	gotFile []byte
 	store   map[string]opencloud.Asset
+	getErr  error
 }
 
 func (f *fakeAsset) CreateAndAwait(_ context.Context, req opencloud.AssetCreate, _, _ string, data []byte) (opencloud.Asset, error) {
@@ -29,6 +31,9 @@ func (f *fakeAsset) CreateAndAwait(_ context.Context, req opencloud.AssetCreate,
 	return a, nil
 }
 func (f *fakeAsset) Get(_ context.Context, id string) (opencloud.Asset, error) {
+	if f.getErr != nil {
+		return opencloud.Asset{}, f.getErr
+	}
 	return f.store[id], nil
 }
 func (f *fakeAsset) Update(_ context.Context, a opencloud.Asset) (opencloud.Asset, error) {
@@ -81,5 +86,12 @@ func TestAssetCreateRejectsMissingCreator(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error when neither creator id is set")
+	}
+}
+
+func TestAssetReadMapsNotFound(t *testing.T) {
+	r := Asset(&fakeAsset{getErr: &opencloud.APIError{Status: 404}})
+	if _, err := r.Read(context.Background(), "555"); !errors.Is(err, provider.ErrNotFound) {
+		t.Fatalf("want provider.ErrNotFound, got %v", err)
 	}
 }

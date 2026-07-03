@@ -68,6 +68,9 @@ func (a *asset) Create(ctx context.Context, desired provider.Attributes) (string
 func (a *asset) Read(ctx context.Context, id string) (provider.Attributes, error) {
 	got, err := a.ac.Get(ctx, id)
 	if err != nil {
+		if opencloud.IsNotFound(err) {
+			return nil, provider.ErrNotFound
+		}
 		return nil, err
 	}
 	out := provider.Attributes{

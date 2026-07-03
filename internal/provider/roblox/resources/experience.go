@@ -57,6 +57,9 @@ func (e *experience) Create(ctx context.Context, desired provider.Attributes) (s
 func (e *experience) Read(ctx context.Context, id string) (provider.Attributes, error) {
 	got, err := e.uc.Get(ctx, id)
 	if err != nil {
+		if opencloud.IsNotFound(err) {
+			return nil, provider.ErrNotFound
+		}
 		return nil, err
 	}
 	return universeAttrs(id, got), nil

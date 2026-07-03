@@ -2,6 +2,7 @@ package resources
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/zclconf/go-cty/cty"
@@ -14,6 +15,7 @@ type fakeProduct struct {
 	created         opencloud.DeveloperProductCreate
 	createdUniverse string
 	store           map[string]opencloud.DeveloperProduct
+	getErr          error
 }
 
 func (f *fakeProduct) Create(_ context.Context, universeID string, p opencloud.DeveloperProductCreate) (opencloud.DeveloperProduct, error) {
@@ -27,6 +29,9 @@ func (f *fakeProduct) Create(_ context.Context, universeID string, p opencloud.D
 	return dp, nil
 }
 func (f *fakeProduct) Get(_ context.Context, _, productID string) (opencloud.DeveloperProduct, error) {
+	if f.getErr != nil {
+		return opencloud.DeveloperProduct{}, f.getErr
+	}
 	return f.store[productID], nil
 }
 func (f *fakeProduct) Update(_ context.Context, _, productID string, p opencloud.DeveloperProductUpdate) (opencloud.DeveloperProduct, error) {
@@ -69,5 +74,12 @@ func TestDeveloperProductCreateAndReadRoundTrip(t *testing.T) {
 	price, _ := got["price"].AsBigFloat().Int64()
 	if got["name"].AsString() != "100 Gems" || price != 99 {
 		t.Fatalf("read = %+v", got)
+	}
+}
+
+func TestDeveloperProductReadMapsNotFound(t *testing.T) {
+	r := DeveloperProduct(&fakeProduct{getErr: &opencloud.APIError{Status: 404}})
+	if _, err := r.Read(context.Background(), "10/777"); !errors.Is(err, provider.ErrNotFound) {
+		t.Fatalf("want provider.ErrNotFound, got %v", err)
 	}
 }
