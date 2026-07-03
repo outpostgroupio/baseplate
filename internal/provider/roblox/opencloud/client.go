@@ -86,6 +86,13 @@ func (c *Client) Do(ctx context.Context, method, path string, body, out any) (*h
 	return c.send(ctx, method, path, contentType, reqBody, out)
 }
 
+// DoRaw sends body verbatim with the given Content-Type (e.g. a raw .rbxl place
+// upload), reusing auth, retry/backoff, and error translation. A JSON response
+// body is decoded into out when non-nil, even if served as text/plain.
+func (c *Client) DoRaw(ctx context.Context, method, path, contentType string, body []byte, out any) (*http.Response, error) {
+	return c.send(ctx, method, path, contentType, body, out)
+}
+
 // send performs the request with retry/backoff on 429/5xx and error translation.
 // A fresh body reader is created each attempt so retries are safe. It is the
 // shared transport for both JSON (Do) and multipart (DoMultipart) requests.
