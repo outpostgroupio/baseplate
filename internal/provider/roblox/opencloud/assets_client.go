@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 )
 
@@ -55,7 +54,10 @@ type assetRequest struct {
 }
 
 type assetResponse struct {
-	AssetID     int64  `json:"assetId,omitempty"`
+	// AssetID is a string on the wire: Roblox serializes 64-bit ids as JSON
+	// strings (to avoid float precision loss) even though the OpenCloud spec
+	// types it as int64. Decoding it as int64 fails against the live API.
+	AssetID     string `json:"assetId,omitempty"`
 	Path        string `json:"path,omitempty"`
 	AssetType   string `json:"assetType,omitempty"`
 	DisplayName string `json:"displayName,omitempty"`
@@ -63,10 +65,8 @@ type assetResponse struct {
 }
 
 func (r assetResponse) toAsset(fallbackID string) Asset {
-	id := ""
-	if r.AssetID != 0 {
-		id = strconv.FormatInt(r.AssetID, 10)
-	} else if r.Path != "" {
+	id := r.AssetID
+	if id == "" && r.Path != "" {
 		id = strings.TrimPrefix(r.Path, "assets/")
 	}
 	if id == "" {
