@@ -2,6 +2,7 @@ package resources
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,9 +14,11 @@ import (
 )
 
 type fakeAsset struct {
-	created opencloud.AssetCreate
-	gotFile []byte
-	store   map[string]opencloud.Asset
+	created   opencloud.AssetCreate
+	gotFile   []byte
+	store     map[string]opencloud.Asset
+	getErr    error
+	deleteErr error
 }
 
 func (f *fakeAsset) CreateAndAwait(_ context.Context, req opencloud.AssetCreate, _, _ string, data []byte) (opencloud.Asset, error) {
@@ -29,13 +32,37 @@ func (f *fakeAsset) CreateAndAwait(_ context.Context, req opencloud.AssetCreate,
 	return a, nil
 }
 func (f *fakeAsset) Get(_ context.Context, id string) (opencloud.Asset, error) {
+	if f.getErr != nil {
+		return opencloud.Asset{}, f.getErr
+	}
 	return f.store[id], nil
 }
 func (f *fakeAsset) Update(_ context.Context, a opencloud.Asset) (opencloud.Asset, error) {
 	f.store[a.ID] = a
 	return a, nil
 }
-func (f *fakeAsset) Delete(_ context.Context, id string) error { delete(f.store, id); return nil }
+func (f *fakeAsset) Delete(_ context.Context, id string) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	delete(f.store, id)
+	return nil
+}
+
+func TestAssetDeleteUnmanagesNonArchivable(t *testing.T) {
+	r := Asset(&fakeAsset{deleteErr: &opencloud.APIError{
+		Status: 400, Message: "Asset 1 is not an archivable asset type."}})
+	if err := r.Delete(context.Background(), "1"); err != nil {
+		t.Fatalf("destroy of a non-archivable asset must succeed (unmanage), got %v", err)
+	}
+}
+
+func TestAssetDeletePropagatesOtherErrors(t *testing.T) {
+	r := Asset(&fakeAsset{deleteErr: &opencloud.APIError{Status: 500, Message: "boom"}})
+	if err := r.Delete(context.Background(), "1"); err == nil {
+		t.Fatal("a delete error unrelated to archivability must propagate")
+	}
+}
 
 func TestAssetCreateReadsFileAndUploads(t *testing.T) {
 	dir := t.TempDir()
@@ -81,5 +108,12 @@ func TestAssetCreateRejectsMissingCreator(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error when neither creator id is set")
+	}
+}
+
+func TestAssetReadMapsNotFound(t *testing.T) {
+	r := Asset(&fakeAsset{getErr: &opencloud.APIError{Status: 404}})
+	if _, err := r.Read(context.Background(), "555"); !errors.Is(err, provider.ErrNotFound) {
+		t.Fatalf("want provider.ErrNotFound, got %v", err)
 	}
 }

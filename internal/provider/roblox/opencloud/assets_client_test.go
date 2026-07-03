@@ -16,7 +16,7 @@ func TestAssetCreateAndAwait(t *testing.T) {
 			json.NewEncoder(w).Encode(map[string]any{"path": "operations/op1", "done": false})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/operations/op1":
 			json.NewEncoder(w).Encode(map[string]any{"path": "operations/op1", "done": true,
-				"response": map[string]any{"assetId": 555, "path": "assets/555", "displayName": "gem"}})
+				"response": map[string]any{"assetId": "555", "path": "assets/555", "displayName": "gem"}})
 		default:
 			http.Error(w, "unexpected "+r.Method+" "+r.URL.Path, 404)
 		}
@@ -41,7 +41,7 @@ func TestAssetCreateAndAwait(t *testing.T) {
 func TestAssetGet(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/v1/assets/555" {
-			json.NewEncoder(w).Encode(map[string]any{"assetId": 555, "path": "assets/555",
+			json.NewEncoder(w).Encode(map[string]any{"assetId": "555", "path": "assets/555",
 				"displayName": "gem", "description": "d"})
 			return
 		}

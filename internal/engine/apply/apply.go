@@ -121,7 +121,14 @@ func commit(b backend.Backend, s *state.State, r state.Resource) error {
 func stateResource(c plan.Change, id string, attrs provider.Attributes) state.Resource {
 	enc := map[string]json.RawMessage{}
 	for k, v := range attrs {
-		raw, err := ctyjson.Marshal(v, v.Type())
+		// Marshal against DynamicPseudoType so the concrete cty type travels in
+		// the JSON wrapper ({"value":...,"type":...}). Reads use
+		// Unmarshal(raw, DynamicPseudoType), which requires that wrapper and
+		// recovers the exact type — so a list reloads as a list, not a tuple, and
+		// non-string references round-trip and diff correctly. Marshaling against
+		// v.Type() produced bare JSON that the reads could not decode (they
+		// errored and silently dropped the attribute).
+		raw, err := ctyjson.Marshal(v, cty.DynamicPseudoType)
 		if err == nil {
 			enc[k] = raw
 		}

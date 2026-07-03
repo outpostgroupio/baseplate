@@ -68,6 +68,9 @@ func (a *asset) Create(ctx context.Context, desired provider.Attributes) (string
 func (a *asset) Read(ctx context.Context, id string) (provider.Attributes, error) {
 	got, err := a.ac.Get(ctx, id)
 	if err != nil {
+		if opencloud.IsNotFound(err) {
+			return nil, provider.ErrNotFound
+		}
 		return nil, err
 	}
 	out := provider.Attributes{
@@ -91,7 +94,17 @@ func (a *asset) Update(ctx context.Context, id string, desired provider.Attribut
 	return a.stateAttrs(desired), nil
 }
 
-func (a *asset) Delete(ctx context.Context, id string) error { return a.ac.Delete(ctx, id) }
+// Delete archives the asset. Some asset types (e.g. Image/Decal) are not
+// archivable and have no Open Cloud delete path; for those, destroy stops
+// managing the asset (drops it from state) and leaves it in the account — the
+// same unmanage-in-place behavior as a developer product that can't be
+// hard-deleted.
+func (a *asset) Delete(ctx context.Context, id string) error {
+	if err := a.ac.Delete(ctx, id); err != nil && !opencloud.IsNotArchivable(err) {
+		return err
+	}
+	return nil
+}
 
 // stateAttrs echoes the declared attributes into state so create-only inputs
 // (file/creator) are recorded and diffable attributes match what Read returns.
