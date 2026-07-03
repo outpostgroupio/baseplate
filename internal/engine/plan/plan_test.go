@@ -106,6 +106,26 @@ func TestBuildDriftRecreatesWhenRemoteMissing(t *testing.T) {
 	}
 }
 
+func TestUndeclaredActualAttrNotADiff(t *testing.T) {
+	p := mock.New()
+	// Remote has an extra attribute the config never declares.
+	p.Seed("mock_thing/1", provider.Attributes{
+		"name": cty.StringVal("x"), "extra": cty.StringVal("from-server")})
+	s := state.New()
+	s.Upsert(state.Resource{Type: "mock_thing", Name: "a", ID: "mock_thing/1"})
+
+	desired := []DesiredResource{
+		{Type: "mock_thing", Name: "a", Attributes: provider.Attributes{"name": cty.StringVal("x")}},
+	}
+	pl, err := Build(context.Background(), p, s, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pl.HasChanges() {
+		t.Fatalf("an attribute the config does not declare must not diff, got: %+v", pl.Changes)
+	}
+}
+
 func TestComputedAttrNotADiff(t *testing.T) {
 	p := mock.New()
 	// Remote has a computed server_id the user never authored.

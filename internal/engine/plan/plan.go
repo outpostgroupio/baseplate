@@ -152,30 +152,29 @@ func mergeRefsFromState(d DesiredResource, s *state.State) provider.Attributes {
 	return out
 }
 
+// diffAttrs compares actual vs desired over ONLY the attributes the config
+// declares (desired), minus any computed attributes. Attributes the provider
+// returns that the config does not declare are not managed and never diff — so
+// a resource's many optional/unset fields don't produce spurious drift. Drift
+// on a declared attribute is still detected (it's in desired). Computed attrs
+// are excluded even if present in desired (e.g. after an import round-trip).
 func diffAttrs(actual, desired provider.Attributes, computed []string) []AttrDiff {
 	skip := map[string]bool{}
 	for _, c := range computed {
 		skip[c] = true
 	}
-	keys := map[string]bool{}
-	for k := range actual {
-		if !skip[k] {
-			keys[k] = true
-		}
-	}
-	for k := range desired {
-		keys[k] = true
-	}
 	var names []string
-	for k := range keys {
-		names = append(names, k)
+	for k := range desired {
+		if !skip[k] {
+			names = append(names, k)
+		}
 	}
 	sort.Strings(names)
 
 	var diffs []AttrDiff
 	for _, k := range names {
 		o := valOr(actual, k)
-		n := valOr(desired, k)
+		n := desired[k]
 		if !o.RawEquals(n) {
 			diffs = append(diffs, AttrDiff{Name: k, Old: o, New: n})
 		}
