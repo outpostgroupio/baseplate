@@ -105,3 +105,23 @@ func TestBuildDriftRecreatesWhenRemoteMissing(t *testing.T) {
 		t.Fatalf("expected drift → recreate (ActionCreate), got %+v", pl.Changes)
 	}
 }
+
+func TestComputedAttrNotADiff(t *testing.T) {
+	p := mock.New()
+	// Remote has a computed server_id the user never authored.
+	p.Seed("mock_computed/1", provider.Attributes{
+		"name": cty.StringVal("x"), "server_id": cty.StringVal("srv-1")})
+	s := state.New()
+	s.Upsert(state.Resource{Type: "mock_computed", Name: "a", ID: "mock_computed/1"})
+
+	desired := []DesiredResource{
+		{Type: "mock_computed", Name: "a", Attributes: provider.Attributes{"name": cty.StringVal("x")}},
+	}
+	pl, err := Build(context.Background(), p, s, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pl.HasChanges() {
+		t.Fatalf("computed-only difference must not be a change, got: %+v", pl.Changes)
+	}
+}

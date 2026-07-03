@@ -102,7 +102,7 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 		if err != nil {
 			return nil, err
 		}
-		diffs := diffAttrs(actual, d.Attributes)
+		diffs := diffAttrs(actual, d.Attributes, resources[d.Type].Computed())
 		action := provider.ActionNoop
 		if len(diffs) > 0 {
 			action = provider.ActionUpdate
@@ -117,10 +117,16 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 	return pl, nil
 }
 
-func diffAttrs(actual, desired provider.Attributes) []AttrDiff {
+func diffAttrs(actual, desired provider.Attributes, computed []string) []AttrDiff {
+	skip := map[string]bool{}
+	for _, c := range computed {
+		skip[c] = true
+	}
 	keys := map[string]bool{}
 	for k := range actual {
-		keys[k] = true
+		if !skip[k] {
+			keys[k] = true
+		}
 	}
 	for k := range desired {
 		keys[k] = true

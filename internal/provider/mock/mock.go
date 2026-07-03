@@ -42,8 +42,9 @@ func (p *Provider) Store() map[string]provider.Attributes {
 
 func (p *Provider) Resources() map[string]provider.Resource {
 	return map[string]provider.Resource{
-		"mock_thing": &res{p: p, typ: "mock_thing"},
-		"mock_child": &res{p: p, typ: "mock_child"},
+		"mock_thing":    &res{p: p, typ: "mock_thing"},
+		"mock_child":    &res{p: p, typ: "mock_child"},
+		"mock_computed": &res{p: p, typ: "mock_computed"},
 	}
 }
 
@@ -94,6 +95,13 @@ func (r *res) Delete(_ context.Context, id string) error {
 	r.p.mu.Lock()
 	defer r.p.mu.Unlock()
 	delete(r.p.store, id)
+	return nil
+}
+
+func (r *res) Computed() []string {
+	if r.typ == "mock_computed" {
+		return []string{"server_id"}
+	}
 	return nil
 }
 
