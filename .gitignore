@@ -3,3 +3,8 @@
 *.tfstate.lock
 /baseplate
 /tmp/
+
+# Large/unused vendored specs kept on disk for Phase 1B universe extraction
+# + Phase 4 drift watcher, but not committed (3MB unified spec, legacy place-publish).
+/internal/provider/roblox/opencloud/specs/openapi-unified.json
+/internal/provider/roblox/opencloud/specs/universes.json
