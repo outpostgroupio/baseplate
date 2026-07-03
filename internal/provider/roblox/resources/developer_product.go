@@ -79,6 +79,9 @@ func (d *developerProduct) Read(ctx context.Context, id string) (provider.Attrib
 	}
 	got, err := d.pc.Get(ctx, uid, pid)
 	if err != nil {
+		if opencloud.IsNotFound(err) {
+			return nil, provider.ErrNotFound
+		}
 		return nil, err
 	}
 	return provider.Attributes{

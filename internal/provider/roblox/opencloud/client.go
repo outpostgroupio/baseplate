@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -49,6 +50,26 @@ func (e *APIError) Error() string {
 		return fmt.Sprintf("Roblox API %d: %s", e.Status, e.Message)
 	}
 	return fmt.Sprintf("Roblox API %d", e.Status)
+}
+
+// IsNotFound reports whether err is, or wraps, a Roblox API 404 response.
+// It lets resources translate an out-of-band deletion into provider.ErrNotFound
+// without the opencloud core depending on internal/provider.
+func IsNotFound(err error) bool {
+	var e *APIError
+	return errors.As(err, &e) && e.Status == http.StatusNotFound
+}
+
+// IsNotArchivable reports whether err is a Roblox API 400 that rejected an
+// archive because the asset's type cannot be archived (e.g. Image/Decal). Such
+// assets have no Open Cloud delete path, so destroy unmanages them in place.
+// The substring match is brittle but fails closed (an unrelated 400 propagates,
+// so we never silently orphan-and-succeed on a different error).
+// TODO: revisit if Roblox exposes a structured error code; pin with a contract test (Phase 4).
+func IsNotArchivable(err error) bool {
+	var e *APIError
+	return errors.As(err, &e) && e.Status == http.StatusBadRequest &&
+		strings.Contains(strings.ToLower(e.Message), "archivable")
 }
 
 func (c *Client) Do(ctx context.Context, method, path string, body, out any) (*http.Response, error) {

@@ -183,6 +183,72 @@ func TestApplyThenReplanConvergesWithReference(t *testing.T) {
 	}
 }
 
+// TestReplanReconstructsCollectionReference proves the state wire format
+// round-trips a non-string reference with its exact cty type. State is written
+// with Marshal(v, cty.DynamicPseudoType) (a {value,type} wrapper) and read with
+// Unmarshal(_, DynamicPseudoType), so plan reconstructs the referenced list as a
+// list. Before the fix, state was written bare (Marshal(v, v.Type())) but read
+// against DynamicPseudoType, which errors and silently DROPS the attribute from
+// the plan's comparison — so drift on a referenced collection went undetected.
+// This test asserts both halves: (a) convergence when nothing changed, and
+// (b) drift detection when the stored value differs (the part that fails without
+// the fix, because a dropped attribute is never compared).
+func TestReplanReconstructsCollectionReference(t *testing.T) {
+	ctx := context.Background()
+	p := mock.New()
+	s := state.New()
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.tfstate"))
+
+	tags := cty.ListVal([]cty.Value{cty.StringVal("x"), cty.StringVal("y")})
+	desired := []plan.DesiredResource{
+		{Type: "mock_thing", Name: "a", Attributes: provider.Attributes{
+			"name": cty.StringVal("root"), "tags": tags}},
+		{Type: "mock_ref", Name: "b", DependsOn: []string{"mock_thing.a"},
+			Attributes: provider.Attributes{"name": cty.StringVal("child")},
+			Refs:       map[string]provider.Ref{"target": {Address: "mock_thing.a", Attr: "tags"}}},
+	}
+
+	first, err := plan.Build(ctx, p, s, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(ctx, p, b, s, first); err != nil {
+		t.Fatal(err)
+	}
+
+	// (a) Nothing changed: re-plan converges.
+	second, err := plan.Build(ctx, p, s, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.HasChanges() {
+		t.Fatalf("re-plan with an unchanged collection reference must converge, got: %s", second.RenderText(false))
+	}
+
+	// (b) Drift the referring resource's stored target, then re-plan MUST detect
+	// it — proving the referenced value is actually reconstructed from state and
+	// compared, not silently dropped. Find mock_ref.b's real id from the store.
+	var refID string
+	for id, a := range p.Store() {
+		if v, ok := a["target"]; ok && v.Type().IsListType() {
+			refID = id
+		}
+	}
+	if refID == "" {
+		t.Fatal("mock_ref.b (with a list target) not found in store")
+	}
+	drifted := cty.ListVal([]cty.Value{cty.StringVal("x"), cty.StringVal("DRIFTED")})
+	p.Seed(refID, provider.Attributes{"name": cty.StringVal("child"), "target": drifted})
+
+	third, err := plan.Build(ctx, p, s, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !third.HasChanges() {
+		t.Fatal("re-plan must detect drift on the referenced collection attribute, but reported no changes (attribute was silently dropped)")
+	}
+}
+
 func TestApplyDeleteRemovesResourceAndState(t *testing.T) {
 	ctx := context.Background()
 	p := mock.New()
