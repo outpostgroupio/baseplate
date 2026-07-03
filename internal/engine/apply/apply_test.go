@@ -183,6 +183,43 @@ func TestApplyThenReplanConvergesWithReference(t *testing.T) {
 	}
 }
 
+// TestApplyThenReplanConvergesWithCollectionReference guards the plan/apply
+// reference-resolution asymmetry: apply stores a resolved reference as a live
+// cty.Value, while plan reconstructs it from state via ctyjson against
+// DynamicPseudoType (a JSON array reloads as a TUPLE, not a list). Without a
+// shared canonical form the referenced collection diffs against itself forever.
+func TestApplyThenReplanConvergesWithCollectionReference(t *testing.T) {
+	ctx := context.Background()
+	p := mock.New()
+	s := state.New()
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.tfstate"))
+
+	tags := cty.ListVal([]cty.Value{cty.StringVal("x"), cty.StringVal("y")})
+	desired := []plan.DesiredResource{
+		{Type: "mock_thing", Name: "a", Attributes: provider.Attributes{
+			"name": cty.StringVal("root"), "tags": tags}},
+		{Type: "mock_ref", Name: "b", DependsOn: []string{"mock_thing.a"},
+			Attributes: provider.Attributes{"name": cty.StringVal("child")},
+			Refs:       map[string]provider.Ref{"target": {Address: "mock_thing.a", Attr: "tags"}}},
+	}
+
+	first, err := plan.Build(ctx, p, s, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(ctx, p, b, s, first); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := plan.Build(ctx, p, s, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.HasChanges() {
+		t.Fatalf("re-plan with a collection reference must converge, got: %s", second.RenderText(false))
+	}
+}
+
 func TestApplyDeleteRemovesResourceAndState(t *testing.T) {
 	ctx := context.Background()
 	p := mock.New()
