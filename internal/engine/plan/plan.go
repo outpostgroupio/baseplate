@@ -112,6 +112,11 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 		// keeps re-plans convergent after apply.
 		effectiveDesired := mergeRefsFromState(d, s)
 		diffs := diffAttrs(actual, effectiveDesired, resources[d.Type].Computed())
+		td, err := triggerDiffs(resources[d.Type], effectiveDesired, st)
+		if err != nil {
+			return nil, err
+		}
+		diffs = append(diffs, td...)
 		action := provider.ActionNoop
 		if len(diffs) > 0 {
 			action = provider.ActionUpdate
@@ -180,6 +185,35 @@ func diffAttrs(actual, desired provider.Attributes, computed []string) []AttrDif
 		}
 	}
 	return diffs
+}
+
+// triggerDiffs compares a Triggerable resource's config-computed triggers against
+// the triggers recorded in state. Each changed key becomes an AttrDiff that forces
+// an Update, even when no declared attribute differs (e.g. a place whose file
+// content changed). Resources that are not Triggerable yield no diffs.
+func triggerDiffs(res provider.Resource, desired provider.Attributes, st *state.Resource) ([]AttrDiff, error) {
+	t, ok := res.(provider.Triggerable)
+	if !ok {
+		return nil, nil
+	}
+	want, err := t.Triggers(desired)
+	if err != nil {
+		return nil, err
+	}
+	have := decodeAttrs(st.Triggers)
+	names := make([]string, 0, len(want))
+	for k := range want {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	var diffs []AttrDiff
+	for _, k := range names {
+		o := valOr(have, k)
+		if !o.RawEquals(want[k]) {
+			diffs = append(diffs, AttrDiff{Name: k, Old: o, New: want[k]})
+		}
+	}
+	return diffs, nil
 }
 
 func valOr(a provider.Attributes, k string) cty.Value {
