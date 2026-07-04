@@ -42,3 +42,43 @@ func TestFilterPlanByTargetDropsUntargetedDeletes(t *testing.T) {
 		t.Fatal("targeted change should not be a delete of another resource")
 	}
 }
+
+func TestImportErrorsWhenAddressNotInConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "baseplate.bp.hcl")
+	os.WriteFile(cfg, []byte("resource \"mock_thing\" \"a\" {\n  name = \"root\"\n}\n"), 0o644)
+
+	var out bytes.Buffer
+	code := run([]string{"import", "mock_thing.ghost", "someid",
+		"--config", cfg, "--state", filepath.Join(dir, "s.tfstate")}, &out)
+	if code != 1 {
+		t.Fatalf("expected exit 1 for an undeclared address, got %d\n%s", code, out.String())
+	}
+}
+
+func TestImportErrorsWhenRemoteNotFound(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "baseplate.bp.hcl")
+	os.WriteFile(cfg, []byte("resource \"mock_thing\" \"a\" {\n  name = \"root\"\n}\n"), 0o644)
+
+	// No ROBLOX_API_KEY → the mock provider with an empty store → Read → ErrNotFound.
+	var out bytes.Buffer
+	code := run([]string{"import", "mock_thing.a", "missing",
+		"--config", cfg, "--state", filepath.Join(dir, "s.tfstate")}, &out)
+	if code != 1 {
+		t.Fatalf("expected exit 1 for a not-found remote, got %d\n%s", code, out.String())
+	}
+}
+
+func TestImportRequiresTwoArgs(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "baseplate.bp.hcl")
+	os.WriteFile(cfg, []byte("resource \"mock_thing\" \"a\" {\n  name = \"root\"\n}\n"), 0o644)
+
+	var out bytes.Buffer
+	code := run([]string{"import", "mock_thing.a", "--config", cfg,
+		"--state", filepath.Join(dir, "s.tfstate")}, &out)
+	if code != 1 {
+		t.Fatalf("expected exit 1 when id arg is missing, got %d\n%s", code, out.String())
+	}
+}
