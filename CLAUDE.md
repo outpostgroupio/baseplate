@@ -19,6 +19,13 @@ config, backed by a state file. A maintained, Go-native successor to Mantle. Mod
   `roblox_asset` test, **proven live**. Live-discovered + fixed: `assetId` is a wire **string**
   (not int64); Image/Decal assets are **not archivable** → `asset.Delete` unmanages-in-place.
   See `docs/superpowers/specs/2026-07-03-baseplate-phase2-robustness-design.md`.
+- **Phase 2 slice 2 COMPLETE (`roblox_place` + Triggers), proven live:** new reusable engine
+  capability `provider.Triggerable` (config-computed values persisted in state that force an Update
+  on divergence, rendered via AttrDiff) + `state.Resource.Triggers`; `roblox_place` publishes an
+  existing place's `.rbxl`/`.rbxlx` and re-publishes on content change (all attrs `Computed`, change
+  detection via `content_hash` trigger); `opencloud.Client.DoRaw` + `PlaceClient.Publish`. Live
+  lifecycle verified (publish→converge→re-publish→converge→no-op destroy).
+  See `docs/superpowers/specs/2026-07-03-baseplate-phase2-place-design.md`.
 - Next: **Phase 2** remaining slices (see Roadmap below).
 
 Read `docs/superpowers/specs/2026-07-03-baseplate-phase1-roblox-provider-design.md` for the
@@ -96,6 +103,14 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
   `imageFile`, ...). The icon is a **direct file upload** (`imageFile`), NOT an assetId
   reference. Can't hard-delete → destroy sets `isForSale=false`. Base `https://apis.roblox.com`.
 - Universe config: `GET/PATCH /cloud/v2/universes/{id}?updateMask=...`, base `https://apis.roblox.com`.
+- Places: publish is `POST /universes/v1/{universeId}/places/{placeId}/versions?versionType=Published`
+  (base `https://apis.roblox.com`), **raw body** (.rbxl→`application/octet-stream`, .rbxlx→
+  `application/xml`), response `{"versionNumber":N}` as `text/plain`. Publishes to an EXISTING place
+  (no create; no content read-back). Requires the **`universe-places:write`** API-key scope
+  (distinct from `universe:write`/`universe.place:write`) — else `401 insufficient scopes`. A
+  minimal `<roblox version="4"></roblox>` .rbxlx is accepted (verified live). Can't unpublish →
+  `roblox_place` destroy is a no-op. Change detection uses the engine's Triggers capability
+  (content_hash of the file), since content isn't remotely readable.
 
 ## Roadmap & tracked deferrals (from the review loops)
 **Phase 2 — coverage + robustness:**
@@ -103,7 +118,8 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
   non-string reference convergence (root cause was a state wire-format mismatch — write emitted
   bare JSON, reads used `DynamicPseudoType` wrapper and silently dropped every non-`id` attr;
   fixed by marshaling state against `cty.DynamicPseudoType`).
-- `roblox_place` (.rbxl publish + versioning) — the deferred half of the original v1 slice.
+- **DONE (slice 2):** `roblox_place` (.rbxl/.rbxlx publish + versioning) + the reusable
+  `Triggerable` engine capability. Proven live.
 - More resources: game passes, badges, thumbnails/icons, social links, notifications, localization.
 - `baseplate import` / adopt existing resources; richer env overlays; config modules.
 - **NEW deferrals (from slice-1 review):**
@@ -113,7 +129,13 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
   - `opencloud.IsNotArchivable` matches the 400 message substring `"archivable"` (Open Cloud gives
     no structured code); pin it with a Phase 4 contract test.
   - **State on-disk wire format changed** this slice (bare → `{value,type}` wrapper); a
-    version-gate / migration for old state files is deferred to Phase 3.
+    version-gate / migration for old state files is deferred to Phase 3. Slice 2 further added a
+    `triggers` object to state (`omitempty`) — same deferred-migration bucket.
+  - **From slice 2 (render/UX polish, Phase 3):** a *create* plan for a triggerable resource shows
+    no trigger line (triggers computed at apply) — surface initial trigger values like
+    known-after-apply. Also: `plan` now does file I/O for triggerable resources (hashing the place
+    file); unify `splitPlaceID`/`splitProductID` into one helper; `roblox_place` reads the file
+    twice per apply (hash + upload) — read once if place files get large.
 
 **Phase 3 — CI layer:** prebuilt GitHub Actions (plan-on-PR comment, apply-on-merge), remote
 state backend + CI locking, `--json`/exit-code hardening, non-interactive mode.
