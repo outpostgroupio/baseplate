@@ -249,6 +249,56 @@ func TestReplanReconstructsCollectionReference(t *testing.T) {
 	}
 }
 
+// TestTriggerChangeForcesUpdateAndConverges proves the Triggers capability:
+// a mock_trigger resource's "rev" is Computed (excluded from the attr diff), so
+// only the trigger can drive an update. Same rev converges (incl. a disk reload);
+// a changed rev forces an Update even though no declared attribute differs.
+func TestTriggerChangeForcesUpdateAndConverges(t *testing.T) {
+	ctx := context.Background()
+	p := mock.New()
+	s := state.New()
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.tfstate"))
+
+	rev1 := []plan.DesiredResource{
+		{Type: "mock_trigger", Name: "a", Attributes: provider.Attributes{
+			"name": cty.StringVal("t"), "rev": cty.StringVal("1")}},
+	}
+	first, err := plan.Build(ctx, p, s, rev1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(ctx, p, b, s, first); err != nil {
+		t.Fatal(err)
+	}
+
+	// Same rev, planned against the RELOADED-from-disk state → converges
+	// (proves triggers round-trip through the state file).
+	reloaded, err := b.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	same, err := plan.Build(ctx, p, reloaded, rev1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if same.HasChanges() {
+		t.Fatalf("an unchanged trigger must converge, got: %s", same.RenderText(false))
+	}
+
+	// Changed rev → Update, even though rev is Computed (no attr diff).
+	rev2 := []plan.DesiredResource{
+		{Type: "mock_trigger", Name: "a", Attributes: provider.Attributes{
+			"name": cty.StringVal("t"), "rev": cty.StringVal("2")}},
+	}
+	second, err := plan.Build(ctx, p, reloaded, rev2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second.HasChanges() {
+		t.Fatal("a changed trigger must force an Update")
+	}
+}
+
 func TestApplyDeleteRemovesResourceAndState(t *testing.T) {
 	ctx := context.Background()
 	p := mock.New()

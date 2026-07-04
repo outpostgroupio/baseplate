@@ -46,6 +46,7 @@ func (p *Provider) Resources() map[string]provider.Resource {
 		"mock_child":    &res{p: p, typ: "mock_child"},
 		"mock_computed": &res{p: p, typ: "mock_computed"},
 		"mock_ref":      &res{p: p, typ: "mock_ref"},
+		"mock_trigger":  &res{p: p, typ: "mock_trigger"},
 	}
 }
 
@@ -67,6 +68,9 @@ func (r *res) DecodeSpec() hcldec.Spec {
 		// Required on purpose: exercises that a REQUIRED attribute which is a
 		// reference (unknown until apply) still decodes cleanly.
 		spec["target"] = &hcldec.AttrSpec{Name: "target", Type: cty.String, Required: true}
+	}
+	if r.typ == "mock_trigger" {
+		spec["rev"] = &hcldec.AttrSpec{Name: "rev", Type: cty.String, Required: false}
 	}
 	return spec
 }
@@ -108,7 +112,21 @@ func (r *res) Computed() []string {
 	if r.typ == "mock_computed" {
 		return []string{"server_id"}
 	}
+	if r.typ == "mock_trigger" {
+		return []string{"rev"}
+	}
 	return nil
+}
+
+func (r *res) Triggers(desired provider.Attributes) (map[string]cty.Value, error) {
+	if r.typ != "mock_trigger" {
+		return nil, nil
+	}
+	out := map[string]cty.Value{}
+	if v, ok := desired["rev"]; ok && !v.IsNull() {
+		out["rev"] = v
+	}
+	return out, nil
 }
 
 func (r *res) Dependencies(desired provider.Attributes) []provider.Ref {

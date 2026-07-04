@@ -11,6 +11,7 @@ type Resource struct {
 	Name         string                     `json:"name"`
 	ID           string                     `json:"id"`
 	Attributes   map[string]json.RawMessage `json:"attributes"`
+	Triggers     map[string]json.RawMessage `json:"triggers,omitempty"`
 	Dependencies []string                   `json:"dependencies,omitempty"`
 }
 
