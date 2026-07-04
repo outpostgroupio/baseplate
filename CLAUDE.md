@@ -26,6 +26,13 @@ config, backed by a state file. A maintained, Go-native successor to Mantle. Mod
   detection via `content_hash` trigger); `opencloud.Client.DoRaw` + `PlaceClient.Publish`. Live
   lifecycle verified (publish→converge→re-publish→converge→no-op destroy).
   See `docs/superpowers/specs/2026-07-03-baseplate-phase2-place-design.md`.
+- **Phase 2 slice 3 COMPLETE (`baseplate import`), proven live:** classic-CLI, config-required,
+  state-only adoption of an existing resource — `baseplate import <address> <id>` reads the live
+  resource via the provider and writes a state entry (under the flock lock), so plan/apply
+  reconcile instead of creating a duplicate. Engine fn `apply.Import` (state-only; reuses the
+  state-writing + trigger helpers). Errors on not-declared / already-in-state / not-found. Live
+  import of the test universe converged. See
+  `docs/superpowers/specs/2026-07-04-baseplate-phase2-import-design.md`.
 - Next: **Phase 2** remaining slices (see Roadmap below).
 
 Read `docs/superpowers/specs/2026-07-03-baseplate-phase1-roblox-provider-design.md` for the
@@ -121,7 +128,11 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
 - **DONE (slice 2):** `roblox_place` (.rbxl/.rbxlx publish + versioning) + the reusable
   `Triggerable` engine capability. Proven live.
 - More resources: game passes, badges, thumbnails/icons, social links, notifications, localization.
-- `baseplate import` / adopt existing resources; richer env overlays; config modules.
+- **DONE (slice 3):** `baseplate import <address> <id>` — classic-CLI, config-required, state-only
+  adoption (engine `apply.Import`). Proven live. Follow-ups: declarative `import {}` block +
+  config generation (`-generate-config-out` equivalent); enrich not-declared/already-in-state
+  errors with the config/state path.
+- Richer env overlays; config modules.
 - **NEW deferrals (from slice-1 review):**
   - `stateResource` (apply.go) silently drops an attribute on a `ctyjson.Marshal` error
     (`if err == nil {…}`, no error surfaced) — the write-side mirror of the read-side bug slice 1
