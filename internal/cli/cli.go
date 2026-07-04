@@ -94,6 +94,14 @@ func run(args []string, stdout io.Writer) int {
 	root.AddCommand(&cobra.Command{Use: "destroy", RunE: func(_ *cobra.Command, _ []string) error {
 		return applyRun(p, cfgPath, statePath, target, true, stdout)
 	}})
+	root.AddCommand(&cobra.Command{
+		Use:   "import <address> <id>",
+		Short: "Adopt an existing resource into state",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return importRun(p, cfgPath, statePath, args[0], args[1], stdout)
+		},
+	})
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
@@ -130,6 +138,30 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy bo
 		return err
 	}
 	fmt.Fprintf(stdout, "Apply complete. %d change(s).\n", len(pl.Changes))
+	return nil
+}
+
+// importRun adopts an existing resource (declared in config) into state by id,
+// under the state lock. It never mutates the remote.
+func importRun(p provider.Provider, cfgPath, statePath, address, id string, stdout io.Writer) error {
+	_, desired, err := config.Load(cfgPath, p)
+	if err != nil {
+		return err
+	}
+	b := backend.NewLocal(statePath)
+	unlock, err := b.Lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	s, err := b.Get()
+	if err != nil {
+		return err
+	}
+	if err := apply.Import(context.Background(), p, b, s, address, id, desired); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "Imported %s (id %s).\n", address, id)
 	return nil
 }
 
