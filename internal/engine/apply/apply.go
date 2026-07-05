@@ -3,6 +3,7 @@ package apply
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/zclconf/go-cty/cty"
@@ -173,4 +174,48 @@ func name(address string) string {
 		}
 	}
 	return address
+}
+
+// Import adopts an existing remote resource into state: it reads the resource by
+// id and writes a state entry, so plan/apply reconcile it instead of creating a
+// duplicate. The address must be declared in the desired config. It never mutates
+// the remote. The caller holds the state lock.
+func Import(ctx context.Context, p provider.Provider, b backend.Backend, s *state.State, address, id string, desired []plan.DesiredResource) error {
+	var d plan.DesiredResource
+	found := false
+	for _, cand := range desired {
+		if cand.Address() == address {
+			d, found = cand, true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("resource %q is not declared in the configuration", address)
+	}
+	if existing, ok := s.Find(address); ok {
+		return fmt.Errorf("resource %q is already in state (id %s)", address, existing.ID)
+	}
+	r := p.Resources()[d.Type]
+	if r == nil {
+		return fmt.Errorf("unknown resource type %q", d.Type)
+	}
+	actual, err := r.Read(ctx, id)
+	if err != nil {
+		if errors.Is(err, provider.ErrNotFound) {
+			return fmt.Errorf("no %s found with id %q", d.Type, id)
+		}
+		return err
+	}
+	trigs, err := computeTriggers(r, d.Attributes)
+	if err != nil {
+		return err
+	}
+	return commit(b, s, state.Resource{
+		Type:         d.Type,
+		Name:         name(address),
+		ID:           id,
+		Attributes:   encodeValues(actual),
+		Triggers:     trigs,
+		Dependencies: d.DependsOn,
+	})
 }

@@ -3,6 +3,7 @@ package apply
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zclconf/go-cty/cty"
@@ -330,5 +331,98 @@ func TestApplyDeleteRemovesResourceAndState(t *testing.T) {
 	persisted, _ := b.Get()
 	if _, ok := persisted.Find("mock_thing.a"); ok {
 		t.Fatal("state should no longer contain the deleted resource")
+	}
+}
+
+func TestImportAdoptsExistingResourceAndConverges(t *testing.T) {
+	ctx := context.Background()
+	p := mock.New()
+	p.Seed("mock_thing/7", provider.Attributes{"name": cty.StringVal("adopted")})
+	s := state.New()
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.tfstate"))
+
+	desired := []plan.DesiredResource{
+		{Type: "mock_thing", Name: "a", Attributes: provider.Attributes{"name": cty.StringVal("adopted")}},
+	}
+	if err := Import(ctx, p, b, s, "mock_thing.a", "mock_thing/7", desired); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := s.Find("mock_thing.a")
+	if !ok || got.ID != "mock_thing/7" {
+		t.Fatalf("import did not record the resource with the right id: %+v", got)
+	}
+	pl, err := plan.Build(ctx, p, s, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pl.HasChanges() {
+		t.Fatalf("plan after import must converge, got: %s", pl.RenderText(false))
+	}
+}
+
+func TestImportRecordsTriggersAndConverges(t *testing.T) {
+	ctx := context.Background()
+	p := mock.New()
+	p.Seed("t1", provider.Attributes{"name": cty.StringVal("x"), "rev": cty.StringVal("v1")})
+	s := state.New()
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.tfstate"))
+
+	desired := []plan.DesiredResource{
+		{Type: "mock_trigger", Name: "a", Attributes: provider.Attributes{
+			"name": cty.StringVal("x"), "rev": cty.StringVal("v1")}},
+	}
+	if err := Import(ctx, p, b, s, "mock_trigger.a", "t1", desired); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Find("mock_trigger.a")
+	if len(got.Triggers) == 0 {
+		t.Fatal("import must record triggers for a triggerable resource")
+	}
+	pl, err := plan.Build(ctx, p, s, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pl.HasChanges() {
+		t.Fatalf("plan after triggerable import must converge, got: %s", pl.RenderText(false))
+	}
+}
+
+func TestImportErrorsWhenNotDeclared(t *testing.T) {
+	p := mock.New()
+	s := state.New()
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "s.tfstate"))
+	err := Import(context.Background(), p, b, s, "mock_thing.ghost", "x", nil)
+	if err == nil || !strings.Contains(err.Error(), "not declared") {
+		t.Fatalf("want a not-declared error, got %v", err)
+	}
+}
+
+func TestImportErrorsWhenAlreadyInState(t *testing.T) {
+	ctx := context.Background()
+	p := mock.New()
+	p.Seed("id1", provider.Attributes{"name": cty.StringVal("x")})
+	s := state.New()
+	s.Upsert(state.Resource{Type: "mock_thing", Name: "a", ID: "id1"})
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "s.tfstate"))
+	desired := []plan.DesiredResource{
+		{Type: "mock_thing", Name: "a", Attributes: provider.Attributes{"name": cty.StringVal("x")}},
+	}
+	err := Import(ctx, p, b, s, "mock_thing.a", "id1", desired)
+	if err == nil || !strings.Contains(err.Error(), "already in state") {
+		t.Fatalf("want an already-in-state error, got %v", err)
+	}
+}
+
+func TestImportErrorsWhenRemoteNotFound(t *testing.T) {
+	ctx := context.Background()
+	p := mock.New() // empty store → Read returns provider.ErrNotFound
+	s := state.New()
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "s.tfstate"))
+	desired := []plan.DesiredResource{
+		{Type: "mock_thing", Name: "a", Attributes: provider.Attributes{"name": cty.StringVal("x")}},
+	}
+	err := Import(ctx, p, b, s, "mock_thing.a", "missing", desired)
+	if err == nil || !strings.Contains(err.Error(), "no mock_thing found") {
+		t.Fatalf("want a not-found error, got %v", err)
 	}
 }
