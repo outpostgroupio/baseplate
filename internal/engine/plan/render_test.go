@@ -30,6 +30,19 @@ func TestRenderNumbersBoolsAndKnownAfterApply(t *testing.T) {
 	}
 }
 
+func TestRenderTextShowsImport(t *testing.T) {
+	pl := &Plan{Changes: []Change{
+		{Address: "mock_thing.a", Type: "mock_thing", Action: provider.ActionNoop, ImportID: "mock_thing/7"},
+	}}
+	out := pl.RenderText(false)
+	if !strings.Contains(out, "mock_thing.a will be imported (id mock_thing/7)") {
+		t.Fatalf("expected an import line, got:\n%s", out)
+	}
+	if !strings.Contains(out, "1 to import") {
+		t.Fatalf("expected the import count in the summary, got:\n%s", out)
+	}
+}
+
 func TestRenderTextGolden(t *testing.T) {
 	pl := &Plan{Changes: []Change{
 		{Address: "mock_thing.a", Type: "mock_thing", Action: provider.ActionCreate,
