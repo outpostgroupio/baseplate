@@ -25,6 +25,31 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 	}
 	for _, c := range pl.Changes {
 		r := resources[c.Type]
+		if c.ImportID != "" {
+			desired, err := resolveRefs(c, outputs)
+			if err != nil {
+				return err
+			}
+			actual, err := r.Read(ctx, c.ImportID)
+			if err != nil {
+				return err
+			}
+			trigs, err := computeTriggers(r, desired)
+			if err != nil {
+				return err
+			}
+			if err := commit(b, s, state.Resource{
+				Type: c.Type, Name: name(c.Address), ID: c.ImportID,
+				Attributes: encodeValues(actual), Triggers: trigs, Dependencies: c.DependsOn,
+			}); err != nil {
+				return err
+			}
+			outputs[c.Address] = withID(actual, c.ImportID)
+			if c.Action != provider.ActionUpdate {
+				continue
+			}
+			// else fall through to the ActionUpdate case to reconcile to config.
+		}
 		switch c.Action {
 		case provider.ActionNoop:
 			if c.ID != "" {
