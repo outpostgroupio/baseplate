@@ -46,7 +46,7 @@ func run(args []string, stdout io.Writer) int {
 	p := newProvider()
 
 	load := func() ([]plan.DesiredResource, error) {
-		_, res, err := config.Load(cfgPath, p)
+		_, res, _, err := config.Load(cfgPath, p)
 		if err != nil {
 			return nil, err
 		}
@@ -113,7 +113,7 @@ func run(args []string, stdout io.Writer) int {
 func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy bool, stdout io.Writer) error {
 	var desired []plan.DesiredResource
 	if !destroy {
-		_, res, err := config.Load(cfgPath, p)
+		_, res, _, err := config.Load(cfgPath, p)
 		if err != nil {
 			return err
 		}
@@ -144,7 +144,7 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy bo
 // importRun adopts an existing resource (declared in config) into state by id,
 // under the state lock. It never mutates the remote.
 func importRun(p provider.Provider, cfgPath, statePath, address, id string, stdout io.Writer) error {
-	_, desired, err := config.Load(cfgPath, p)
+	_, desired, _, err := config.Load(cfgPath, p)
 	if err != nil {
 		return err
 	}
