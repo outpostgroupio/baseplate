@@ -426,3 +426,72 @@ func TestImportErrorsWhenRemoteNotFound(t *testing.T) {
 		t.Fatalf("want a not-found error, got %v", err)
 	}
 }
+
+func TestApplyImportBlockAdoptsAndReconciles(t *testing.T) {
+	ctx := context.Background()
+	p := mock.New()
+	p.Seed("mock_thing/7", provider.Attributes{"name": cty.StringVal("old")})
+	s := state.New()
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.tfstate"))
+
+	desired := []plan.DesiredResource{
+		{Type: "mock_thing", Name: "a", Attributes: provider.Attributes{"name": cty.StringVal("new")}},
+	}
+	pl, err := plan.Build(ctx, p, s, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := plan.ResolveImports(ctx, p, s, pl, []plan.ImportBlock{{Address: "mock_thing.a", ID: "mock_thing/7"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(ctx, p, b, s, pl); err != nil {
+		t.Fatal(err)
+	}
+	// Adopted into state under the real id, and reconciled to config ("new").
+	got, ok := s.Find("mock_thing.a")
+	if !ok || got.ID != "mock_thing/7" {
+		t.Fatalf("import did not adopt under the real id: %+v", got)
+	}
+	if p.Store()["mock_thing/7"]["name"].AsString() != "new" {
+		t.Fatalf("one-pass import must reconcile the remote to config, store = %+v", p.Store()["mock_thing/7"])
+	}
+	// Second plan converges.
+	pl2, _ := plan.Build(ctx, p, s, desired)
+	if err := plan.ResolveImports(ctx, p, s, pl2, []plan.ImportBlock{{Address: "mock_thing.a", ID: "mock_thing/7"}}); err != nil {
+		t.Fatal(err)
+	}
+	if pl2.HasChanges() {
+		t.Fatalf("post-import plan must converge, got: %s", pl2.RenderText(false))
+	}
+}
+
+func TestApplyImportBlockTriggerableAdoptsCleanly(t *testing.T) {
+	ctx := context.Background()
+	p := mock.New()
+	p.Seed("t1", provider.Attributes{"name": cty.StringVal("x"), "rev": cty.StringVal("v1")})
+	s := state.New()
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.tfstate"))
+
+	desired := []plan.DesiredResource{
+		{Type: "mock_trigger", Name: "a", Attributes: provider.Attributes{
+			"name": cty.StringVal("x"), "rev": cty.StringVal("v1")}},
+	}
+	pl, _ := plan.Build(ctx, p, s, desired)
+	if err := plan.ResolveImports(ctx, p, s, pl, []plan.ImportBlock{{Address: "mock_trigger.a", ID: "t1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(ctx, p, b, s, pl); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Find("mock_trigger.a")
+	if len(got.Triggers) == 0 {
+		t.Fatal("import must record triggers (baseline from config) for a triggerable resource")
+	}
+	pl2, _ := plan.Build(ctx, p, s, desired)
+	if err := plan.ResolveImports(ctx, p, s, pl2, []plan.ImportBlock{{Address: "mock_trigger.a", ID: "t1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if pl2.HasChanges() {
+		t.Fatalf("triggerable import must converge, got: %s", pl2.RenderText(false))
+	}
+}
