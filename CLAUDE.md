@@ -33,6 +33,14 @@ config, backed by a state file. A maintained, Go-native successor to Mantle. Mod
   state-writing + trigger helpers). Errors on not-declared / already-in-state / not-found. Live
   import of the test universe converged. See
   `docs/superpowers/specs/2026-07-04-baseplate-phase2-import-design.md`.
+- **Phase 2 slice 4 COMPLETE (declarative `import {}` block), proven live:** modern
+  config-driven import — `import { to = <address>  id = "<id>" }` blocks that `plan` previews
+  (`will be imported (id …)`, `N to import`) and `apply` executes **one-pass** (adopt the live
+  resource, trigger baseline from config, then reconcile to config in the same apply). Imports are a
+  read-only POST-PASS `plan.ResolveImports` over the built plan (chosen to leave `plan.Build`'s ~38
+  call sites untouched); `config.Load` now returns `[]plan.ImportBlock`; `Change.ImportID` +
+  `render`. Errors on not-declared / not-found / duplicate. Live import-block adopt+converge
+  verified. See `docs/superpowers/specs/2026-07-05-baseplate-phase2-import-block-design.md`.
 - Next: **Phase 2** remaining slices (see Roadmap below).
 
 Read `docs/superpowers/specs/2026-07-03-baseplate-phase1-roblox-provider-design.md` for the
@@ -129,9 +137,14 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
   `Triggerable` engine capability. Proven live.
 - More resources: game passes, badges, thumbnails/icons, social links, notifications, localization.
 - **DONE (slice 3):** `baseplate import <address> <id>` — classic-CLI, config-required, state-only
-  adoption (engine `apply.Import`). Proven live. Follow-ups: declarative `import {}` block +
-  config generation (`-generate-config-out` equivalent); enrich not-declared/already-in-state
-  errors with the config/state path.
+  adoption (engine `apply.Import`). Proven live.
+- **DONE (slice 4):** declarative `import {}` block — `plan.ResolveImports` post-pass + one-pass
+  adopt+reconcile apply. Proven live. Follow-up: config generation (`-generate-config-out`
+  equivalent) as its own slice.
+- More resources: game passes, badges, thumbnails/icons, social links, notifications, localization
+  (NOTE: game-passes/badges are LEGACY-API-only — no `/cloud/v2` writable surface; create-via-Open-
+  Cloud is uncertain. Subscriptions (`/cloud/v2/universes/{id}/subscription-products`) are the one
+  clean modern monetization resource).
 - Richer env overlays; config modules.
 - **NEW deferrals (from slice-1 review):**
   - `stateResource` (apply.go) silently drops an attribute on a `ctyjson.Marshal` error
@@ -147,6 +160,11 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
     known-after-apply. Also: `plan` now does file I/O for triggerable resources (hashing the place
     file); unify `splitPlaceID`/`splitProductID` into one helper; `roblox_place` reads the file
     twice per apply (hash + upload) — read once if place files get large.
+  - **From slice 4 (all defer, cosmetic):** `plan.nameFromAddress` duplicates `apply.name` (fold
+    into the splitter-unification cleanup); `config.importAddress` truncates a 3-part `to`
+    (`type.name.extra` → `type.name`) instead of erroring (add a `len(tr)!=2` guard); an
+    import-that-updates does two `b.Put`/`Serial++` (adopt commit then Update commit — harmless,
+    second supersedes).
 
 **Phase 3 — CI layer:** prebuilt GitHub Actions (plan-on-PR comment, apply-on-merge), remote
 state backend + CI locking, `--json`/exit-code hardening, non-interactive mode.
