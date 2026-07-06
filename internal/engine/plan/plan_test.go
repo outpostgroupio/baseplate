@@ -145,3 +145,75 @@ func TestComputedAttrNotADiff(t *testing.T) {
 		t.Fatalf("computed-only difference must not be a change, got: %+v", pl.Changes)
 	}
 }
+
+func TestResolveImportsPendingImportConverges(t *testing.T) {
+	ctx := context.Background()
+	p := mock.New()
+	p.Seed("mock_thing/7", provider.Attributes{"name": cty.StringVal("adopted")})
+	s := state.New()
+	desired := []DesiredResource{
+		{Type: "mock_thing", Name: "a", Attributes: provider.Attributes{"name": cty.StringVal("adopted")}},
+	}
+	pl, err := Build(ctx, p, s, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	imports := []ImportBlock{{Address: "mock_thing.a", ID: "mock_thing/7"}}
+	if err := ResolveImports(ctx, p, s, pl, imports); err != nil {
+		t.Fatal(err)
+	}
+	if !pl.HasChanges() {
+		t.Fatal("a pending import is a change")
+	}
+	c := pl.Changes[0]
+	if c.ImportID != "mock_thing/7" {
+		t.Fatalf("expected ImportID set, got %q", c.ImportID)
+	}
+	if c.Action != provider.ActionNoop {
+		t.Fatalf("config matches live → post-import reconcile should be Noop, got %v", c.Action)
+	}
+}
+
+func TestResolveImportsShowsUpdateWhenConfigDiffers(t *testing.T) {
+	ctx := context.Background()
+	p := mock.New()
+	p.Seed("mock_thing/7", provider.Attributes{"name": cty.StringVal("old")})
+	s := state.New()
+	desired := []DesiredResource{
+		{Type: "mock_thing", Name: "a", Attributes: provider.Attributes{"name": cty.StringVal("new")}},
+	}
+	pl, _ := Build(ctx, p, s, desired)
+	if err := ResolveImports(ctx, p, s, pl, []ImportBlock{{Address: "mock_thing.a", ID: "mock_thing/7"}}); err != nil {
+		t.Fatal(err)
+	}
+	if pl.Changes[0].Action != provider.ActionUpdate {
+		t.Fatalf("config differs from live → expected Update, got %v", pl.Changes[0].Action)
+	}
+}
+
+func TestResolveImportsErrors(t *testing.T) {
+	ctx := context.Background()
+	p := mock.New()
+	s := state.New()
+	desired := []DesiredResource{
+		{Type: "mock_thing", Name: "a", Attributes: provider.Attributes{"name": cty.StringVal("x")}},
+	}
+
+	// not declared
+	pl, _ := Build(ctx, p, s, desired)
+	if err := ResolveImports(ctx, p, s, pl, []ImportBlock{{Address: "mock_thing.ghost", ID: "id"}}); err == nil {
+		t.Fatal("want a not-declared error")
+	}
+	// not found (empty store)
+	pl2, _ := Build(ctx, p, s, desired)
+	if err := ResolveImports(ctx, p, s, pl2, []ImportBlock{{Address: "mock_thing.a", ID: "missing"}}); err == nil {
+		t.Fatal("want a not-found error")
+	}
+	// duplicate
+	p.Seed("id1", provider.Attributes{"name": cty.StringVal("x")})
+	pl3, _ := Build(ctx, p, s, desired)
+	dup := []ImportBlock{{Address: "mock_thing.a", ID: "id1"}, {Address: "mock_thing.a", ID: "id1"}}
+	if err := ResolveImports(ctx, p, s, pl3, dup); err == nil {
+		t.Fatal("want a duplicate-import error")
+	}
+}

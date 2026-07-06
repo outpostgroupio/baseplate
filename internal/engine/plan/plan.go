@@ -38,6 +38,7 @@ type Change struct {
 	Type      string
 	ID        string
 	Action    provider.ChangeAction
+	ImportID  string
 	Desired   provider.Attributes
 	Actual    provider.Attributes
 	AttrDiffs []AttrDiff
@@ -51,7 +52,7 @@ type Plan struct {
 
 func (p *Plan) HasChanges() bool {
 	for _, c := range p.Changes {
-		if c.Action != provider.ActionNoop {
+		if c.Action != provider.ActionNoop || c.ImportID != "" {
 			return true
 		}
 	}
