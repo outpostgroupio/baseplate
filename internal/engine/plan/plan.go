@@ -44,6 +44,7 @@ type Change struct {
 	AttrDiffs []AttrDiff
 	DependsOn []string
 	Refs      map[string]provider.Ref
+	Sensitive []string
 }
 
 type Plan struct {
@@ -86,7 +87,8 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 		if r, isDelete := deletes[addr]; isDelete {
 			pl.Changes = append(pl.Changes, Change{
 				Address: addr, Type: r.Type, ID: r.ID, Action: provider.ActionDelete,
-				Actual: decodeAttrs(r.Attributes),
+				Actual:    decodeAttrs(r.Attributes),
+				Sensitive: sensitiveAttrs(resources[r.Type]),
 			})
 			continue
 		}
@@ -95,6 +97,7 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 		if !inState {
 			pl.Changes = append(pl.Changes, Change{
 				Address: addr, Type: d.Type, Action: provider.ActionCreate, Desired: d.Attributes, DependsOn: d.DependsOn, Refs: d.Refs,
+				Sensitive: sensitiveAttrs(resources[d.Type]),
 			})
 			continue
 		}
@@ -102,6 +105,7 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 		if errors.Is(err, provider.ErrNotFound) {
 			pl.Changes = append(pl.Changes, Change{
 				Address: addr, Type: d.Type, Action: provider.ActionCreate, Desired: d.Attributes, DependsOn: d.DependsOn, Refs: d.Refs,
+				Sensitive: sensitiveAttrs(resources[d.Type]),
 			})
 			continue
 		}
@@ -125,6 +129,7 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 		pl.Changes = append(pl.Changes, Change{
 			Address: addr, Type: d.Type, ID: st.ID, Action: action,
 			Desired: d.Attributes, Actual: actual, AttrDiffs: diffs, DependsOn: d.DependsOn, Refs: d.Refs,
+			Sensitive: sensitiveAttrs(resources[d.Type]),
 		})
 	}
 	// deletes must run in reverse dependency order; re-sort delete block.
@@ -248,4 +253,11 @@ func decodeAttrs(m map[string]json.RawMessage) provider.Attributes {
 		}
 	}
 	return out
+}
+
+func sensitiveAttrs(res provider.Resource) []string {
+	if s, ok := res.(provider.Sensitive); ok {
+		return s.Sensitive()
+	}
+	return nil
 }

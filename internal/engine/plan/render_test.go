@@ -61,3 +61,43 @@ func TestRenderTextGolden(t *testing.T) {
 		t.Fatalf("render mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
+
+func TestRenderTextRedactsSensitive(t *testing.T) {
+	p := &Plan{Changes: []Change{
+		{Address: "roblox_universe_secret.s", Type: "roblox_universe_secret",
+			Action: provider.ActionCreate, Sensitive: []string{"value"},
+			Desired: provider.Attributes{
+				"name":  cty.StringVal("aws"),
+				"value": cty.StringVal("hunter2"),
+			}},
+	}}
+	out := p.RenderText(false)
+	if strings.Contains(out, "hunter2") {
+		t.Fatalf("plaintext leaked into text plan:\n%s", out)
+	}
+	if !strings.Contains(out, "value = (sensitive value)") {
+		t.Fatalf("expected redaction marker, got:\n%s", out)
+	}
+}
+
+func TestRenderJSONRedactsSensitive(t *testing.T) {
+	p := &Plan{Changes: []Change{
+		{Address: "roblox_universe_secret.s", Type: "roblox_universe_secret",
+			Action: provider.ActionUpdate, Sensitive: []string{"value"},
+			AttrDiffs: []AttrDiff{{Name: "value", Old: cty.StringVal("oldsecret"), New: cty.StringVal("hunter2")}}},
+	}}
+	b, err := p.RenderJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// NOTE: checking for the bare plaintext value "oldsecret" here rather than
+	// "old" — jsonAttr's Old field serializes with JSON key "old"
+	// (`json:"old,omitempty"`), so a literal `"old"` substring check would
+	// always match the field name itself regardless of redaction.
+	if strings.Contains(string(b), "hunter2") || strings.Contains(string(b), "oldsecret") {
+		t.Fatalf("plaintext leaked into json plan:\n%s", b)
+	}
+	if !strings.Contains(string(b), "(sensitive value)") {
+		t.Fatalf("expected redaction marker, got:\n%s", b)
+	}
+}

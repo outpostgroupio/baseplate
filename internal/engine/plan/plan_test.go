@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/hashicorp/hcl/v2/hcldec"
 	"github.com/zclconf/go-cty/cty"
 
 	"github.com/outpostgroup/baseplate/internal/provider"
@@ -215,5 +216,39 @@ func TestResolveImportsErrors(t *testing.T) {
 	dup := []ImportBlock{{Address: "mock_thing.a", ID: "id1"}, {Address: "mock_thing.a", ID: "id1"}}
 	if err := ResolveImports(ctx, p, s, pl3, dup); err == nil {
 		t.Fatal("want a duplicate-import error")
+	}
+}
+
+type sensitiveResource struct{}
+
+func (sensitiveResource) Type() string                                    { return "fake_secret" }
+func (sensitiveResource) DecodeSpec() hcldec.Spec                         { return hcldec.ObjectSpec{} }
+func (sensitiveResource) Computed() []string                              { return []string{"value"} }
+func (sensitiveResource) Sensitive() []string                             { return []string{"value"} }
+func (sensitiveResource) Dependencies(provider.Attributes) []provider.Ref { return nil }
+func (sensitiveResource) Create(context.Context, provider.Attributes) (string, provider.Attributes, error) {
+	return "", nil, nil
+}
+func (sensitiveResource) Read(context.Context, string) (provider.Attributes, error) { return nil, nil }
+func (sensitiveResource) Update(context.Context, string, provider.Attributes) (provider.Attributes, error) {
+	return nil, nil
+}
+func (sensitiveResource) Delete(context.Context, string) error { return nil }
+
+type sensitiveProvider struct{}
+
+func (sensitiveProvider) Resources() map[string]provider.Resource {
+	return map[string]provider.Resource{"fake_secret": sensitiveResource{}}
+}
+
+func TestBuildPopulatesSensitive(t *testing.T) {
+	pl, err := Build(context.Background(), sensitiveProvider{}, state.New(), []DesiredResource{
+		{Type: "fake_secret", Name: "s", Attributes: provider.Attributes{"value": cty.StringVal("x")}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pl.Changes) != 1 || len(pl.Changes[0].Sensitive) != 1 || pl.Changes[0].Sensitive[0] != "value" {
+		t.Fatalf("Change.Sensitive not populated: %+v", pl.Changes)
 	}
 }
