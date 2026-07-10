@@ -68,3 +68,12 @@ type Resource interface {
 type Triggerable interface {
 	Triggers(desired Attributes) (map[string]cty.Value, error)
 }
+
+// Sensitive is an optional Resource capability. Sensitive returns attribute names
+// whose values must be redacted from all rendered plan output (they may be secrets
+// sourced from env()). The values still flow to the provider at apply; only
+// rendering is affected. State never contains them because such resources omit
+// them from the attributes they return (see roblox_universe_secret).
+type Sensitive interface {
+	Sensitive() []string
+}

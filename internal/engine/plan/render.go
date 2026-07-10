@@ -61,7 +61,15 @@ func (p *Plan) RenderText(color bool) string {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
+		sensitive := map[string]bool{}
+		for _, k := range c.Sensitive {
+			sensitive[k] = true
+		}
 		for _, k := range keys {
+			if sensitive[k] {
+				fmt.Fprintf(&b, "    %s = (sensitive value)\n", k)
+				continue
+			}
 			if v, ok := attrs[k]; ok {
 				fmt.Fprintf(&b, "    %s = %s\n", k, ctyString(v))
 			} else {
@@ -89,7 +97,15 @@ func (p *Plan) RenderJSON() ([]byte, error) {
 	var out []jsonChange
 	for _, c := range p.Changes {
 		jc := jsonChange{Address: c.Address, Action: c.Action.String(), ImportID: c.ImportID}
+		sensitive := map[string]bool{}
+		for _, k := range c.Sensitive {
+			sensitive[k] = true
+		}
 		for _, d := range c.AttrDiffs {
+			if sensitive[d.Name] {
+				jc.Attrs = append(jc.Attrs, jsonAttr{Name: d.Name, Old: "(sensitive value)", New: "(sensitive value)"})
+				continue
+			}
 			jc.Attrs = append(jc.Attrs, jsonAttr{Name: d.Name, Old: ctyString(d.Old), New: ctyString(d.New)})
 		}
 		out = append(out, jc)
