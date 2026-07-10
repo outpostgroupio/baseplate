@@ -7,6 +7,7 @@ require (
 	github.com/hashicorp/hcl/v2 v2.20.1
 	github.com/spf13/cobra v1.10.2
 	github.com/zclconf/go-cty v1.14.4
+	golang.org/x/crypto v0.46.0
 )
 
 require (
