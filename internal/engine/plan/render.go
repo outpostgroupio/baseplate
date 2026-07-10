@@ -21,8 +21,16 @@ var symbols = map[provider.ChangeAction]string{
 
 func (p *Plan) RenderText(color bool) string {
 	var b strings.Builder
-	var add, chg, del int
+	var add, chg, del, imp int
 	for _, c := range p.Changes {
+		if c.ImportID != "" {
+			imp++
+			fmt.Fprintf(&b, "%s will be imported (id %s)\n", c.Address, c.ImportID)
+			for _, d := range c.AttrDiffs {
+				fmt.Fprintf(&b, "    %s: %s => %s\n", d.Name, ctyString(d.Old), ctyString(d.New))
+			}
+			continue
+		}
 		if c.Action == provider.ActionNoop {
 			continue
 		}
@@ -62,7 +70,7 @@ func (p *Plan) RenderText(color bool) string {
 			}
 		}
 	}
-	fmt.Fprintf(&b, "\nPlan: %d to add, %d to change, %d to destroy.\n", add, chg, del)
+	fmt.Fprintf(&b, "\nPlan: %d to import, %d to add, %d to change, %d to destroy.\n", imp, add, chg, del)
 	return b.String()
 }
 
@@ -73,13 +81,14 @@ func (p *Plan) RenderJSON() ([]byte, error) {
 		New  string `json:"new,omitempty"`
 	}
 	type jsonChange struct {
-		Address string     `json:"address"`
-		Action  string     `json:"action"`
-		Attrs   []jsonAttr `json:"attributes,omitempty"`
+		Address  string     `json:"address"`
+		Action   string     `json:"action"`
+		ImportID string     `json:"import_id,omitempty"`
+		Attrs    []jsonAttr `json:"attributes,omitempty"`
 	}
 	var out []jsonChange
 	for _, c := range p.Changes {
-		jc := jsonChange{Address: c.Address, Action: c.Action.String()}
+		jc := jsonChange{Address: c.Address, Action: c.Action.String(), ImportID: c.ImportID}
 		for _, d := range c.AttrDiffs {
 			jc.Attrs = append(jc.Attrs, jsonAttr{Name: d.Name, Old: ctyString(d.Old), New: ctyString(d.New)})
 		}

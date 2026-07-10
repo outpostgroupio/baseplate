@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,7 +12,7 @@ import (
 
 func TestLoadResourcesAndDeps(t *testing.T) {
 	t.Setenv("BP_TEST_KEY", "secret123")
-	pc, resources, err := Load(filepath.Join("..", "..", "testdata", "sample.bp.hcl"), mock.New())
+	pc, resources, _, err := Load(filepath.Join("..", "..", "testdata", "sample.bp.hcl"), mock.New())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +37,7 @@ func TestLoadResourcesAndDeps(t *testing.T) {
 }
 
 func TestLoadCapturesReferences(t *testing.T) {
-	_, resources, err := Load(filepath.Join("..", "..", "testdata", "refs.bp.hcl"), mock.New())
+	_, resources, _, err := Load(filepath.Join("..", "..", "testdata", "refs.bp.hcl"), mock.New())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +66,7 @@ func TestLoadOmitsUnsetOptionalAttrs(t *testing.T) {
 	// mock_child has an optional "parent" attribute; when the user doesn't write
 	// it, hcldec decodes it as null. Load must omit it from Attributes so it is
 	// not treated as a declared attribute (which would diff as null forever).
-	_, resources, err := Load(filepath.Join("..", "..", "testdata", "optional.bp.hcl"), mock.New())
+	_, resources, _, err := Load(filepath.Join("..", "..", "testdata", "optional.bp.hcl"), mock.New())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,11 +83,46 @@ func TestLoadOmitsUnsetOptionalAttrs(t *testing.T) {
 }
 
 func TestLoadRejectsWrappedReference(t *testing.T) {
-	_, _, err := Load(filepath.Join("..", "..", "testdata", "badref.bp.hcl"), mock.New())
+	_, _, _, err := Load(filepath.Join("..", "..", "testdata", "badref.bp.hcl"), mock.New())
 	if err == nil {
 		t.Fatal("expected an error for a reference wrapped in a string template")
 	}
 	if !strings.Contains(err.Error(), "unsupported way") {
 		t.Fatalf("error should explain the unsupported reference form, got: %v", err)
+	}
+}
+
+func TestLoadParsesImportBlocks(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.bp.hcl")
+	os.WriteFile(path, []byte(`
+resource "mock_thing" "a" {
+  name = "root"
+}
+
+import {
+  to = mock_thing.a
+  id = "mock_thing/7"
+}
+`), 0o644)
+
+	_, _, imports, err := Load(path, mock.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imports) != 1 {
+		t.Fatalf("expected 1 import block, got %d", len(imports))
+	}
+	if imports[0].Address != "mock_thing.a" || imports[0].ID != "mock_thing/7" {
+		t.Fatalf("import = %+v", imports[0])
+	}
+}
+
+func TestLoadRejectsImportWithoutTo(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "c.bp.hcl")
+	os.WriteFile(path, []byte("import {\n  id = \"x\"\n}\n"), 0o644)
+	if _, _, _, err := Load(path, mock.New()); err == nil {
+		t.Fatal("expected an error for an import block missing `to`")
 	}
 }

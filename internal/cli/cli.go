@@ -45,16 +45,16 @@ func run(args []string, stdout io.Writer) int {
 	exit := 0
 	p := newProvider()
 
-	load := func() ([]plan.DesiredResource, error) {
-		_, res, err := config.Load(cfgPath, p)
+	load := func() ([]plan.DesiredResource, []plan.ImportBlock, error) {
+		_, res, imports, err := config.Load(cfgPath, p)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return res, nil
+		return res, imports, nil
 	}
 
 	root.AddCommand(&cobra.Command{Use: "validate", RunE: func(_ *cobra.Command, _ []string) error {
-		if _, err := load(); err != nil {
+		if _, _, err := load(); err != nil {
 			return err
 		}
 		fmt.Fprintln(stdout, "Configuration is valid.")
@@ -62,7 +62,7 @@ func run(args []string, stdout io.Writer) int {
 	}})
 
 	root.AddCommand(&cobra.Command{Use: "plan", RunE: func(_ *cobra.Command, _ []string) error {
-		desired, err := load()
+		desired, imports, err := load()
 		if err != nil {
 			return err
 		}
@@ -73,6 +73,9 @@ func run(args []string, stdout io.Writer) int {
 		}
 		pl, err := plan.Build(context.Background(), p, s, desired)
 		if err != nil {
+			return err
+		}
+		if err := plan.ResolveImports(context.Background(), p, s, pl, imports); err != nil {
 			return err
 		}
 		filterPlanByTarget(pl, target)
@@ -112,12 +115,13 @@ func run(args []string, stdout io.Writer) int {
 
 func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy bool, stdout io.Writer) error {
 	var desired []plan.DesiredResource
+	var imports []plan.ImportBlock
 	if !destroy {
-		_, res, err := config.Load(cfgPath, p)
+		_, res, imps, err := config.Load(cfgPath, p)
 		if err != nil {
 			return err
 		}
-		desired = res
+		desired, imports = res, imps
 	}
 	b := backend.NewLocal(statePath)
 	unlock, err := b.Lock()
@@ -133,6 +137,9 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy bo
 	if err != nil {
 		return err
 	}
+	if err := plan.ResolveImports(context.Background(), p, s, pl, imports); err != nil {
+		return err
+	}
 	filterPlanByTarget(pl, target)
 	if err := apply.Apply(context.Background(), p, b, s, pl); err != nil {
 		return err
@@ -144,7 +151,7 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy bo
 // importRun adopts an existing resource (declared in config) into state by id,
 // under the state lock. It never mutates the remote.
 func importRun(p provider.Provider, cfgPath, statePath, address, id string, stdout io.Writer) error {
-	_, desired, err := config.Load(cfgPath, p)
+	_, desired, _, err := config.Load(cfgPath, p)
 	if err != nil {
 		return err
 	}
