@@ -101,3 +101,18 @@ func TestRenderJSONRedactsSensitive(t *testing.T) {
 		t.Fatalf("expected redaction marker, got:\n%s", b)
 	}
 }
+
+func TestRenderTextRedactsSensitiveImport(t *testing.T) {
+	p := &Plan{Changes: []Change{
+		{Address: "roblox_universe_secret.s", Type: "roblox_universe_secret",
+			ImportID: "100/aws", Sensitive: []string{"value"},
+			AttrDiffs: []AttrDiff{{Name: "value", Old: cty.NullVal(cty.String), New: cty.StringVal("hunter2")}}},
+	}}
+	out := p.RenderText(false)
+	if strings.Contains(out, "hunter2") {
+		t.Fatalf("plaintext leaked into import preview:\n%s", out)
+	}
+	if !strings.Contains(out, "value: (sensitive value) => (sensitive value)") {
+		t.Fatalf("expected redaction in import preview, got:\n%s", out)
+	}
+}

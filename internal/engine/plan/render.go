@@ -26,7 +26,15 @@ func (p *Plan) RenderText(color bool) string {
 		if c.ImportID != "" {
 			imp++
 			fmt.Fprintf(&b, "%s will be imported (id %s)\n", c.Address, c.ImportID)
+			sensitive := map[string]bool{}
+			for _, k := range c.Sensitive {
+				sensitive[k] = true
+			}
 			for _, d := range c.AttrDiffs {
+				if sensitive[d.Name] {
+					fmt.Fprintf(&b, "    %s: (sensitive value) => (sensitive value)\n", d.Name)
+					continue
+				}
 				fmt.Fprintf(&b, "    %s: %s => %s\n", d.Name, ctyString(d.Old), ctyString(d.New))
 			}
 			continue
