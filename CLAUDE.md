@@ -5,7 +5,7 @@ Roblox resources declaratively via Open Cloud: `baseplate plan/apply/destroy` ov
 config, backed by a state file. A maintained, Go-native successor to Mantle. Module:
 `github.com/outpostgroup/baseplate`.
 
-## Status (2026-07-03)
+## Status (2026-07-05)
 - **Phase 0 COMPLETE (on main):** provider-agnostic engine — HCL config → dependency graph →
   deterministic plan → apply/destroy → state file (serial/lineage, flock locking). Proven
   against an in-memory mock provider.
