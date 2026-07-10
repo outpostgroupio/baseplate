@@ -22,21 +22,22 @@ var rootSchema = &hcl.BodySchema{
 	Blocks: []hcl.BlockHeaderSchema{
 		{Type: "provider", LabelNames: []string{"name"}},
 		{Type: "resource", LabelNames: []string{"type", "name"}},
+		{Type: "import"},
 	},
 }
 
-func Load(path string, p provider.Provider) (ProviderConfig, []plan.DesiredResource, error) {
+func Load(path string, p provider.Provider) (ProviderConfig, []plan.DesiredResource, []plan.ImportBlock, error) {
 	src, err := os.ReadFile(path)
 	if err != nil {
-		return ProviderConfig{}, nil, err
+		return ProviderConfig{}, nil, nil, err
 	}
 	f, diags := hclsyntax.ParseConfig(src, path, hcl.InitialPos)
 	if diags.HasErrors() {
-		return ProviderConfig{}, nil, diags
+		return ProviderConfig{}, nil, nil, diags
 	}
 	content, diags := f.Body.Content(rootSchema)
 	if diags.HasErrors() {
-		return ProviderConfig{}, nil, diags
+		return ProviderConfig{}, nil, nil, diags
 	}
 
 	resTypes := p.Resources()
@@ -48,18 +49,19 @@ func Load(path string, p provider.Provider) (ProviderConfig, []plan.DesiredResou
 
 	var pc ProviderConfig
 	var out []plan.DesiredResource
+	var imports []plan.ImportBlock
 	for _, b := range content.Blocks {
 		switch b.Type {
 		case "provider":
 			attrs, d := b.Body.JustAttributes()
 			if d.HasErrors() {
-				return pc, nil, d
+				return pc, nil, nil, d
 			}
 			pc.Attributes = provider.Attributes{}
 			for k, a := range attrs {
 				v, vd := a.Expr.Value(ctx)
 				if vd.HasErrors() {
-					return pc, nil, vd
+					return pc, nil, nil, vd
 				}
 				pc.Attributes[k] = v
 			}
@@ -67,11 +69,11 @@ func Load(path string, p provider.Provider) (ProviderConfig, []plan.DesiredResou
 			typ, name := b.Labels[0], b.Labels[1]
 			r, ok := resTypes[typ]
 			if !ok {
-				return pc, nil, fmt.Errorf("%s: unknown resource type %q", path, typ)
+				return pc, nil, nil, fmt.Errorf("%s: unknown resource type %q", path, typ)
 			}
 			val, d := hcldec.Decode(b.Body, r.DecodeSpec(), ctx)
 			if d.HasErrors() {
-				return pc, nil, d
+				return pc, nil, nil, d
 			}
 			attrs := provider.Attributes{}
 			for k, v := range val.AsValueMap() {
@@ -101,16 +103,41 @@ func Load(path string, p provider.Provider) (ProviderConfig, []plan.DesiredResou
 			// or a function call). Reject it loudly rather than silently dropping it.
 			for k, v := range attrs {
 				if !v.IsKnown() {
-					return pc, nil, fmt.Errorf("%s: %s.%s: attribute %q references another resource in an unsupported way; use a bare reference like type.name.attr", path, typ, name, k)
+					return pc, nil, nil, fmt.Errorf("%s: %s.%s: attribute %q references another resource in an unsupported way; use a bare reference like type.name.attr", path, typ, name, k)
 				}
 			}
 			out = append(out, plan.DesiredResource{
 				Type: typ, Name: name, Attributes: attrs,
 				DependsOn: extractDeps(b.Body), Refs: refAttrs,
 			})
+		case "import":
+			attrs, d := b.Body.JustAttributes()
+			if d.HasErrors() {
+				return pc, nil, nil, d
+			}
+			toAttr, ok := attrs["to"]
+			if !ok {
+				return pc, nil, nil, fmt.Errorf("%s: import block requires a `to` argument", path)
+			}
+			addr, ok := importAddress(toAttr.Expr)
+			if !ok {
+				return pc, nil, nil, fmt.Errorf("%s: import `to` must be a resource address like type.name", path)
+			}
+			idAttr, ok := attrs["id"]
+			if !ok {
+				return pc, nil, nil, fmt.Errorf("%s: import block requires an `id` argument", path)
+			}
+			idv, vd := idAttr.Expr.Value(ctx)
+			if vd.HasErrors() {
+				return pc, nil, nil, vd
+			}
+			if idv.IsNull() || idv.Type() != cty.String {
+				return pc, nil, nil, fmt.Errorf("%s: import `id` must be a string", path)
+			}
+			imports = append(imports, plan.ImportBlock{Address: addr, ID: idv.AsString()})
 		}
 	}
-	return pc, out, nil
+	return pc, out, imports, nil
 }
 
 // buildRefObject makes each resource block referenceable in expressions as
@@ -224,6 +251,20 @@ func traversalName(tr hcl.Traversal) (string, bool) {
 		return a.Name, true
 	}
 	return "", false
+}
+
+// importAddress extracts a "<type>.<name>" address from an import block's `to`
+// expression, which must be a bare 2-part resource-reference traversal.
+func importAddress(expr hcl.Expression) (string, bool) {
+	te, ok := expr.(*hclsyntax.ScopeTraversalExpr)
+	if !ok {
+		return "", false
+	}
+	name, ok := traversalName(te.Traversal)
+	if !ok {
+		return "", false
+	}
+	return te.Traversal.RootName() + "." + name, true
 }
 
 func envFunc() function.Function {

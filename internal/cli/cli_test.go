@@ -105,6 +105,19 @@ func TestImportErrorsWhenRemoteNotFound(t *testing.T) {
 	}
 }
 
+func TestPlanWithImportBlockNotFoundExits1(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "baseplate.bp.hcl")
+	os.WriteFile(cfg, []byte("resource \"mock_thing\" \"a\" {\n  name = \"root\"\n}\nimport {\n  to = mock_thing.a\n  id = \"missing\"\n}\n"), 0o644)
+
+	var out bytes.Buffer
+	// The import target isn't in the (empty) mock store → ResolveImports Read → not found → exit 1.
+	code := run([]string{"plan", "--config", cfg, "--state", filepath.Join(dir, "s.tfstate")}, &out)
+	if code != 1 {
+		t.Fatalf("expected exit 1 (import id not found), got %d\n%s", code, out.String())
+	}
+}
+
 func TestImportRequiresTwoArgs(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "baseplate.bp.hcl")
