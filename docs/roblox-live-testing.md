@@ -16,6 +16,10 @@ scoped to your test universe:
 - **Assets** — read + write
 - **Universe** (the v2 Universe/Cloud API) — read + write
 - **Developer Products** ("Configure Developer Products/Game Passes") — read + write
+- **Universe Secrets** (`universe.secret:read` + `universe.secret:write`) — only
+  needed for the `roblox_universe_secret` live test; distinct from `universe:write`
+  (same pattern as places needing their own `universe-places:write` scope) — without
+  it the API returns `401 insufficient scopes`.
 
 Set an IP allowlist (`0.0.0.0/0` for quick testing) and an expiration you're
 comfortable with. Copy the key once — you can't view it again.
@@ -39,6 +43,11 @@ experience, creates a developer product whose `universe_id` is a **reference** t
 the experience's id (resolved at apply time), asserts a second plan converges to
 no changes, then cleans up (the product is taken off sale; experience config is
 left as set — Baseplate adopts universes, it doesn't own their lifecycle).
+
+`-run Live` also picks up `TestLiveSecretLifecycle` (`roblox_universe_secret`),
+which reuses the same `BASEPLATE_TEST_UNIVERSE` and creates/rotates/destroys a
+throwaway `bp_test_<unixtime>` secret — a real hard delete, verified by listing
+secrets after destroy. Run it in isolation with `-run LiveSecret`.
 
 ## Using the CLI directly
 With `ROBLOX_API_KEY` exported, the `baseplate` CLI uses the real provider
