@@ -5,7 +5,7 @@ Roblox resources declaratively via Open Cloud: `baseplate plan/apply/destroy` ov
 config, backed by a state file. A maintained, Go-native successor to Mantle. Module:
 `github.com/outpostgroup/baseplate`.
 
-## Status (2026-07-05)
+## Status (2026-07-10)
 - **Phase 0 COMPLETE (on main):** provider-agnostic engine — HCL config → dependency graph →
   deterministic plan → apply/destroy → state file (serial/lineage, flock locking). Proven
   against an in-memory mock provider.
@@ -41,6 +41,15 @@ config, backed by a state file. A maintained, Go-native successor to Mantle. Mod
   call sites untouched); `config.Load` now returns `[]plan.ImportBlock`; `Change.ImportID` +
   `render`. Errors on not-declared / not-found / duplicate. Live import-block adopt+converge
   verified. See `docs/superpowers/specs/2026-07-05-baseplate-phase2-import-block-design.md`.
+- **Phase 2 slice 5 COMPLETE (`roblox_universe_secret`), hermetic (live pending):** first
+  resource with a full CRUD lifecycle incl. a **real hard-delete**. Plaintext `value` is
+  `env()`-sourced, sealed client-side with a LibSodium sealed box
+  (`golang.org/x/crypto/nacl/box.SealAnonymous`, pure Go), and NEVER persisted to state
+  (provider returns attrs sans `value`) or rendered in plan output (new `provider.Sensitive`
+  engine capability redacts it in text + JSON + import previews). Value-change detection via a
+  `value_hash` trigger (reuses `Triggerable`); `domain` is the one normal diffable attr. No
+  single-GET → `Read` = list-and-find; PATCH has no updateMask. New `opencloud.SecretClient`.
+  See `docs/superpowers/specs/2026-07-10-baseplate-phase2-universe-secret-design.md`.
 - Next: **Phase 2** remaining slices (see Roadmap below).
 
 Read `docs/superpowers/specs/2026-07-03-baseplate-phase1-roblox-provider-design.md` for the
@@ -126,6 +135,13 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
   minimal `<roblox version="4"></roblox>` .rbxlx is accepted (verified live). Can't unpublish →
   `roblox_place` destroy is a no-op. Change detection uses the engine's Triggers capability
   (content_hash of the file), since content isn't remotely readable.
+- Universe secrets (`/cloud/v2/universes/{id}/secrets`, base `https://apis.roblox.com`): values
+  must be **LibSodium sealed-box + base64** encrypted with the universe public key from
+  `GET .../secrets/public-key` (returns the key in the `secret` field + `key_id`). No single-GET
+  (list-and-find via `GET .../secrets`, cursor-paginated); PATCH has **no updateMask**. Requires
+  the **`universe.secret:read`/`universe.secret:write`** scopes (distinct from `universe:write`).
+  Real **DELETE** exists (hard delete). Wire fields are snake_case (`id`, `secret`, `key_id`,
+  `domain`, `create_time`, `update_time`); `domain` empty/null = private key, `*` = all domains.
 
 ## Roadmap & tracked deferrals (from the review loops)
 **Phase 2 — coverage + robustness:**
@@ -141,10 +157,15 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
 - **DONE (slice 4):** declarative `import {}` block — `plan.ResolveImports` post-pass + one-pass
   adopt+reconcile apply. Proven live. Follow-up: config generation (`-generate-config-out`
   equivalent) as its own slice.
+- **DONE (slice 5):** `roblox_universe_secret` — full CRUD incl. real hard-delete; client-side
+  LibSodium sealed box; no-plaintext-in-state (`value_hash` trigger + new `provider.Sensitive`
+  render redaction). NOTE: **subscription-products has NO Open Cloud write surface** (read-only
+  per-user GET only; products are Creator-Dashboard-managed only), so the roadmap's
+  `subscription-products` monetization resource is not implementable — secrets was chosen
+  instead.
 - More resources: game passes, badges, thumbnails/icons, social links, notifications, localization
   (NOTE: game-passes/badges are LEGACY-API-only — no `/cloud/v2` writable surface; create-via-Open-
-  Cloud is uncertain. Subscriptions (`/cloud/v2/universes/{id}/subscription-products`) are the one
-  clean modern monetization resource).
+  Cloud is uncertain).
 - Richer env overlays; config modules.
 - **NEW deferrals (from slice-1 review):**
   - `stateResource` (apply.go) silently drops an attribute on a `ctyjson.Marshal` error
