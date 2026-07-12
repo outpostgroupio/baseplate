@@ -1,0 +1,94 @@
+// Package configgen writes HCL resource blocks generated from an existing
+// resource's read-back attributes (for `baseplate plan --generate-config`).
+package configgen
+
+import (
+	"fmt"
+	"sort"
+
+	"github.com/hashicorp/hcl/v2/hcldec"
+	"github.com/hashicorp/hcl/v2/hclsyntax"
+	"github.com/hashicorp/hcl/v2/hclwrite"
+	"github.com/zclconf/go-cty/cty"
+
+	"github.com/outpostgroup/baseplate/internal/provider"
+)
+
+// Generate builds an HCL `resource "<type>" "<name>"` block for an adopted
+// resource. actual is the resource's Read(id) result. Attributes are sourced
+// from actual; a required attribute that isn't readable becomes a placeholder
+// with a `# TODO` comment; an optional unreadable attribute is omitted; a
+// sensitive attribute is always a placeholder (its value is never emitted).
+func Generate(res provider.Resource, name, id string, actual provider.Attributes) (*hclwrite.Block, error) {
+	spec, ok := res.DecodeSpec().(hcldec.ObjectSpec)
+	if !ok {
+		return nil, fmt.Errorf("configgen: resource %q has a non-object schema", res.Type())
+	}
+	sensitive := sensitiveSet(res)
+
+	block := hclwrite.NewBlock("resource", []string{res.Type(), name})
+	body := block.Body()
+
+	for _, k := range sortedKeys(spec) {
+		as, ok := spec[k].(*hcldec.AttrSpec)
+		if !ok {
+			continue
+		}
+		v, present := actual[k]
+		if sensitive[k] {
+			present = false // never emit a sensitive value
+		}
+		if present && v.IsKnown() && !v.IsNull() {
+			body.SetAttributeValue(k, v)
+			continue
+		}
+		if as.Required {
+			msg := fmt.Sprintf("TODO: %s is required but not readable from the API — set before apply", k)
+			if sensitive[k] {
+				msg += `, e.g. env("...")`
+			}
+			body.AppendUnstructuredTokens(commentLine(msg))
+			body.SetAttributeValue(k, zeroValue(as.Type))
+		}
+		// optional + unreadable → omit
+	}
+	return block, nil
+}
+
+func sensitiveSet(res provider.Resource) map[string]bool {
+	m := map[string]bool{}
+	if s, ok := res.(provider.Sensitive); ok {
+		for _, k := range s.Sensitive() {
+			m[k] = true
+		}
+	}
+	return m
+}
+
+func sortedKeys(spec hcldec.ObjectSpec) []string {
+	keys := make([]string, 0, len(spec))
+	for k := range spec {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func zeroValue(t cty.Type) cty.Value {
+	switch t {
+	case cty.Number:
+		return cty.NumberIntVal(0)
+	case cty.Bool:
+		return cty.False
+	default:
+		return cty.StringVal("")
+	}
+}
+
+// commentLine builds a single `# <text>` comment line as unstructured tokens.
+func commentLine(text string) hclwrite.Tokens {
+	return hclwrite.Tokens{{
+		Type:  hclsyntax.TokenComment,
+		Bytes: []byte("# " + text + "\n"),
+	}}
+}
