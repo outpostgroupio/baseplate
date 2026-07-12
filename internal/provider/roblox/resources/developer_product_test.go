@@ -83,3 +83,16 @@ func TestDeveloperProductReadMapsNotFound(t *testing.T) {
 		t.Fatalf("want provider.ErrNotFound, got %v", err)
 	}
 }
+
+func TestDeveloperProductReadIncludesUniverseID(t *testing.T) {
+	f := &fakeProduct{store: map[string]opencloud.DeveloperProduct{
+		"777": {ID: "777", Name: "Gems", PriceInRobux: 25, IsForSale: true},
+	}}
+	attrs, err := DeveloperProduct(f).Read(context.Background(), "42/777")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := attrs["universe_id"]; !ok || v.AsString() != "42" {
+		t.Fatalf("Read must include universe_id from the id; got %+v", attrs)
+	}
+}

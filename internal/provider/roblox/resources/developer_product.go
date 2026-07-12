@@ -85,6 +85,7 @@ func (d *developerProduct) Read(ctx context.Context, id string) (provider.Attrib
 		return nil, err
 	}
 	return provider.Attributes{
+		"universe_id": cty.StringVal(uid),
 		"name":        cty.StringVal(got.Name),
 		"price":       cty.NumberIntVal(got.PriceInRobux),
 		"description": cty.StringVal(got.Description),
