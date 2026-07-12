@@ -112,8 +112,8 @@ Phase 1 design + rationale, and `docs/superpowers/plans/` for the executed task-
   `.bp.hcl` → plan/apply/converge/destroy); `docs/cli-reference.md` (commands, flags, exit codes);
   `docs/resource-reference.md` (per-resource attributes — hand-authored, to be replaced by the
   autodocs slice below).
-- **REMAINING — how-to guides:** managing secrets, importing existing resources (classic + `import {}`),
-  references + `env()`, live vs mock provider, API-key scopes per resource.
+- **DONE — how-to guides** (`docs/how-to/`): importing existing resources (classic + `import {}`),
+  managing secrets, references + `env()`, API-key scopes per resource.
 - **REMAINING — annotated examples:** grow `examples/` into a walk-through set.
 - **PLANNED SLICE — autodocs generator (`resource-docs`):** a Go generator (à la Terraform
   `tfplugindocs`) that walks `provider.Resources()`, introspects each resource's `DecodeSpec()` +

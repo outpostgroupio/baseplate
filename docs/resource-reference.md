@@ -34,7 +34,7 @@ Hub first); it does not create universes.
 
 `displayName` / `description` / `visibility` / `ageRating` are **read-only** on the Open Cloud v2
 API (they're set via the root place), so they are not manageable here. `destroy` unmanages the
-universe (it is never deleted).
+universe (it is never deleted). Requires the `universe:write` [scope](how-to/api-key-scopes.md).
 
 ```hcl
 resource "roblox_experience" "main" {
@@ -86,7 +86,8 @@ Uploads a user- or group-owned image/decal asset.
 | `creator_group_id` | number | optional, create-only | … or owning group id (set one). |
 
 The `id` output is the `assetId` (a numeric string). Image/decal assets are **not archivable**, so
-`destroy` unmanages the asset in place (drops it from state, leaves it uploaded).
+`destroy` unmanages the asset in place (drops it from state, leaves it uploaded). Requires the
+`asset:read` and `asset:write` [scopes](how-to/api-key-scopes.md).
 
 ```hcl
 resource "roblox_asset" "gem_icon" {
@@ -113,6 +114,8 @@ Manages a developer product (an in-experience consumable purchase).
 | `is_for_sale` | bool | optional, diffable | On sale (default `true`). |
 
 Developer products can't be hard-deleted, so `destroy` sets `is_for_sale = false` and unmanages it.
+Requires the `developer-product:read` and `developer-product:write`
+[scopes](how-to/api-key-scopes.md).
 
 ```hcl
 resource "roblox_developer_product" "gems_100" {
