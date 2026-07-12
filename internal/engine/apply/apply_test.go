@@ -25,7 +25,7 @@ func TestApplyCreatesAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.tfstate"))
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.bpstate"))
 	if err := Apply(context.Background(), p, b, s, pl); err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestApplyThenReplanConverges(t *testing.T) {
 		t.Fatal("first plan should have changes")
 	}
 
-	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.tfstate"))
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.bpstate"))
 	if err := Apply(ctx, p, b, s, first); err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestApplyThenDestroyDeletesDependentFirst(t *testing.T) {
 	ctx := context.Background()
 	p := mock.New()
 	s := state.New()
-	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.tfstate"))
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.bpstate"))
 
 	// child "a" depends on parent "z"; note "mock_child.a" < "mock_thing.z" lexically.
 	desired := []plan.DesiredResource{
@@ -119,7 +119,7 @@ func TestApplyResolvesReferenceFromDependencyOutput(t *testing.T) {
 	ctx := context.Background()
 	p := mock.New()
 	s := state.New()
-	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.tfstate"))
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.bpstate"))
 
 	desired := []plan.DesiredResource{
 		{Type: "mock_thing", Name: "a", Attributes: provider.Attributes{"name": cty.StringVal("root")}},
@@ -158,7 +158,7 @@ func TestApplyThenReplanConvergesWithReference(t *testing.T) {
 	ctx := context.Background()
 	p := mock.New()
 	s := state.New()
-	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.tfstate"))
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.bpstate"))
 
 	desired := []plan.DesiredResource{
 		{Type: "mock_thing", Name: "a", Attributes: provider.Attributes{"name": cty.StringVal("root")}},
@@ -198,7 +198,7 @@ func TestReplanReconstructsCollectionReference(t *testing.T) {
 	ctx := context.Background()
 	p := mock.New()
 	s := state.New()
-	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.tfstate"))
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.bpstate"))
 
 	tags := cty.ListVal([]cty.Value{cty.StringVal("x"), cty.StringVal("y")})
 	desired := []plan.DesiredResource{
@@ -258,7 +258,7 @@ func TestTriggerChangeForcesUpdateAndConverges(t *testing.T) {
 	ctx := context.Background()
 	p := mock.New()
 	s := state.New()
-	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.tfstate"))
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.bpstate"))
 
 	rev1 := []plan.DesiredResource{
 		{Type: "mock_trigger", Name: "a", Attributes: provider.Attributes{
@@ -304,7 +304,7 @@ func TestApplyDeleteRemovesResourceAndState(t *testing.T) {
 	ctx := context.Background()
 	p := mock.New()
 	s := state.New()
-	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.tfstate"))
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.bpstate"))
 
 	desired := []plan.DesiredResource{
 		{Type: "mock_thing", Name: "a", Attributes: provider.Attributes{"name": cty.StringVal("root")}},
@@ -339,7 +339,7 @@ func TestImportAdoptsExistingResourceAndConverges(t *testing.T) {
 	p := mock.New()
 	p.Seed("mock_thing/7", provider.Attributes{"name": cty.StringVal("adopted")})
 	s := state.New()
-	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.tfstate"))
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.bpstate"))
 
 	desired := []plan.DesiredResource{
 		{Type: "mock_thing", Name: "a", Attributes: provider.Attributes{"name": cty.StringVal("adopted")}},
@@ -365,7 +365,7 @@ func TestImportRecordsTriggersAndConverges(t *testing.T) {
 	p := mock.New()
 	p.Seed("t1", provider.Attributes{"name": cty.StringVal("x"), "rev": cty.StringVal("v1")})
 	s := state.New()
-	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.tfstate"))
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.bpstate"))
 
 	desired := []plan.DesiredResource{
 		{Type: "mock_trigger", Name: "a", Attributes: provider.Attributes{
@@ -390,7 +390,7 @@ func TestImportRecordsTriggersAndConverges(t *testing.T) {
 func TestImportErrorsWhenNotDeclared(t *testing.T) {
 	p := mock.New()
 	s := state.New()
-	b := backend.NewLocal(filepath.Join(t.TempDir(), "s.tfstate"))
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "s.bpstate"))
 	err := Import(context.Background(), p, b, s, "mock_thing.ghost", "x", nil)
 	if err == nil || !strings.Contains(err.Error(), "not declared") {
 		t.Fatalf("want a not-declared error, got %v", err)
@@ -403,7 +403,7 @@ func TestImportErrorsWhenAlreadyInState(t *testing.T) {
 	p.Seed("id1", provider.Attributes{"name": cty.StringVal("x")})
 	s := state.New()
 	s.Upsert(state.Resource{Type: "mock_thing", Name: "a", ID: "id1"})
-	b := backend.NewLocal(filepath.Join(t.TempDir(), "s.tfstate"))
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "s.bpstate"))
 	desired := []plan.DesiredResource{
 		{Type: "mock_thing", Name: "a", Attributes: provider.Attributes{"name": cty.StringVal("x")}},
 	}
@@ -417,7 +417,7 @@ func TestImportErrorsWhenRemoteNotFound(t *testing.T) {
 	ctx := context.Background()
 	p := mock.New() // empty store → Read returns provider.ErrNotFound
 	s := state.New()
-	b := backend.NewLocal(filepath.Join(t.TempDir(), "s.tfstate"))
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "s.bpstate"))
 	desired := []plan.DesiredResource{
 		{Type: "mock_thing", Name: "a", Attributes: provider.Attributes{"name": cty.StringVal("x")}},
 	}
@@ -432,7 +432,7 @@ func TestApplyImportBlockAdoptsAndReconciles(t *testing.T) {
 	p := mock.New()
 	p.Seed("mock_thing/7", provider.Attributes{"name": cty.StringVal("old")})
 	s := state.New()
-	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.tfstate"))
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.bpstate"))
 
 	desired := []plan.DesiredResource{
 		{Type: "mock_thing", Name: "a", Attributes: provider.Attributes{"name": cty.StringVal("new")}},
@@ -470,7 +470,7 @@ func TestApplyImportBlockTriggerableAdoptsCleanly(t *testing.T) {
 	p := mock.New()
 	p.Seed("t1", provider.Attributes{"name": cty.StringVal("x"), "rev": cty.StringVal("v1")})
 	s := state.New()
-	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.tfstate"))
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "baseplate.bpstate"))
 
 	desired := []plan.DesiredResource{
 		{Type: "mock_trigger", Name: "a", Attributes: provider.Attributes{

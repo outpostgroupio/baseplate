@@ -40,7 +40,7 @@ func TestLiveSecretLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	b := backend.NewLocal(filepath.Join(t.TempDir(), "live-secret.tfstate"))
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "live-secret.bpstate"))
 	s := state.New()
 
 	name := fmt.Sprintf("bp_test_%d", time.Now().Unix())

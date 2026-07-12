@@ -1,6 +1,6 @@
 /.superpowers/
-*.tfstate
-*.tfstate.lock
+*.bpstate
+*.bpstate.lock
 /baseplate
 /tmp/
 

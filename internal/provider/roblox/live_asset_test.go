@@ -72,7 +72,7 @@ func TestLiveAssetLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	b := backend.NewLocal(filepath.Join(t.TempDir(), "live-asset.tfstate"))
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "live-asset.bpstate"))
 	s := state.New()
 
 	pngPath := filepath.Join(t.TempDir(), "baseplate-live.png")

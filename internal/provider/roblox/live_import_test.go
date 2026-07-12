@@ -39,7 +39,7 @@ func TestLiveImportExperience(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	b := backend.NewLocal(filepath.Join(t.TempDir(), "live-import.tfstate"))
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "live-import.bpstate"))
 	s := state.New()
 
 	// Declare only universe_id — experience.Read echoes it, so the diff compares

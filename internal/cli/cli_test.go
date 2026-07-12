@@ -24,7 +24,7 @@ func TestImportRunWritesStateAndReports(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "baseplate.bp.hcl")
 	os.WriteFile(cfg, []byte("resource \"mock_thing\" \"a\" {\n  name = \"root\"\n}\n"), 0o644)
-	statePath := filepath.Join(dir, "s.tfstate")
+	statePath := filepath.Join(dir, "s.bpstate")
 
 	p := mock.New()
 	p.Seed("mock_thing/9", provider.Attributes{"name": cty.StringVal("root")})
@@ -55,7 +55,7 @@ resource "mock_thing" "a" {
 `), 0o644)
 
 	var out bytes.Buffer
-	code := run([]string{"plan", "--config", cfg, "--state", filepath.Join(dir, "s.tfstate")}, &out)
+	code := run([]string{"plan", "--config", cfg, "--state", filepath.Join(dir, "s.bpstate")}, &out)
 	if code != 2 {
 		t.Fatalf("expected exit 2 (changes present), got %d\n%s", code, out.String())
 	}
@@ -85,7 +85,7 @@ func TestImportErrorsWhenAddressNotInConfig(t *testing.T) {
 
 	var out bytes.Buffer
 	code := run([]string{"import", "mock_thing.ghost", "someid",
-		"--config", cfg, "--state", filepath.Join(dir, "s.tfstate")}, &out)
+		"--config", cfg, "--state", filepath.Join(dir, "s.bpstate")}, &out)
 	if code != 1 {
 		t.Fatalf("expected exit 1 for an undeclared address, got %d\n%s", code, out.String())
 	}
@@ -99,7 +99,7 @@ func TestImportErrorsWhenRemoteNotFound(t *testing.T) {
 	// No ROBLOX_API_KEY → the mock provider with an empty store → Read → ErrNotFound.
 	var out bytes.Buffer
 	code := run([]string{"import", "mock_thing.a", "missing",
-		"--config", cfg, "--state", filepath.Join(dir, "s.tfstate")}, &out)
+		"--config", cfg, "--state", filepath.Join(dir, "s.bpstate")}, &out)
 	if code != 1 {
 		t.Fatalf("expected exit 1 for a not-found remote, got %d\n%s", code, out.String())
 	}
@@ -112,7 +112,7 @@ func TestPlanWithImportBlockNotFoundExits1(t *testing.T) {
 
 	var out bytes.Buffer
 	// The import target isn't in the (empty) mock store → ResolveImports Read → not found → exit 1.
-	code := run([]string{"plan", "--config", cfg, "--state", filepath.Join(dir, "s.tfstate")}, &out)
+	code := run([]string{"plan", "--config", cfg, "--state", filepath.Join(dir, "s.bpstate")}, &out)
 	if code != 1 {
 		t.Fatalf("expected exit 1 (import id not found), got %d\n%s", code, out.String())
 	}
@@ -125,7 +125,7 @@ func TestImportRequiresTwoArgs(t *testing.T) {
 
 	var out bytes.Buffer
 	code := run([]string{"import", "mock_thing.a", "--config", cfg,
-		"--state", filepath.Join(dir, "s.tfstate")}, &out)
+		"--state", filepath.Join(dir, "s.bpstate")}, &out)
 	if code != 1 {
 		t.Fatalf("expected exit 1 when id arg is missing, got %d\n%s", code, out.String())
 	}
