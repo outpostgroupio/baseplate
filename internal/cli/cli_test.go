@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -128,5 +129,46 @@ func TestImportRequiresTwoArgs(t *testing.T) {
 		"--state", filepath.Join(dir, "s.bpstate")}, &out)
 	if code != 1 {
 		t.Fatalf("expected exit 1 when id arg is missing, got %d\n%s", code, out.String())
+	}
+}
+
+func TestGenerateConfigWritesFileForUndeclaredImport(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "gen.bp.hcl")
+	p := mock.New()
+	p.Seed("mock_thing/9", provider.Attributes{"name": cty.StringVal("root")})
+
+	imports := []plan.ImportBlock{{Address: "mock_thing.a", ID: "mock_thing/9"}}
+	declared := map[string]bool{} // mock_thing.a is NOT declared → generate it
+
+	var outbuf bytes.Buffer
+	if err := generateConfig(context.Background(), p, imports, declared, out, &outbuf); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `resource "mock_thing" "a"`) || !strings.Contains(string(data), `name = "root"`) {
+		t.Fatalf("generated file wrong:\n%s", data)
+	}
+	if !strings.Contains(outbuf.String(), "Generated configuration for 1 resource(s)") {
+		t.Fatalf("missing report line: %q", outbuf.String())
+	}
+}
+
+func TestGenerateConfigSkipsDeclaredImports(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "gen.bp.hcl")
+	p := mock.New()
+	imports := []plan.ImportBlock{{Address: "mock_thing.a", ID: "mock_thing/9"}}
+	declared := map[string]bool{"mock_thing.a": true} // declared → not generated
+
+	var outbuf bytes.Buffer
+	if err := generateConfig(context.Background(), p, imports, declared, out, &outbuf); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(out); !os.IsNotExist(err) {
+		t.Fatalf("no file should be written when every import is declared")
 	}
 }

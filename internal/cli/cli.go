@@ -2,13 +2,17 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
+	"github.com/hashicorp/hcl/v2/hclwrite"
 	"github.com/spf13/cobra"
 
 	"github.com/outpostgroup/baseplate/internal/config"
+	"github.com/outpostgroup/baseplate/internal/config/configgen"
 	"github.com/outpostgroup/baseplate/internal/engine/apply"
 	"github.com/outpostgroup/baseplate/internal/engine/plan"
 	"github.com/outpostgroup/baseplate/internal/provider"
@@ -33,6 +37,7 @@ func Execute() { os.Exit(run(os.Args[1:], os.Stdout)) }
 func run(args []string, stdout io.Writer) int {
 	var cfgPath, statePath, target string
 	var jsonOut bool
+	var generateConfigOut string
 
 	root := &cobra.Command{Use: "baseplate", SilenceUsage: true, SilenceErrors: true}
 	root.PersistentFlags().StringVar(&cfgPath, "config", "baseplate.bp.hcl", "config file")
@@ -61,7 +66,7 @@ func run(args []string, stdout io.Writer) int {
 		return nil
 	}})
 
-	root.AddCommand(&cobra.Command{Use: "plan", RunE: func(_ *cobra.Command, _ []string) error {
+	planCmd := &cobra.Command{Use: "plan", RunE: func(_ *cobra.Command, _ []string) error {
 		desired, imports, err := load()
 		if err != nil {
 			return err
@@ -71,12 +76,25 @@ func run(args []string, stdout io.Writer) int {
 		if err != nil {
 			return err
 		}
+		declared := map[string]bool{}
+		for _, d := range desired {
+			declared[d.Address()] = true
+		}
+		toResolve := imports
+		if generateConfigOut != "" {
+			toResolve = declaredImports(imports, declared)
+		}
 		pl, err := plan.Build(context.Background(), p, s, desired)
 		if err != nil {
 			return err
 		}
-		if err := plan.ResolveImports(context.Background(), p, s, pl, imports); err != nil {
+		if err := plan.ResolveImports(context.Background(), p, s, pl, toResolve); err != nil {
 			return err
+		}
+		if generateConfigOut != "" {
+			if err := generateConfig(context.Background(), p, imports, declared, generateConfigOut, stdout); err != nil {
+				return err
+			}
 		}
 		filterPlanByTarget(pl, target)
 		if jsonOut {
@@ -89,7 +107,9 @@ func run(args []string, stdout io.Writer) int {
 			exit = 2
 		}
 		return nil
-	}})
+	}}
+	planCmd.Flags().StringVar(&generateConfigOut, "generate-config", "", "write generated HCL for undeclared import blocks to this file")
+	root.AddCommand(planCmd)
 
 	root.AddCommand(&cobra.Command{Use: "apply", RunE: func(_ *cobra.Command, _ []string) error {
 		return applyRun(p, cfgPath, statePath, target, false, stdout)
@@ -185,4 +205,62 @@ func filterPlanByTarget(pl *plan.Plan, target string) {
 		}
 	}
 	pl.Changes = out
+}
+
+// declaredImports filters imports down to those whose address has a matching
+// resource block, so --generate-config can route the rest to generateConfig
+// instead of letting ResolveImports reject them as not declared.
+func declaredImports(imports []plan.ImportBlock, declared map[string]bool) []plan.ImportBlock {
+	var out []plan.ImportBlock
+	for _, imp := range imports {
+		if declared[imp.Address] {
+			out = append(out, imp)
+		}
+	}
+	return out
+}
+
+// generateConfig writes HCL for each import whose address is NOT declared as a
+// resource, by reading the live resource and emitting a resource block. It never
+// touches state.
+func generateConfig(ctx context.Context, p provider.Provider, imports []plan.ImportBlock, declared map[string]bool, outPath string, stdout io.Writer) error {
+	resources := p.Resources()
+	var blocks []*hclwrite.Block
+	for _, imp := range imports {
+		if declared[imp.Address] {
+			continue
+		}
+		typ, name := splitAddress(imp.Address)
+		r, ok := resources[typ]
+		if !ok {
+			return fmt.Errorf("generate %s: unknown resource type %q", imp.Address, typ)
+		}
+		actual, err := r.Read(ctx, imp.ID)
+		if err != nil {
+			if errors.Is(err, provider.ErrNotFound) {
+				return fmt.Errorf("generate %s: no %s found with id %q", imp.Address, typ, imp.ID)
+			}
+			return err
+		}
+		block, err := configgen.Generate(r, name, imp.ID, actual)
+		if err != nil {
+			return err
+		}
+		blocks = append(blocks, block)
+	}
+	if len(blocks) == 0 {
+		return nil
+	}
+	if err := configgen.WriteFile(outPath, blocks); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "Generated configuration for %d resource(s) → %s\n", len(blocks), outPath)
+	return nil
+}
+
+func splitAddress(addr string) (typ, name string) {
+	if i := strings.IndexByte(addr, '.'); i >= 0 {
+		return addr[:i], addr[i+1:]
+	}
+	return addr, ""
 }

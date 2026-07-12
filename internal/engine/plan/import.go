@@ -36,7 +36,7 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 		seen[imp.Address] = true
 		i, ok := idx[imp.Address]
 		if !ok {
-			return fmt.Errorf("import target %q is not declared as a resource", imp.Address)
+			return fmt.Errorf("import target %q is not declared as a resource (add a resource block, or run plan --generate-config=FILE to generate one)", imp.Address)
 		}
 		c := &pl.Changes[i]
 		if c.Action != provider.ActionCreate {
