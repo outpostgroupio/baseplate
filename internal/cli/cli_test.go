@@ -172,3 +172,19 @@ func TestGenerateConfigSkipsDeclaredImports(t *testing.T) {
 		t.Fatalf("no file should be written when every import is declared")
 	}
 }
+
+func TestGenerateConfigRejectsDuplicateUndeclaredImports(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "gen.bp.hcl")
+	p := mock.New()
+	p.Seed("mock_thing/9", provider.Attributes{"name": cty.StringVal("root")})
+	imports := []plan.ImportBlock{
+		{Address: "mock_thing.a", ID: "mock_thing/9"},
+		{Address: "mock_thing.a", ID: "mock_thing/9"},
+	}
+	var outbuf bytes.Buffer
+	err := generateConfig(context.Background(), p, imports, map[string]bool{}, out, &outbuf)
+	if err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("expected a duplicate error, got %v", err)
+	}
+}
