@@ -1,0 +1,66 @@
+# How-to: API key scopes
+
+Every resource Baseplate manages maps to an Open Cloud API surface, and each surface requires
+specific **scopes** on your API key. This guide lists what each resource needs and how to avoid the
+common pitfalls.
+
+## Scopes per resource
+
+Grant the scopes for the resources you actually manage. Reads happen during `plan`/refresh, writes
+during `apply`/`destroy`, so grant both sides.
+
+| Resource | Scopes |
+|---|---|
+| `roblox_experience` | `universe:write` |
+| `roblox_place` | `universe-places:write` |
+| `roblox_asset` | `asset:read`, `asset:write` |
+| `roblox_developer_product` | `developer-product:read`, `developer-product:write` |
+| `roblox_universe_secret` | `universe.secret:read`, `universe.secret:write` |
+
+A few are easy to miss because they don't match the "obvious" name:
+
+- **`universe-places:write`** for `roblox_place` is distinct from `universe:write` and from
+  `universe.place:write`. Using the wrong one gives `401 … insufficient scope`.
+- **`universe.secret:read` / `universe.secret:write`** are separate from `universe:write` — a key
+  that can edit universe config still can't touch secrets without them.
+
+## Scopes are per-universe — and you must save
+
+The single most common failure isn't the scope itself, it's **the universe binding**. On the
+[Creator Dashboard → Credentials](https://create.roblox.com/dashboard/credentials) page, an API
+key's scopes are granted **per universe**:
+
+1. Add the target universe to the key.
+2. Tick the scopes above **for that universe**.
+3. **Save** the key.
+
+If the scope is ticked but the specific universe isn't selected (or you forgot to save), calls fail
+with:
+
+```
+403  Authorization scope does not allow this operation
+```
+
+A scope that's missing entirely (not just unbound) typically shows as:
+
+```
+401  … insufficient scope
+```
+
+## Where the key comes from
+
+Baseplate reads the key from the environment via `env()` in your config:
+
+```hcl
+provider "roblox" {
+  api_key = env("ROBLOX_API_KEY")
+}
+```
+
+Export it in your shell, or keep it in a gitignored `.env.local` and source it. Never commit an API
+key.
+
+## See also
+
+- [Getting started](../getting-started.md#3-api-keys--scopes)
+- [Resource reference](../resource-reference.md)
