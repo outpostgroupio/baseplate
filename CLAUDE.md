@@ -41,7 +41,7 @@ config, backed by a state file. A maintained, Go-native successor to Mantle. Mod
   call sites untouched); `config.Load` now returns `[]plan.ImportBlock`; `Change.ImportID` +
   `render`. Errors on not-declared / not-found / duplicate. Live import-block adopt+converge
   verified. See `docs/superpowers/specs/2026-07-05-baseplate-phase2-import-block-design.md`.
-- **Phase 2 slice 5 COMPLETE (`roblox_universe_secret`), hermetic (live pending):** first
+- **Phase 2 slice 5 COMPLETE (`roblox_universe_secret`), proven live:** first
   resource with a full CRUD lifecycle incl. a **real hard-delete**. Plaintext `value` is
   `env()`-sourced, sealed client-side with a LibSodium sealed box
   (`golang.org/x/crypto/nacl/box.SealAnonymous`, pure Go), and NEVER persisted to state
@@ -49,7 +49,11 @@ config, backed by a state file. A maintained, Go-native successor to Mantle. Mod
   engine capability redacts it in text + JSON + import previews). Value-change detection via a
   `value_hash` trigger (reuses `Triggerable`); `domain` is the one normal diffable attr. No
   single-GET → `Read` = list-and-find; PATCH has no updateMask. New `opencloud.SecretClient`.
-  See `docs/superpowers/specs/2026-07-10-baseplate-phase2-universe-secret-design.md`.
+  Live lifecycle verified (create→converge→rotate value+domain→converge→destroy→verified gone).
+  Live-discovered + fixed: the secrets list endpoint **always returns a non-empty
+  `nextPageCursor`** (even on the empty final page), so `List` must terminate on an **empty
+  page**, not an empty cursor — the naive cursor loop paginated forever and tripped the 120/min
+  rate limit (429). See `docs/superpowers/specs/2026-07-10-baseplate-phase2-universe-secret-design.md`.
 - Next: **Phase 2** remaining slices (see Roadmap below).
 
 Read `docs/superpowers/specs/2026-07-03-baseplate-phase1-roblox-provider-design.md` for the
@@ -142,6 +146,9 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
   the **`universe.secret:read`/`universe.secret:write`** scopes (distinct from `universe:write`).
   Real **DELETE** exists (hard delete). Wire fields are snake_case (`id`, `secret`, `key_id`,
   `domain`, `create_time`, `update_time`); `domain` empty/null = private key, `*` = all domains.
+  **Pagination gotcha (verified live):** the list endpoint **always** returns a non-empty
+  `nextPageCursor` — even on the empty final page — so paginate until an **empty `secrets` page**,
+  not an empty cursor (a cursor-only loop never terminates and burns the 120-req/min limit → 429).
 
 ## Roadmap & tracked deferrals (from the review loops)
 **Phase 2 — coverage + robustness:**
