@@ -114,3 +114,37 @@ func TestSecretClientDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestSecretClientListTerminatesOnEmptyPage guards against an infinite pagination
+// loop: the real Roblox secrets endpoint ALWAYS returns a non-empty nextPageCursor,
+// even on the final (empty) page, so List must terminate on an empty page rather
+// than following the cursor forever. The handler returns 500 on any 3rd+ request,
+// so a non-terminating loop fails with an error instead of hanging.
+func TestSecretClientListTerminatesOnEmptyPage(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/cloud/v2/universes/100/secrets" {
+			http.Error(w, "unexpected "+r.Method+" "+r.URL.Path, 404)
+			return
+		}
+		calls++
+		switch r.URL.Query().Get("cursor") {
+		case "":
+			_, _ = io.WriteString(w, `{"secrets":[{"id":"aws","domain":"*"}],"nextPageCursor":"c1"}`)
+		case "c1":
+			// Final page: no items, but the cursor is STILL non-empty (real API behavior).
+			_, _ = io.WriteString(w, `{"secrets":[],"nextPageCursor":"c2"}`)
+		default:
+			http.Error(w, "would loop forever", 500)
+		}
+	}))
+	defer srv.Close()
+	sc := NewSecretClient(New("k", srv.URL, WithSleeper(func(time.Duration) {})))
+	got, err := sc.List(context.Background(), "100")
+	if err != nil {
+		t.Fatalf("List did not terminate on the empty page: %v (calls=%d)", err, calls)
+	}
+	if len(got) != 1 || got[0].Name != "aws" {
+		t.Fatalf("list = %+v", got)
+	}
+}

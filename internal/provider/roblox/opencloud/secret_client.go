@@ -85,7 +85,11 @@ func (sc *secretClient) List(ctx context.Context, universeID string) ([]Secret, 
 		for _, s := range w.Secrets {
 			out = append(out, s.toDomain())
 		}
-		if w.NextPageCursor == "" {
+		// The secrets endpoint returns a non-empty nextPageCursor even on the final
+		// (empty) page, so an empty page — not an empty cursor — is the real
+		// end-of-list signal. Also stop if the cursor fails to advance, as a guard
+		// against a pathological non-terminating response.
+		if w.NextPageCursor == "" || len(w.Secrets) == 0 || w.NextPageCursor == cursor {
 			return out, nil
 		}
 		cursor = w.NextPageCursor
