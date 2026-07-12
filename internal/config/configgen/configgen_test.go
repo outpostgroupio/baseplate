@@ -1,0 +1,117 @@
+package configgen
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/hashicorp/hcl/v2/hcldec"
+	"github.com/hashicorp/hcl/v2/hclwrite"
+	"github.com/zclconf/go-cty/cty"
+
+	"github.com/outpostgroup/baseplate/internal/provider"
+)
+
+// fakeRes is a minimal provider.Resource for exercising the emitter.
+type fakeRes struct {
+	typ       string
+	spec      hcldec.ObjectSpec
+	sensitive []string
+}
+
+func (f fakeRes) Type() string                                          { return f.typ }
+func (f fakeRes) DecodeSpec() hcldec.Spec                                { return f.spec }
+func (f fakeRes) Computed() []string                                     { return nil }
+func (f fakeRes) Sensitive() []string                                    { return f.sensitive }
+func (f fakeRes) Dependencies(provider.Attributes) []provider.Ref        { return nil }
+func (f fakeRes) Create(context.Context, provider.Attributes) (string, provider.Attributes, error) {
+	return "", nil, nil
+}
+func (f fakeRes) Read(context.Context, string) (provider.Attributes, error) { return nil, nil }
+func (f fakeRes) Update(context.Context, string, provider.Attributes) (provider.Attributes, error) {
+	return nil, nil
+}
+func (f fakeRes) Delete(context.Context, string) error { return nil }
+
+func render(t *testing.T, b *hclwrite.Block) string {
+	t.Helper()
+	f := hclwrite.NewEmptyFile()
+	f.Body().AppendBlock(b)
+	return string(f.Bytes())
+}
+
+func strAttr(req bool) *hcldec.AttrSpec { return &hcldec.AttrSpec{Type: cty.String, Required: req} }
+
+func TestGenerateReadableAttributes(t *testing.T) {
+	res := fakeRes{typ: "roblox_thing", spec: hcldec.ObjectSpec{
+		"name":  strAttr(true),
+		"label": strAttr(false),
+	}}
+	b, err := Generate(res, "a", "id-1", provider.Attributes{
+		"name":  cty.StringVal("root"),
+		"label": cty.StringVal("hi"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := render(t, b)
+	if !strings.Contains(out, `resource "roblox_thing" "a"`) {
+		t.Fatalf("missing block header:\n%s", out)
+	}
+	if !strings.Contains(out, `name  = "root"`) && !strings.Contains(out, `name = "root"`) {
+		t.Fatalf("missing name attribute:\n%s", out)
+	}
+	if !strings.Contains(out, `"hi"`) {
+		t.Fatalf("missing label attribute:\n%s", out)
+	}
+}
+
+func TestGenerateRequiredUnreadableIsPlaceholder(t *testing.T) {
+	res := fakeRes{typ: "roblox_thing", spec: hcldec.ObjectSpec{
+		"file": strAttr(true),
+	}}
+	b, err := Generate(res, "a", "id-1", provider.Attributes{}) // file absent
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := render(t, b)
+	if !strings.Contains(out, "# TODO: file is required") {
+		t.Fatalf("missing TODO comment:\n%s", out)
+	}
+	if !strings.Contains(out, `file = ""`) {
+		t.Fatalf("missing placeholder value:\n%s", out)
+	}
+}
+
+func TestGenerateOptionalUnreadableIsOmitted(t *testing.T) {
+	res := fakeRes{typ: "roblox_thing", spec: hcldec.ObjectSpec{
+		"name": strAttr(true),
+		"desc": strAttr(false),
+	}}
+	b, err := Generate(res, "a", "id-1", provider.Attributes{"name": cty.StringVal("x")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := render(t, b)
+	if strings.Contains(out, "desc") {
+		t.Fatalf("optional-unreadable attribute must be omitted:\n%s", out)
+	}
+}
+
+func TestGenerateSensitiveNeverEmitsValue(t *testing.T) {
+	res := fakeRes{typ: "roblox_universe_secret", spec: hcldec.ObjectSpec{
+		"value": strAttr(true),
+	}, sensitive: []string{"value"}}
+	// Even though actual contains the value, it must never be emitted.
+	b, err := Generate(res, "a", "id-1", provider.Attributes{"value": cty.StringVal("hunter2")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := render(t, b)
+	if strings.Contains(out, "hunter2") {
+		t.Fatalf("sensitive value leaked into generated config:\n%s", out)
+	}
+	if !strings.Contains(out, "# TODO") || !strings.Contains(out, "env(") {
+		t.Fatalf("expected a TODO with an env() hint for the sensitive attribute:\n%s", out)
+	}
+}
