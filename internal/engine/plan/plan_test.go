@@ -2,6 +2,7 @@ package plan
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/hcl/v2/hcldec"
@@ -216,6 +217,20 @@ func TestResolveImportsErrors(t *testing.T) {
 	dup := []ImportBlock{{Address: "mock_thing.a", ID: "id1"}, {Address: "mock_thing.a", ID: "id1"}}
 	if err := ResolveImports(ctx, p, s, pl3, dup); err == nil {
 		t.Fatal("want a duplicate-import error")
+	}
+}
+
+func TestResolveImportsUndeclaredErrorHasHint(t *testing.T) {
+	p := mock.New()
+	s := state.New()
+	pl, err := Build(context.Background(), p, s, nil) // no declared resources
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = ResolveImports(context.Background(), p, s, pl,
+		[]ImportBlock{{Address: "mock_thing.a", ID: "mock_thing/9"}})
+	if err == nil || !strings.Contains(err.Error(), "--generate-config") {
+		t.Fatalf("expected a hint about --generate-config, got %v", err)
 	}
 }
 
