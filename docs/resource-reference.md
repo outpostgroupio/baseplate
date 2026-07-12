@@ -1,0 +1,156 @@
+# Resource reference
+
+The resources Baseplate can manage, and their attributes.
+
+> **Note:** this page is hand-authored for now. A [planned slice](../ROADMAP.md) will generate it
+> directly from each resource's schema so it can never drift from the code.
+
+**Legend for the _Kind_ column:**
+
+- **required** / **optional** — whether the attribute must be set in config.
+- **create-only** — set at create; changing it in config does **not** produce an update (it's
+  excluded from the diff). To change it, taint/recreate the resource.
+- **diffable** — a normal managed attribute; a config change plans an update.
+- **sensitive** — redacted from all plan output and never written to state.
+- **trigger** — not diffed directly; a change is detected via a hash/marker and forces an update.
+- **output** — set by the provider (read-only), available for references.
+
+Every resource also has an implicit `id` (Baseplate's state id) — you never set it in config.
+
+---
+
+## `roblox_experience`
+
+Manages a universe's writable configuration. Adopts an **existing** universe (create one in Creator
+Hub first); it does not create universes.
+
+| Attribute | Type | Kind | Notes |
+|---|---|---|---|
+| `universe_id` | string | required | The universe to manage. Its `id` output equals this. |
+| `voice_chat_enabled` | bool | optional, diffable | Enable voice chat. |
+| `desktop_enabled` | bool | optional, diffable | Playable on desktop. |
+| `mobile_enabled` | bool | optional, diffable | Playable on mobile. |
+| `tablet_enabled` | bool | optional, diffable | Playable on tablet. |
+
+`displayName` / `description` / `visibility` / `ageRating` are **read-only** on the Open Cloud v2
+API (they're set via the root place), so they are not manageable here. `destroy` unmanages the
+universe (it is never deleted).
+
+```hcl
+resource "roblox_experience" "main" {
+  universe_id        = "10438196190"
+  voice_chat_enabled = true
+  desktop_enabled    = true
+}
+```
+
+---
+
+## `roblox_place`
+
+Publishes a place file (`.rbxl`/`.rbxlx`) to an **existing** place and re-publishes when the file
+content changes. Requires the **`universe-places:write`** API-key scope.
+
+| Attribute | Type | Kind | Notes |
+|---|---|---|---|
+| `universe_id` | string | required, create-only | The universe the place belongs to. |
+| `place_id` | string | required, create-only | The existing place to publish to. |
+| `file` | string | required, trigger | Path to the `.rbxl`/`.rbxlx`. Change detected via content hash. |
+| `version_type` | string | optional, trigger | `Published` (default) or `Saved`. |
+| `version_number` | number | output | The published version number. |
+
+Place content isn't remotely readable, so change detection is by file content hash. `destroy` is a
+no-op (a place can't be unpublished).
+
+```hcl
+resource "roblox_place" "start" {
+  universe_id = roblox_experience.main.id
+  place_id    = "YOUR_PLACE_ID"
+  file        = "build/start.rbxlx"
+}
+```
+
+---
+
+## `roblox_asset`
+
+Uploads a user- or group-owned image/decal asset.
+
+| Attribute | Type | Kind | Notes |
+|---|---|---|---|
+| `file` | string | required, create-only | Path to the image to upload. |
+| `display_name` | string | required, diffable | Asset name. |
+| `description` | string | required, diffable | Asset description. |
+| `asset_type` | string | optional, diffable | Asset type (e.g. image/decal). |
+| `creator_user_id` | number | optional, create-only | Owning user id … |
+| `creator_group_id` | number | optional, create-only | … or owning group id (set one). |
+
+The `id` output is the `assetId` (a numeric string). Image/decal assets are **not archivable**, so
+`destroy` unmanages the asset in place (drops it from state, leaves it uploaded).
+
+```hcl
+resource "roblox_asset" "gem_icon" {
+  file            = "assets/gem.png"
+  display_name    = "Gem Icon"
+  description     = "Currency icon"
+  creator_user_id = 5822334358
+}
+```
+
+---
+
+## `roblox_developer_product`
+
+Manages a developer product (an in-experience consumable purchase).
+
+| Attribute | Type | Kind | Notes |
+|---|---|---|---|
+| `universe_id` | string | required, create-only | The universe. Often a reference to an experience. |
+| `name` | string | required, diffable | Product name. |
+| `price` | number | required, diffable | Price in Robux. |
+| `description` | string | optional, diffable | Product description. |
+| `icon_file` | string | optional, create-only | Path to an icon image (direct upload). |
+| `is_for_sale` | bool | optional, diffable | On sale (default `true`). |
+
+Developer products can't be hard-deleted, so `destroy` sets `is_for_sale = false` and unmanages it.
+
+```hcl
+resource "roblox_developer_product" "gems_100" {
+  universe_id = roblox_experience.main.id
+  name        = "100 Gems"
+  price       = 25
+  description = "Buy 100 gems"
+}
+```
+
+---
+
+## `roblox_universe_secret`
+
+Manages an Open Cloud **secret** for a universe — the only resource with a full create/update/**real
+delete** lifecycle. The value is encrypted client-side (LibSodium sealed box) before upload and is
+never written to state or printed in a plan. Requires the **`universe.secret:read`** and
+**`universe.secret:write`** scopes.
+
+| Attribute | Type | Kind | Notes |
+|---|---|---|---|
+| `universe_id` | string | required, create-only | The universe. |
+| `name` | string | required, create-only | Secret name (the API id): 1–64 chars, alphanumeric/underscore, not starting with a digit. |
+| `value` | string | required, **sensitive**, trigger | The plaintext. Usually `env("…")`. Sealed client-side; change detected via a hash. |
+| `domain` | string | optional, diffable | HttpService domain wildcard (e.g. `api.example.com`, `*`). Omit for a private key. |
+
+Renaming a secret (`name`) is a recreate, not an in-place rename.
+
+```hcl
+resource "roblox_universe_secret" "discord" {
+  universe_id = roblox_experience.main.id
+  name        = "discord_token"
+  value       = env("DISCORD_TOKEN")
+  domain      = "discord.com"
+}
+```
+
+## See also
+
+- [Getting started](getting-started.md)
+- [CLI reference](cli-reference.md)

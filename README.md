@@ -72,7 +72,7 @@ $ baseplate --help
 ## Quick start
 
 1. Create an [Open Cloud API key](https://create.roblox.com/dashboard/credentials) with the scopes
-   for the resources you'll manage (see [Getting Started](docs/getting-started.md#api-keys--scopes)),
+   for the resources you'll manage (see [Getting Started](docs/getting-started.md#3-api-keys--scopes)),
    and export it:
    ```console
    $ export ROBLOX_API_KEY="…"
@@ -112,5 +112,7 @@ against a live universe. Current status, the remaining roadmap, and tracked defe
 ## Documentation
 
 - [Getting started](docs/getting-started.md) — install → API key → first config → apply → destroy.
+- [CLI reference](docs/cli-reference.md) — commands, flags, exit codes.
+- [Resource reference](docs/resource-reference.md) — every `roblox_*` resource and its attributes.
 - [Examples](examples/) — annotated `.bp.hcl` configs.
 - [Live testing against real Roblox](docs/roblox-live-testing.md).
