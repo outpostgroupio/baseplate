@@ -19,7 +19,7 @@ $ baseplate --help
 
 Baseplate reads your `.bp.hcl` config, builds a dependency-ordered plan, and reconciles it through
 the Roblox Open Cloud API using your API key. State (which resources it manages, and their last-known
-values) is written to `baseplate.tfstate` — overridable with `--state`.
+values) is written to `baseplate.bpstate` — overridable with `--state`.
 
 You need `ROBLOX_API_KEY` set to manage `roblox_*` resources. Without it, the CLI falls back to an
 internal **mock** provider used for the engine's own tests — it doesn't understand the `roblox_*`

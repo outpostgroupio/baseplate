@@ -38,7 +38,7 @@ func TestLiveImportBlockExperience(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	b := backend.NewLocal(filepath.Join(t.TempDir(), "live-import-block.tfstate"))
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "live-import-block.bpstate"))
 	s := state.New()
 
 	desired := []plan.DesiredResource{

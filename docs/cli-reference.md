@@ -14,7 +14,7 @@ These are accepted by every command.
 | Flag | Default | Description |
 |---|---|---|
 | `--config` | `baseplate.bp.hcl` | Path to the HCL config file. |
-| `--state` | `baseplate.tfstate` | Path to the state file. |
+| `--state` | `baseplate.bpstate` | Path to the state file. |
 | `--target` | *(none)* | Limit the operation to a single resource address (e.g. `roblox_asset.icon`). |
 | `--json` | `false` | Emit machine-readable output. **`plan` only** — `apply`/`destroy` ignore it. |
 

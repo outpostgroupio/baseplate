@@ -35,7 +35,7 @@ CGO_ENABLED=0 go build ./... # distribution must be pure Go (a hard constraint)
 CI (`.github/workflows/ci.yml`) builds with `CGO_ENABLED=0` but runs `-race` under the default
 toolchain (the race detector needs cgo).
 
-**Run the CLI:** `go run ./cmd/baseplate {validate|plan|apply|destroy} --config X.bp.hcl --state X.tfstate [--target A] [--json]`.
+**Run the CLI:** `go run ./cmd/baseplate {validate|plan|apply|destroy} --config X.bp.hcl --state X.bpstate [--target A] [--json]`.
 Exit codes: `0` no changes, `2` changes present, `1` error. With `ROBLOX_API_KEY` set the CLI
 uses the real provider; otherwise the in-memory mock.
 

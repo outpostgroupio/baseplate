@@ -9,7 +9,7 @@ import (
 
 func TestLocalPutGetAndLock(t *testing.T) {
 	dir := t.TempDir()
-	b := NewLocal(filepath.Join(dir, "baseplate.tfstate"))
+	b := NewLocal(filepath.Join(dir, "baseplate.bpstate"))
 
 	s, err := b.Get() // missing file → fresh
 	if err != nil {

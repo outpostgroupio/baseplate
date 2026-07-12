@@ -40,7 +40,7 @@ func TestLiveExperienceAndProductLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	b := backend.NewLocal(filepath.Join(t.TempDir(), "live.tfstate"))
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "live.bpstate"))
 	s := state.New()
 
 	desired := []plan.DesiredResource{

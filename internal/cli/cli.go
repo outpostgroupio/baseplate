@@ -36,7 +36,7 @@ func run(args []string, stdout io.Writer) int {
 
 	root := &cobra.Command{Use: "baseplate", SilenceUsage: true, SilenceErrors: true}
 	root.PersistentFlags().StringVar(&cfgPath, "config", "baseplate.bp.hcl", "config file")
-	root.PersistentFlags().StringVar(&statePath, "state", "baseplate.tfstate", "state file")
+	root.PersistentFlags().StringVar(&statePath, "state", "baseplate.bpstate", "state file")
 	root.PersistentFlags().StringVar(&target, "target", "", "limit to a single resource address")
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "machine-readable output")
 	root.SetOut(stdout)

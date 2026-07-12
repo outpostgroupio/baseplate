@@ -91,7 +91,7 @@ Full walkthrough: **[docs/getting-started.md](docs/getting-started.md)**.
 ## CLI
 
 ```
-baseplate <command> [--config baseplate.bp.hcl] [--state baseplate.tfstate] [--target ADDR] [--json]
+baseplate <command> [--config baseplate.bp.hcl] [--state baseplate.bpstate] [--target ADDR] [--json]
 
   validate   Load and type-check the config.
   plan       Show the changes apply would make. Exit 2 if there are changes.
@@ -100,7 +100,7 @@ baseplate <command> [--config baseplate.bp.hcl] [--state baseplate.tfstate] [--t
   import <address> <id>   Adopt an existing resource into state.
 ```
 
-`--config` defaults to `baseplate.bp.hcl`, `--state` to `baseplate.tfstate`. `--target` limits an
+`--config` defaults to `baseplate.bp.hcl`, `--state` to `baseplate.bpstate`. `--target` limits an
 apply/plan to one resource address; `--json` emits machine-readable output for CI.
 
 ## Status

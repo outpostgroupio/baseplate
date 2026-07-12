@@ -57,7 +57,7 @@ placeholder IDs, then:
 
 ```bash
 set -a; . ./.env.local; set +a
-go run ./cmd/baseplate plan   --config examples/baseplate.bp.hcl --state /tmp/bp.tfstate
-go run ./cmd/baseplate apply  --config examples/baseplate.bp.hcl --state /tmp/bp.tfstate
-go run ./cmd/baseplate destroy --config examples/baseplate.bp.hcl --state /tmp/bp.tfstate
+go run ./cmd/baseplate plan   --config examples/baseplate.bp.hcl --state /tmp/bp.bpstate
+go run ./cmd/baseplate apply  --config examples/baseplate.bp.hcl --state /tmp/bp.bpstate
+go run ./cmd/baseplate destroy --config examples/baseplate.bp.hcl --state /tmp/bp.bpstate
 ```

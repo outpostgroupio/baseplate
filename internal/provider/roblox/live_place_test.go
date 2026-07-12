@@ -52,7 +52,7 @@ func TestLivePlaceLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	b := backend.NewLocal(filepath.Join(t.TempDir(), "live-place.tfstate"))
+	b := backend.NewLocal(filepath.Join(t.TempDir(), "live-place.bpstate"))
 	s := state.New()
 
 	fp := filepath.Join(t.TempDir(), "game.rbxlx")
