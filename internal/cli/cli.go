@@ -226,10 +226,15 @@ func declaredImports(imports []plan.ImportBlock, declared map[string]bool) []pla
 func generateConfig(ctx context.Context, p provider.Provider, imports []plan.ImportBlock, declared map[string]bool, outPath string, stdout io.Writer) error {
 	resources := p.Resources()
 	var blocks []*hclwrite.Block
+	seen := map[string]bool{}
 	for _, imp := range imports {
 		if declared[imp.Address] {
 			continue
 		}
+		if seen[imp.Address] {
+			return fmt.Errorf("duplicate import block for %q", imp.Address)
+		}
+		seen[imp.Address] = true
 		typ, name := splitAddress(imp.Address)
 		r, ok := resources[typ]
 		if !ok {
