@@ -37,6 +37,28 @@ Requires the `asset:read`, `asset:write` [scopes](how-to/api-key-scopes.md).
 
 ---
 
+## `roblox_badge`
+
+Manages a badge (an achievement players can earn in an experience).
+
+| Attribute | Type | Kind | Description |
+|---|---|---|---|
+| `description` | string | optional, diffable | Badge description. |
+| `enabled` | bool | optional, diffable | Whether the badge is active and awardable (default `true`). |
+| `expected_cost` | number | optional, create-only | Robux cost you accept for creating the badge (default `0`). Creation is free in practice; a non-zero value opts into a paid badge. |
+| `icon_file` | string | required, trigger | Path to an icon image (direct upload, required — Roblox rejects a badge created without an icon). Change detected via content hash. |
+| `name` | string | required, diffable | Badge name. |
+| `payment_source` | string | optional, create-only | Funding source when `expected_cost` > 0: `user` (default) or `group`. |
+| `universe_id` | string | required, create-only | The universe. Often a reference to an experience. |
+
+Badges can't be hard-deleted, so `destroy` sets `enabled = false` and unmanages the badge. The icon is reconciled via a content-hash trigger; any update re-uploads the icon. Reads use the public badge endpoint on `badges.roblox.com` (writes use Open Cloud on `apis.roblox.com`).
+
+Requires the `legacy-universe.badge:manage-and-spend-robux`, `legacy-universe.badge:write`, `legacy-badge:manage` [scopes](how-to/api-key-scopes.md).
+
+Example: [`examples/badge.bp.hcl`](../examples/badge.bp.hcl).
+
+---
+
 ## `roblox_developer_product`
 
 Manages a developer product (an in-experience consumable purchase).
