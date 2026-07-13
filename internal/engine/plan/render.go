@@ -1,7 +1,6 @@
 package plan
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -148,10 +147,6 @@ func (p *Plan) RenderText(color bool) string {
 	}
 	fmt.Fprintf(&b, "\nPlan: %d to import, %d to add, %d to change, %d to destroy.\n", imp, add, chg, del)
 	return b.String()
-}
-
-func (p *Plan) RenderJSON() ([]byte, error) {
-	return json.MarshalIndent(p.JSONChanges(), "", "  ")
 }
 
 func ctyString(v cty.Value) string {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/zclconf/go-cty/cty"
 
+	"github.com/outpostgroupio/baseplate/internal/cli/output"
 	"github.com/outpostgroupio/baseplate/internal/engine/plan"
 	"github.com/outpostgroupio/baseplate/internal/provider"
 	"github.com/outpostgroupio/baseplate/internal/provider/mock"
@@ -42,7 +43,7 @@ func TestImportRunWritesStateAndReports(t *testing.T) {
 	p.Seed("mock_thing/9", provider.Attributes{"name": cty.StringVal("root")})
 
 	var out bytes.Buffer
-	if err := importRun(p, cfg, statePath, "mock_thing.a", "mock_thing/9", streams{
+	if err := importRun(p, cfg, statePath, "mock_thing.a", "mock_thing/9", output.Text, streams{
 		in: strings.NewReader(""), out: &out, err: &out, isTTY: func() bool { return false },
 	}); err != nil {
 		t.Fatal(err)
@@ -221,5 +222,39 @@ func TestJSONErrorGoesToStderrEnvelope(t *testing.T) {
 	}
 	if !strings.Contains(errBuf.String(), `"format_version": 1`) || !strings.Contains(errBuf.String(), `"error"`) {
 		t.Fatalf("stderr should carry the JSON error envelope, got %q", errBuf.String())
+	}
+}
+
+func TestPlanJSONHasEnvelopeAndSummary(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "baseplate.bp.hcl")
+	os.WriteFile(cfg, []byte("resource \"mock_thing\" \"a\" {\n  name = \"root\"\n}\n"), 0o644)
+
+	var out bytes.Buffer
+	code := runOut([]string{"plan", "--json", "--config", cfg,
+		"--state", filepath.Join(dir, "s.bpstate")}, &out)
+	if code != 2 {
+		t.Fatalf("expected exit 2 (changes), got %d\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), `"format_version": 1`) ||
+		!strings.Contains(out.String(), `"command": "plan"`) ||
+		!strings.Contains(out.String(), `"summary"`) {
+		t.Fatalf("plan --json missing envelope/summary: %s", out.String())
+	}
+}
+
+func TestValidateJSONResult(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "baseplate.bp.hcl")
+	os.WriteFile(cfg, []byte("resource \"mock_thing\" \"a\" {\n  name = \"root\"\n}\n"), 0o644)
+
+	var out bytes.Buffer
+	code := runOut([]string{"validate", "--json", "--config", cfg,
+		"--state", filepath.Join(dir, "s.bpstate")}, &out)
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), `"valid": true`) {
+		t.Fatalf("validate --json wrong: %s", out.String())
 	}
 }
