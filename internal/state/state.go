@@ -24,8 +24,42 @@ type State struct {
 	Resources []Resource `json:"resources"`
 }
 
+// CurrentVersion is the state-file format version this build writes and reads.
+// A file with a higher version is rejected (forward-incompatible); lower
+// versions are migrated up via the migrations table.
+const CurrentVersion = 1
+
 func New() *State {
-	return &State{Version: 1, Lineage: newLineage()}
+	return &State{Version: CurrentVersion, Lineage: newLineage()}
+}
+
+// migrator upgrades a state document (generic JSON form) from version v to v+1,
+// so it may add/rename/reshape fields. applyMigrations stamps the version.
+type migrator func(map[string]json.RawMessage) (map[string]json.RawMessage, error)
+
+// migrations[v] upgrades v -> v+1. Empty today (CurrentVersion == 1); the first
+// future format change adds migrations[1] and bumps CurrentVersion to 2.
+var migrations = map[int]migrator{}
+
+// applyMigrations upgrades doc from version `from` to `to`, applying
+// table[from], table[from+1], … and stamping doc["version"] after each step.
+func applyMigrations(doc map[string]json.RawMessage, from, to int, table map[int]migrator) (map[string]json.RawMessage, error) {
+	for v := from; v < to; v++ {
+		m, ok := table[v]
+		if !ok {
+			return nil, fmt.Errorf("no migration path from state version %d", v)
+		}
+		var err error
+		if doc, err = m(doc); err != nil {
+			return nil, fmt.Errorf("migrating state version %d: %w", v, err)
+		}
+		nb, err := json.Marshal(v + 1)
+		if err != nil {
+			return nil, err
+		}
+		doc["version"] = nb
+	}
+	return doc, nil
 }
 
 func (s *State) Marshal() ([]byte, error) {
@@ -37,14 +71,42 @@ func (s *State) Marshal() ([]byte, error) {
 }
 
 func Unmarshal(b []byte) (*State, error) {
-	var s State
-	if err := json.Unmarshal(b, &s); err != nil {
+	var peek struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(b, &peek); err != nil {
 		return nil, err
 	}
-	if s.Version != 1 {
-		return nil, fmt.Errorf("unsupported state version %d (want 1)", s.Version)
+	switch {
+	case peek.Version <= 0:
+		return nil, fmt.Errorf("state file is missing a version (corrupt or not a baseplate state file)")
+	case peek.Version > CurrentVersion:
+		return nil, fmt.Errorf("state file was written by a newer version of baseplate (state version %d, this build supports %d); upgrade baseplate", peek.Version, CurrentVersion)
+	case peek.Version < CurrentVersion:
+		var doc map[string]json.RawMessage
+		if err := json.Unmarshal(b, &doc); err != nil {
+			return nil, err
+		}
+		doc, err := applyMigrations(doc, peek.Version, CurrentVersion, migrations)
+		if err != nil {
+			return nil, err
+		}
+		mb, err := json.Marshal(doc)
+		if err != nil {
+			return nil, err
+		}
+		var s State
+		if err := json.Unmarshal(mb, &s); err != nil {
+			return nil, err
+		}
+		return &s, nil
+	default:
+		var s State
+		if err := json.Unmarshal(b, &s); err != nil {
+			return nil, err
+		}
+		return &s, nil
 	}
-	return &s, nil
 }
 
 func (s *State) Find(address string) (*Resource, bool) {
