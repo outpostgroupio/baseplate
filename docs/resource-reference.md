@@ -128,6 +128,36 @@ resource "roblox_developer_product" "gems_100" {
 
 ---
 
+## `roblox_game_pass`
+
+Manages a game pass (a one-time, permanent in-experience purchase).
+
+| Attribute | Type | Kind | Notes |
+|---|---|---|---|
+| `universe_id` | string | required, create-only | The universe. Often a reference to an experience. |
+| `name` | string | required, diffable | Game pass name. |
+| `price` | number | required, diffable | Price in Robux. |
+| `description` | string | optional, diffable | Game pass description. |
+| `icon_file` | string | optional, create-only | Path to an icon image (direct upload). |
+| `is_for_sale` | bool | optional, diffable | On sale (default `true`). |
+
+Game passes can't be hard-deleted, so `destroy` sets `is_for_sale = false` and unmanages it.
+Managed pricing is intentionally not exposed as an attribute — it requires prior manual acceptance
+of Roblox's managed-pricing terms in the Creator Dashboard, so it isn't something Baseplate can
+turn on for you. Requires the `game-pass:read` and `game-pass:write`
+[scopes](how-to/api-key-scopes.md).
+
+```hcl
+resource "roblox_game_pass" "vip" {
+  universe_id = roblox_experience.main.id
+  name        = "VIP"
+  price       = 100
+  description = "Unlocks the VIP area"
+}
+```
+
+---
+
 ## `roblox_universe_secret`
 
 Manages an Open Cloud **secret** for a universe — the only resource with a full create/update/**real

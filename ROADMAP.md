@@ -53,6 +53,16 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   `nextPageCursor`** (even on the empty final page), so `List` must terminate on an **empty
   page**, not an empty cursor — the naive cursor loop paginated forever and tripped the 120/min
   rate limit (429). See `docs/superpowers/specs/2026-07-10-baseplate-phase2-universe-secret-design.md`.
+- **Phase 2 slice 7 COMPLETE (`roblox_game_pass`), proven live:** near-clone of
+  `roblox_developer_product` — no DELETE surface, so `destroy` sets `is_for_sale = false` and
+  unmanages it. New `opencloud.GamePassClient` on the `game-passes/v1` service: create/update are
+  **multipart**, create is **synchronous** (no Operation poll, unlike assets), update's PATCH
+  returns an **empty body** so `Update` GETs-after-PATCH to read back, and `gamePassId`/
+  `iconAssetId` decode as JSON **numbers** into typed `int64` (opposite of `assetId`, which is a
+  wire string). A risk-first live probe found Roblox's `isManagedPricingEnabled` requires prior
+  manual acceptance in the Creator Dashboard, so **managed pricing was cut from v1** — `price` is
+  Required instead. Live lifecycle verified (create→converge→update→converge→off-sale destroy).
+  See `docs/superpowers/specs/2026-07-13-baseplate-phase2-game-pass-design.md`.
 - Next: **Phase 2** remaining slices (see Roadmap below).
 
 Read `docs/superpowers/specs/2026-07-03-baseplate-phase1-roblox-provider-design.md` for the
@@ -143,8 +153,10 @@ list-cursor surprises). Reproduce with `.superpowers/sdd/surface-probe.jq` /`det
   `assetId`) and `iconAssetId` is a large int64 number → decode ids into typed `int64`, never
   `interface{}`/`float64`; **PATCH returns an empty body** → the client's Update must GET-after-PATCH
   to read back; price nests under `priceInformation.defaultPriceInRobux`; `iconAssetId` is
-  auto-assigned even with no upload (→ computed). Near-clone of `roblox_developer_product` →
-  the chosen next slice.
+  auto-assigned even with no upload (→ computed). Near-clone of `roblox_developer_product`.
+  **SHIPPED (slice 7)** — see the Status entry above. Managed pricing (`isManagedPricingEnabled`)
+  was cut from v1: it requires prior manual acceptance in the Creator Dashboard, so it isn't
+  something Baseplate can turn on for you; `price` is Required instead of that being optional.
 - **`roblox_creator_store_product`** — clean modern `/cloud/v2` CRUD, not in any prior roadmap list.
   `POST /cloud/v2/creator-store-products`, `GET`/`PATCH …/{creator_store_product_id}`. API-key
   advertised. **No DELETE.** Best structural fit for our existing `/cloud/v2` patterns; needs a
