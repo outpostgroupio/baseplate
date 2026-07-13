@@ -32,6 +32,7 @@ func New(apiKey string) (*Provider, error) {
 		"roblox_experience":        resources.Experience(opencloud.NewUniverseClient(root)),
 		"roblox_asset":             resources.Asset(opencloud.NewAssetClient(assets)),
 		"roblox_developer_product": resources.DeveloperProduct(opencloud.NewDeveloperProductClient(root)),
+		"roblox_game_pass":         resources.GamePass(opencloud.NewGamePassClient(root)),
 		"roblox_place":             resources.Place(opencloud.NewPlaceClient(root)),
 		"roblox_universe_secret":   resources.UniverseSecret(opencloud.NewSecretClient(root)),
 	}}, nil
