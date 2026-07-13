@@ -16,6 +16,17 @@ import (
 	"github.com/outpostgroupio/baseplate/internal/state/backend"
 )
 
+// runOut drives run() with an empty stdin, a non-TTY (CI-like) terminal, and a
+// single buffer capturing stdout; errors go to the same buffer.
+func runOut(args []string, out *bytes.Buffer) int {
+	return run(args, streams{
+		in:    strings.NewReader(""),
+		out:   out,
+		err:   out,
+		isTTY: func() bool { return false },
+	})
+}
+
 // TestImportRunWritesStateAndReports is the CLI happy path: importRun takes an
 // injectable provider, so we seed a mock "remote" resource and assert import
 // records it in the state file and prints the success line. (The full command
@@ -31,7 +42,9 @@ func TestImportRunWritesStateAndReports(t *testing.T) {
 	p.Seed("mock_thing/9", provider.Attributes{"name": cty.StringVal("root")})
 
 	var out bytes.Buffer
-	if err := importRun(p, cfg, statePath, "mock_thing.a", "mock_thing/9", &out); err != nil {
+	if err := importRun(p, cfg, statePath, "mock_thing.a", "mock_thing/9", streams{
+		in: strings.NewReader(""), out: &out, err: &out, isTTY: func() bool { return false },
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "Imported mock_thing.a (id mock_thing/9)") {
@@ -56,7 +69,7 @@ resource "mock_thing" "a" {
 `), 0o644)
 
 	var out bytes.Buffer
-	code := run([]string{"plan", "--config", cfg, "--state", filepath.Join(dir, "s.bpstate")}, &out)
+	code := runOut([]string{"plan", "--config", cfg, "--state", filepath.Join(dir, "s.bpstate")}, &out)
 	if code != 2 {
 		t.Fatalf("expected exit 2 (changes present), got %d\n%s", code, out.String())
 	}
@@ -85,7 +98,7 @@ func TestImportErrorsWhenAddressNotInConfig(t *testing.T) {
 	os.WriteFile(cfg, []byte("resource \"mock_thing\" \"a\" {\n  name = \"root\"\n}\n"), 0o644)
 
 	var out bytes.Buffer
-	code := run([]string{"import", "mock_thing.ghost", "someid",
+	code := runOut([]string{"import", "mock_thing.ghost", "someid",
 		"--config", cfg, "--state", filepath.Join(dir, "s.bpstate")}, &out)
 	if code != 1 {
 		t.Fatalf("expected exit 1 for an undeclared address, got %d\n%s", code, out.String())
@@ -99,7 +112,7 @@ func TestImportErrorsWhenRemoteNotFound(t *testing.T) {
 
 	// No ROBLOX_API_KEY → the mock provider with an empty store → Read → ErrNotFound.
 	var out bytes.Buffer
-	code := run([]string{"import", "mock_thing.a", "missing",
+	code := runOut([]string{"import", "mock_thing.a", "missing",
 		"--config", cfg, "--state", filepath.Join(dir, "s.bpstate")}, &out)
 	if code != 1 {
 		t.Fatalf("expected exit 1 for a not-found remote, got %d\n%s", code, out.String())
@@ -113,7 +126,7 @@ func TestPlanWithImportBlockNotFoundExits1(t *testing.T) {
 
 	var out bytes.Buffer
 	// The import target isn't in the (empty) mock store → ResolveImports Read → not found → exit 1.
-	code := run([]string{"plan", "--config", cfg, "--state", filepath.Join(dir, "s.bpstate")}, &out)
+	code := runOut([]string{"plan", "--config", cfg, "--state", filepath.Join(dir, "s.bpstate")}, &out)
 	if code != 1 {
 		t.Fatalf("expected exit 1 (import id not found), got %d\n%s", code, out.String())
 	}
@@ -125,7 +138,7 @@ func TestImportRequiresTwoArgs(t *testing.T) {
 	os.WriteFile(cfg, []byte("resource \"mock_thing\" \"a\" {\n  name = \"root\"\n}\n"), 0o644)
 
 	var out bytes.Buffer
-	code := run([]string{"import", "mock_thing.a", "--config", cfg,
+	code := runOut([]string{"import", "mock_thing.a", "--config", cfg,
 		"--state", filepath.Join(dir, "s.bpstate")}, &out)
 	if code != 1 {
 		t.Fatalf("expected exit 1 when id arg is missing, got %d\n%s", code, out.String())
@@ -186,5 +199,27 @@ func TestGenerateConfigRejectsDuplicateUndeclaredImports(t *testing.T) {
 	err := generateConfig(context.Background(), p, imports, map[string]bool{}, out, &outbuf)
 	if err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("expected a duplicate error, got %v", err)
+	}
+}
+
+func TestJSONErrorGoesToStderrEnvelope(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "baseplate.bp.hcl")
+	// Malformed config -> config.Load fails -> structured error under --json.
+	os.WriteFile(cfg, []byte("resource \"mock_thing\" \"a\" {\n  name =\n"), 0o644)
+
+	var out, errBuf bytes.Buffer
+	code := run([]string{"validate", "--json", "--config", cfg,
+		"--state", filepath.Join(dir, "s.bpstate")}, streams{
+		in: strings.NewReader(""), out: &out, err: &errBuf, isTTY: func() bool { return false },
+	})
+	if code != 1 {
+		t.Fatalf("expected exit 1, got %d", code)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout must be empty on error, got %q", out.String())
+	}
+	if !strings.Contains(errBuf.String(), `"format_version": 1`) || !strings.Contains(errBuf.String(), `"error"`) {
+		t.Fatalf("stderr should carry the JSON error envelope, got %q", errBuf.String())
 	}
 }
