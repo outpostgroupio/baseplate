@@ -56,6 +56,18 @@ $ baseplate destroy   # tear down what's managed
 Plus declarative `import { to = <address>  id = "<id>" }` blocks to adopt existing resources during a
 normal `apply`.
 
+**Planned:** game passes, badges, and creator-store products all have a usable Open Cloud write
+surface and are candidate resources — see the [roadmap](ROADMAP.md#resource-surface-audit-2026-07-13).
+
+**Not manageable via Open Cloud** (no write API — Roblox exposes these only through the Creator
+Dashboard, so Baseplate can't and won't manage them):
+
+- **Subscription products** — read-only API (per-user subscription lookups only); no create/update.
+- **Experience social links** — a write API exists for *groups* only, not experiences/universes.
+- **Universe display name, description, visibility, age rating** — read-only on the API; set them on
+  the experience's root place in Studio. Baseplate manages the writable universe settings (voice
+  chat, device enablement, private-server price) via `roblox_experience`.
+
 ## Install
 
 Baseplate is a single self-contained binary — no runtime dependencies. Download the build for your
