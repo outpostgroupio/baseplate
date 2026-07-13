@@ -134,8 +134,9 @@ list-cursor surprises). Reproduce with `.superpowers/sdd/surface-probe.jq` /`det
   claiming "legacy-only, create-via-Open-Cloud uncertain" was **wrong**). `POST
   /game-passes/v1/universes/{universeId}/game-passes` (create), `PATCH …/{gamePassId}` (update),
   `GET …/game-passes/creator` (list) + `…/{gamePassId}/creator` (read). No DELETE → destroy
-  unmanages/disables, same pattern as `roblox_developer_product`. **LIVE-VERIFIED 2026-07-13** (probe
-  `TestLiveGamePassProbe`; the API key created+got+updated a real game pass on the test universe).
+  unmanages/disables, same pattern as `roblox_developer_product`. **LIVE-VERIFIED 2026-07-13**
+  (one-off probe, since removed — the API key created+got+updated a real game pass on the test
+  universe; the slice's committed live test supersedes it).
   Wire facts learned live: create/update are **multipart** (`name`,`description`,`price`,`isForSale`,
   `imageFile`,`isManagedPricingEnabled`); create is **synchronous** (returns `GamePassConfigV2`
   directly, no Operation poll); **`gamePassId` is a JSON _number_, not a string** (opposite of
@@ -201,3 +202,38 @@ state backend + CI locking, `--json`/exit-code hardening, non-interactive mode.
 **Phase 4 — churn resilience:** the schema-drift watcher (`regen.sh` + the vendored spec seed
 it — fetch Roblox/creator-docs `openapi.json`, semantic-diff on change, open an issue/PR),
 capability detection, contract-test suite, Rokit distribution.
+
+## Backlog — adopted from the feature wishlist (2026-07-13)
+Reconciled from the old `CLAUDES_REQUESTED_FEATURES.md` (now deleted). The bulk of that file is
+already **shipped** (plan/apply, diffs, idempotent reconcile, import/adopt, drift detection,
+dependency graph, state locking, `--target`, rate-limit backoff, secrets-by-reference, developer
+products, assets, generated clients, provider seam, one-key model, `--json`) or already **tracked**
+above (env overlays + config modules, autodocs/schema validation, non-interactive mode, error
+translation, capability detection, contract tests, Rokit, and the audit's badge/localization/
+thumbnail/notification candidates). The genuinely new items we chose to adopt:
+
+- **Resources (need a surface spike before slicing, like game passes got):**
+  - **Place config** — max players, streaming, allowed gear on a place (distinct from the `.rbxl`
+    publish `roblox_place` already does). Surface unconfirmed (candidates: `/v2/places/{placeId}`,
+    universe/place `configuration` endpoints) — spike before committing.
+  - **Collaborators / permissions** — manage universe/place collaborator access. Likely
+    `legacy-develop/v1/universes/{id}/permissions` + team-create; legacy-prefixed → live-probe risk
+    like `roblox_badge`.
+- **DX / observability:** a `--debug` flag (or `BASEPLATE_DEBUG`) that dumps raw Open Cloud
+  requests/responses, **redacting the api-key and sealed/sensitive values**. Small, high
+  troubleshooting value; folds into the Phase 3 DX hardening.
+- **Architecture (longer-horizon):** multi-place / multi-universe repos as a first-class concept —
+  shapes config + state layout (per-universe state vs. one config spanning many universes).
+  Significant; revisit once Phase 2 resource coverage settles.
+- **Known limitation (NOT a planned feature):** partial-failure resume is already effectively
+  provided — `apply` commits state after every resource op (`commit` → `b.Put`) and the flow is
+  idempotent, so a failed apply resumes by re-running. The only uncovered gap is a crash in the
+  narrow window *between* a successful remote mutation and its state write (that resource could
+  re-Create on the next run — a possible duplicate for non-idempotent creates). Crash-safe
+  checkpointing is the only part a dedicated "resume" feature would add; deferred as low priority.
+
+**Considered but not adopted** (recorded so they aren't re-litigated): stateless-by-listing
+reconciliation, rollback / plan history, Luau-authored programmable config (competes with the
+locked HCL decision), JSON-schema/LSP config autocomplete, decal→texture id resolution, Rojo build
+integration, lockfile version pinning, and a quarantined legacy cookie/CSRF adapter (a deliberate
+non-goal — Baseplate stays Open-Cloud-only).

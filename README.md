@@ -71,7 +71,7 @@ Dashboard, so Baseplate can't and won't manage them):
 ## Install
 
 Baseplate is a single self-contained binary — no runtime dependencies. Download the build for your
-platform from the [Releases](https://github.com/outpostgroup/baseplate/releases) page and put it on
+platform from the [Releases](https://github.com/outpostgroupio/baseplate/releases) page and put it on
 your `PATH`:
 
 ```console
