@@ -281,8 +281,11 @@ state — if ever wanted, they belong behind a CLI verb, not a `resource` block.
   auth, custom methods) — GitLab-style managed state works. Local file backend remains the default.
   S3/R2 are additive follow-ups on the same seam. See
   `docs/superpowers/specs/2026-07-13-baseplate-phase3-remote-state-design.md`.
-- Remaining: prebuilt GitHub Actions (plan-on-PR comment, apply-on-merge), state-file
-  version/migration.
+- **DONE (slice 3 — state versioning):** the state file is version-gated — an older binary refuses a
+  newer-format state file with an upgrade message, and there's a migration seam (`migrations[v]`) for
+  future format changes. `CurrentVersion` is 1 (no format change this slice). See
+  `docs/superpowers/specs/2026-07-13-baseplate-phase3-state-versioning-design.md`.
+- Remaining: prebuilt GitHub Actions (plan-on-PR comment, apply-on-merge).
 
 **Phase 4 — churn resilience:** the schema-drift watcher (`regen.sh` + the vendored spec seed
 it — fetch Roblox/creator-docs `openapi.json`, semantic-diff on change, open an issue/PR),
