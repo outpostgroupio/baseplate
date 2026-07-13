@@ -64,6 +64,24 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   manual acceptance in the Creator Dashboard, so **managed pricing was cut from v1** — `price` is
   Required instead. Live lifecycle verified (create→converge→update→converge→off-sale destroy).
   See `docs/superpowers/specs/2026-07-13-baseplate-phase2-game-pass-design.md`.
+- **Phase 2 slice 8 COMPLETE (`roblox_badge`), proven live:** first resource with a **split
+  read/write host** — write (create/update/icon) goes through the Open Cloud legacy bridge on
+  `apis.roblox.com` (api-key + the two badge scopes, `legacy-universe.badge:manage-and-spend-robux`
+  for create and `legacy-universe.badge:write` for update), while `Get` is a **public, unauthenticated
+  single-GET** on a different host, `GET https://badges.roblox.com/v1/badges/{badgeId}`. New
+  `opencloud.BadgeClient` takes two `*opencloud.Client`s (`write`, `read`) for this reason. Live-
+  confirmed: create is **free** (`expectedCost=0` accepted) but the icon (`files` multipart part) is
+  **required** — omitting it 400s with code `11` ("The badge icon is invalid"); `id`/`iconImageId`
+  decode as JSON **numbers** (int64), same convention as `roblox_game_pass`; the icon-overwrite
+  multipart field is **`Files`** (capital), asymmetric with create's lowercase `files`; the error
+  envelope is `{"errors":[{code,message}]}` (an array), which doesn't match `opencloud.APIError`'s
+  flat decode. No DELETE surface → `destroy` sets `enabled=false` and unmanages, same pattern as
+  `roblox_game_pass`/`roblox_developer_product`. Live lifecycle verified end-to-end (create→
+  converge→update name+disable→converge→icon change via the `content_hash` Trigger→converge→
+  disable+unmanage destroy) in `internal/provider/roblox/live_badge_test.go`. Deferred: `Update` is
+  stateless w.r.t. prior triggers, so a name-only edit still re-uploads/re-moderates the icon (see
+  the slice-8 deferral note in the Roadmap section below — a general engine fix, not badge-specific).
+  See `docs/superpowers/specs/2026-07-13-baseplate-phase2-badge-design.md`.
 - Next: **Phase 2** remaining slices (see Roadmap below).
 
 Read `docs/superpowers/specs/2026-07-03-baseplate-phase1-roblox-provider-design.md` for the
@@ -180,8 +198,15 @@ list-cursor surprises). Reproduce with `.superpowers/sdd/surface-probe.jq` /`det
   7-way create-only oneOf; scope string unconfirmed → live-probe first).
 - **`roblox_badge`** — `POST /legacy-badges/v1/universes/{universeId}/badges` (create, api-key
   advertised), `PATCH /legacy-badges/v1/badges/{badgeId}` (update), `POST
-  /legacy-publish/v1/badges/{badgeId}/icon` (icon). Legacy-prefixed → **higher live-probe risk**
-  (legacy bridges sometimes reject api-keys in practice). No DELETE. Viable but confirm live first.
+  /legacy-publish/v1/badges/{badgeId}/icon` (icon). Legacy-prefixed → initially flagged as
+  **higher live-probe risk** (legacy bridges sometimes reject api-keys in practice), and the first
+  probe did hit a 403 until the user added the `legacy-universe.badge:manage-and-spend-robux` +
+  `legacy-universe.badge:write` scopes to the test key. **LIVE-VERIFIED 2026-07-13** (create, update,
+  icon overwrite, and read all exercised against the test universe; see the slice-8 Status entry
+  above for the full wire-fact summary). **SHIPPED (slice 8)** — no DELETE surface, so `destroy`
+  disables (`enabled=false`) and unmanages, same pattern as `roblox_game_pass`. Read is a public
+  single-GET on the separate `badges.roblox.com` host, unlike every other resource's
+  read-through-`apis.roblox.com`.
 - **Localization tables** — `POST /v1/localization-table/tables` + `GET`/`PATCH …/{tableId}` +
   entries endpoints. Legacy, and entry management makes it a **heavy** resource; defer unless asked.
 
