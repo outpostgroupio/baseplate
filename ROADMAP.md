@@ -64,6 +64,28 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   manual acceptance in the Creator Dashboard, so **managed pricing was cut from v1** — `price` is
   Required instead. Live lifecycle verified (create→converge→update→converge→off-sale destroy).
   See `docs/superpowers/specs/2026-07-13-baseplate-phase2-game-pass-design.md`.
+- **Phase 2 slice 8 COMPLETE (`roblox_badge`), proven live:** first resource with a **split
+  read/write host** — write (create/update/icon) goes through the Open Cloud legacy bridge on
+  `apis.roblox.com` (api-key; create used `legacy-universe.badge:manage-and-spend-robux`, update
+  used `legacy-universe.badge:write`. The icon-overwrite endpoint is spec-documented as requiring
+  `legacy-badge:manage`, but the live lifecycle — including the icon upload — passed with only the
+  two `legacy-universe.badge:*` scopes granted, so the third scope's necessity is unconfirmed; see
+  `docs/how-to/api-key-scopes.md`), while
+  `Get` is a **public, unauthenticated single-GET** on a different host,
+  `GET https://badges.roblox.com/v1/badges/{badgeId}`. New
+  `opencloud.BadgeClient` takes two `*opencloud.Client`s (`write`, `read`) for this reason. Live-
+  confirmed: create is **free** (`expectedCost=0` accepted) but the icon (`files` multipart part) is
+  **required** — omitting it 400s with code `11` ("The badge icon is invalid"); `id`/`iconImageId`
+  decode as JSON **numbers** (int64), same convention as `roblox_game_pass`; the icon-overwrite
+  multipart field is **`Files`** (capital), asymmetric with create's lowercase `files`; the error
+  envelope is `{"errors":[{code,message}]}` (an array), which doesn't match `opencloud.APIError`'s
+  flat decode. No DELETE surface → `destroy` sets `enabled=false` and unmanages, same pattern as
+  `roblox_game_pass`/`roblox_developer_product`. Live lifecycle verified end-to-end (create→
+  converge→update name+disable→converge→icon change via the `content_hash` Trigger→converge→
+  disable+unmanage destroy) in `internal/provider/roblox/live_badge_test.go`. Deferred: `Update` is
+  stateless w.r.t. prior triggers, so a name-only edit still re-uploads/re-moderates the icon (see
+  the slice-8 deferral note in the Roadmap section below — a general engine fix, not badge-specific).
+  See `docs/superpowers/specs/2026-07-13-baseplate-phase2-badge-design.md`.
 - **Release automation COMPLETE:** goreleaser pipeline (`.goreleaser.yaml` + `.github/workflows/release.yml`)
   — a `v*` tag push cross-compiles 6 static `CGO_ENABLED=0` binaries (linux/darwin/windows ×
   amd64/arm64) and publishes a GitHub Release (archives, `checksums.txt`, grouped changelog,
@@ -137,6 +159,25 @@ Phase 1 design + rationale, and `docs/superpowers/plans/` for the executed task-
     attr today, `secret.value`, is Required); `roblox_asset` "one-of" `creator_user_id`/
     `creator_group_id` is omitted from generated config (a `# TODO`-worthy gap the generic emitter
     can't flag — a future `GenerateHints()` capability could).
+  - **From slice 8 (`roblox_badge`) — trigger-aware Update (own engine slice, general/reusable):**
+    `Update(ctx, id, desired)` is stateless — it never receives the prior triggers — so a resource
+    that backs an upload with a `content_hash` Trigger *and* also has normal diffable attrs (badge:
+    icon trigger + name/description/enabled) can't tell which fired, and must re-run the upload on
+    *every* Update (badge re-uploads/re-moderates its icon even on a name-only edit; no correctness
+    impact, just churn). Fix: an optional capability that passes the old triggers map into `Update`
+    so the upload fires only when its trigger actually changed. Deliberately NOT folded into the
+    badge slice — it's a general engine capability. (`roblox_place` doesn't hit this because it is
+    all-computed: the trigger is its *only* change signal.)
+  - **From slice 8 (`roblox_badge`) review, minor deferrals:** `Delete` PATCHes
+    `{name:"",description:"",enabled:false}` (zero-valued name/description, no updateMask) — may
+    blank the abandoned badge's name on Roblox's side; untested. A read-then-patch or
+    enabled-only disable would avoid mutating fields destroy shouldn't touch. The read-host
+    not-found path (404 on `badges.roblox.com` → `provider.ErrNotFound` → drift-recreate) is
+    unit-tested but not live-confirmed; the live probe only read an existing badge — relevant only
+    to the rare dashboard-side-deletion / stale-state edge. The badge READ client is constructed
+    with the api-key (`opencloud.New(apiKey, badgesBase)`) even though `badges.roblox.com` reads
+    are public/unauthenticated; a keyless read client would avoid sending the credential to an
+    endpoint that ignores it.
 
 ### Resource surface audit (2026-07-13)
 Audit of the vendored unified Open Cloud spec (`opencloud/specs/openapi-unified.json`) for the
@@ -176,8 +217,15 @@ list-cursor surprises). Reproduce with `.superpowers/sdd/surface-probe.jq` /`det
   7-way create-only oneOf; scope string unconfirmed → live-probe first).
 - **`roblox_badge`** — `POST /legacy-badges/v1/universes/{universeId}/badges` (create, api-key
   advertised), `PATCH /legacy-badges/v1/badges/{badgeId}` (update), `POST
-  /legacy-publish/v1/badges/{badgeId}/icon` (icon). Legacy-prefixed → **higher live-probe risk**
-  (legacy bridges sometimes reject api-keys in practice). No DELETE. Viable but confirm live first.
+  /legacy-publish/v1/badges/{badgeId}/icon` (icon). Legacy-prefixed → initially flagged as
+  **higher live-probe risk** (legacy bridges sometimes reject api-keys in practice), and the first
+  probe did hit a 403 until the user added the `legacy-universe.badge:manage-and-spend-robux` +
+  `legacy-universe.badge:write` scopes to the test key. **LIVE-VERIFIED 2026-07-13** (create, update,
+  icon overwrite, and read all exercised against the test universe; see the slice-8 Status entry
+  above for the full wire-fact summary). **SHIPPED (slice 8)** — no DELETE surface, so `destroy`
+  disables (`enabled=false`) and unmanages, same pattern as `roblox_game_pass`. Read is a public
+  single-GET on the separate `badges.roblox.com` host, unlike every other resource's
+  read-through-`apis.roblox.com`.
 - **Localization tables** — `POST /v1/localization-table/tables` + `GET`/`PATCH …/{tableId}` +
   entries endpoints. Legacy, and entry management makes it a **heavy** resource; defer unless asked.
 
