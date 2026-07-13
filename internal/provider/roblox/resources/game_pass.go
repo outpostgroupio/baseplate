@@ -28,6 +28,23 @@ func GamePass(gc opencloud.GamePassClient) provider.Resource {
 
 func (g *gamePass) Type() string { return "roblox_game_pass" }
 
+func (g *gamePass) Doc() provider.ResourceDoc {
+	return provider.ResourceDoc{
+		Summary: "Manages a game pass (a one-time, permanent in-experience purchase).",
+		Attributes: map[string]string{
+			"universe_id": "The universe. Often a reference to an experience.",
+			"name":        "Game pass name.",
+			"price":       "Price in Robux.",
+			"description": "Game pass description.",
+			"icon_file":   "Path to an icon image (direct upload).",
+			"is_for_sale": "On sale (default `true`).",
+		},
+		Notes:       "Game passes can't be hard-deleted, so `destroy` sets `is_for_sale = false` and unmanages it. Managed pricing is intentionally not exposed — it requires prior manual acceptance of Roblox's managed-pricing terms in the Creator Dashboard.",
+		Scopes:      []string{"game-pass:read", "game-pass:write"},
+		ExampleFile: "examples/game-pass.bp.hcl",
+	}
+}
+
 func (g *gamePass) DecodeSpec() hcldec.Spec {
 	return hcldec.ObjectSpec{
 		"universe_id": &hcldec.AttrSpec{Name: "universe_id", Type: cty.String, Required: true},

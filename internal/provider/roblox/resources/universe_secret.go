@@ -24,6 +24,20 @@ func UniverseSecret(sc opencloud.SecretClient) provider.Resource { return &unive
 
 func (u *universeSecret) Type() string { return "roblox_universe_secret" }
 
+func (u *universeSecret) Doc() provider.ResourceDoc {
+	return provider.ResourceDoc{
+		Summary: "Manages an Open Cloud secret for a universe — the only resource with a full create/update/real delete lifecycle. The value is encrypted client-side (LibSodium sealed box) before upload and is never written to state or printed in a plan.",
+		Attributes: map[string]string{
+			"universe_id": "The universe.",
+			"name":        "Secret name (the API id): 1-64 chars, alphanumeric/underscore, not starting with a digit.",
+			"value":       "The plaintext. Usually `env(\"…\")`. Sealed client-side; change detected via a hash.",
+			"domain":      "HttpService domain wildcard (e.g. `api.example.com`, `*`). Omit for a private key.",
+		},
+		Notes:  "Renaming a secret (`name`) is a recreate, not an in-place rename.",
+		Scopes: []string{"universe.secret:read", "universe.secret:write"},
+	}
+}
+
 func (u *universeSecret) DecodeSpec() hcldec.Spec {
 	return hcldec.ObjectSpec{
 		"universe_id": &hcldec.AttrSpec{Name: "universe_id", Type: cty.String, Required: true},

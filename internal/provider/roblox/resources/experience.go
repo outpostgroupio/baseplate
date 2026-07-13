@@ -26,6 +26,22 @@ func Experience(uc opencloud.UniverseClient) provider.Resource { return &experie
 
 func (e *experience) Type() string { return "roblox_experience" }
 
+func (e *experience) Doc() provider.ResourceDoc {
+	return provider.ResourceDoc{
+		Summary: "Manages a universe's writable configuration. Adopts an existing universe (create one in Creator Hub first); it does not create universes.",
+		Attributes: map[string]string{
+			"universe_id":        "The universe to manage. Its `id` output equals this.",
+			"voice_chat_enabled": "Enable voice chat.",
+			"desktop_enabled":    "Playable on desktop.",
+			"mobile_enabled":     "Playable on mobile.",
+			"tablet_enabled":     "Playable on tablet.",
+		},
+		Notes:       "`displayName`/`description`/`visibility`/`ageRating` are read-only on the Open Cloud v2 API (they're set via the root place), so they are not manageable here. `destroy` unmanages the universe (it is never deleted).",
+		Scopes:      []string{"universe:write"},
+		ExampleFile: "examples/baseplate.bp.hcl",
+	}
+}
+
 func (e *experience) DecodeSpec() hcldec.Spec {
 	spec := hcldec.ObjectSpec{
 		"universe_id": &hcldec.AttrSpec{Name: "universe_id", Type: cty.String, Required: true},
