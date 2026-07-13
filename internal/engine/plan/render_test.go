@@ -80,25 +80,19 @@ func TestRenderTextRedactsSensitive(t *testing.T) {
 	}
 }
 
-func TestRenderJSONRedactsSensitive(t *testing.T) {
+func TestJSONChangesRedactsSensitive(t *testing.T) {
 	p := &Plan{Changes: []Change{
 		{Address: "roblox_universe_secret.s", Type: "roblox_universe_secret",
 			Action: provider.ActionUpdate, Sensitive: []string{"value"},
 			AttrDiffs: []AttrDiff{{Name: "value", Old: cty.StringVal("oldsecret"), New: cty.StringVal("hunter2")}}},
 	}}
-	b, err := p.RenderJSON()
-	if err != nil {
-		t.Fatal(err)
+	changes := p.JSONChanges()
+	if len(changes) != 1 || len(changes[0].Attrs) != 1 {
+		t.Fatalf("unexpected changes shape: %+v", changes)
 	}
-	// NOTE: checking for the bare plaintext value "oldsecret" here rather than
-	// "old" — jsonAttr's Old field serializes with JSON key "old"
-	// (`json:"old,omitempty"`), so a literal `"old"` substring check would
-	// always match the field name itself regardless of redaction.
-	if strings.Contains(string(b), "hunter2") || strings.Contains(string(b), "oldsecret") {
-		t.Fatalf("plaintext leaked into json plan:\n%s", b)
-	}
-	if !strings.Contains(string(b), "(sensitive value)") {
-		t.Fatalf("expected redaction marker, got:\n%s", b)
+	a := changes[0].Attrs[0]
+	if a.Old != "(sensitive value)" || a.New != "(sensitive value)" {
+		t.Fatalf("sensitive value not redacted: %+v", a)
 	}
 }
 

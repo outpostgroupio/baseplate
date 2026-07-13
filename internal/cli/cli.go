@@ -33,6 +33,20 @@ func newProvider() provider.Provider {
 	return mock.New()
 }
 
+type validateResult struct {
+	Valid bool `json:"valid"`
+}
+
+type planResult struct {
+	Changes []plan.JSONChange `json:"changes"`
+	Summary plan.Summary      `json:"summary"`
+}
+
+type importResult struct {
+	Address string `json:"address"`
+	ID      string `json:"id"`
+}
+
 type streams struct {
 	in    io.Reader
 	out   io.Writer
@@ -84,8 +98,7 @@ func run(args []string, s streams) int {
 		if _, _, err := load(); err != nil {
 			return err
 		}
-		fmt.Fprintln(s.out, "Configuration is valid.")
-		return nil
+		return output.Emit(s.out, fmtOf(jsonOut), "validate", "Configuration is valid.\n", validateResult{Valid: true})
 	}})
 
 	planCmd := &cobra.Command{Use: "plan", RunE: func(cmd *cobra.Command, _ []string) error {
@@ -120,11 +133,10 @@ func run(args []string, s streams) int {
 			}
 		}
 		filterPlanByTarget(pl, target)
-		if jsonOut {
-			out, _ := pl.RenderJSON()
-			fmt.Fprintln(s.out, string(out))
-		} else {
-			fmt.Fprint(s.out, pl.RenderText(true))
+		if err := output.Emit(s.out, fmtOf(jsonOut), "plan",
+			pl.RenderText(true),
+			planResult{Changes: pl.JSONChanges(), Summary: pl.Summary()}); err != nil {
+			return err
 		}
 		if pl.HasChanges() {
 			exit = 2
@@ -148,7 +160,7 @@ func run(args []string, s streams) int {
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmdName = cmd.Name()
-			return importRun(p, cfgPath, statePath, args[0], args[1], s)
+			return importRun(p, cfgPath, statePath, args[0], args[1], fmtOf(jsonOut), s)
 		},
 	})
 
@@ -196,7 +208,7 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy bo
 
 // importRun adopts an existing resource (declared in config) into state by id,
 // under the state lock. It never mutates the remote.
-func importRun(p provider.Provider, cfgPath, statePath, address, id string, s streams) error {
+func importRun(p provider.Provider, cfgPath, statePath, address, id string, format output.Format, s streams) error {
 	_, desired, _, err := config.Load(cfgPath, p)
 	if err != nil {
 		return err
@@ -214,8 +226,9 @@ func importRun(p provider.Provider, cfgPath, statePath, address, id string, s st
 	if err := apply.Import(context.Background(), p, b, st, address, id, desired); err != nil {
 		return err
 	}
-	fmt.Fprintf(s.out, "Imported %s (id %s).\n", address, id)
-	return nil
+	return output.Emit(s.out, format, "import",
+		fmt.Sprintf("Imported %s (id %s).\n", address, id),
+		importResult{Address: address, ID: id})
 }
 
 // filterPlanByTarget restricts the plan to a single resource address when
