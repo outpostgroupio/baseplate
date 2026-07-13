@@ -116,3 +116,33 @@ func TestRenderTextRedactsSensitiveImport(t *testing.T) {
 		t.Fatalf("expected redaction in import preview, got:\n%s", out)
 	}
 }
+
+func TestJSONChangesAndSummary(t *testing.T) {
+	pl := &Plan{Changes: []Change{
+		{Address: "mock_thing.a", Action: provider.ActionCreate},
+		{Address: "mock_thing.b", Action: provider.ActionUpdate,
+			AttrDiffs: []AttrDiff{{Name: "name", Old: cty.StringVal("x"), New: cty.StringVal("y")}}},
+		{Address: "mock_thing.c", Action: provider.ActionDelete},
+		{Address: "mock_thing.d", ImportID: "id-9"},
+	}}
+
+	got := pl.JSONChanges()
+	if len(got) != 4 {
+		t.Fatalf("want 4 changes, got %d", len(got))
+	}
+	if got[1].Address != "mock_thing.b" || len(got[1].Attrs) != 1 || got[1].Attrs[0].New != "y" {
+		t.Fatalf("update change wrong: %+v", got[1])
+	}
+	if got[3].ImportID != "id-9" {
+		t.Fatalf("import id not carried: %+v", got[3])
+	}
+
+	s := pl.Summary()
+	if s.Add != 1 || s.Change != 1 || s.Destroy != 1 || s.Import != 1 {
+		t.Fatalf("summary wrong: %+v", s)
+	}
+
+	if empty := (&Plan{}).JSONChanges(); empty == nil {
+		t.Fatal("JSONChanges must return a non-nil slice for an empty plan")
+	}
+}
