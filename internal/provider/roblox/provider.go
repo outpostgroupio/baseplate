@@ -40,3 +40,17 @@ func New(apiKey string) (*Provider, error) {
 
 // Resources implements provider.Provider.
 func (p *Provider) Resources() map[string]provider.Resource { return p.resources }
+
+// SchemaProvider builds the provider's resource set with nil Open Cloud clients,
+// for schema/documentation introspection only (e.g. the resource-docs generator).
+// The resources' network methods (Create/Read/Update/Delete) must not be called.
+func SchemaProvider() *Provider {
+	return &Provider{resources: map[string]provider.Resource{
+		"roblox_experience":        resources.Experience(nil),
+		"roblox_asset":             resources.Asset(nil),
+		"roblox_developer_product": resources.DeveloperProduct(nil),
+		"roblox_place":             resources.Place(nil),
+		"roblox_universe_secret":   resources.UniverseSecret(nil),
+		"roblox_game_pass":         resources.GamePass(nil),
+	}}
+}
