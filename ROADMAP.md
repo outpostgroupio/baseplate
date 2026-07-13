@@ -57,7 +57,8 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   `roblox_developer_product` — no DELETE surface, so `destroy` sets `is_for_sale = false` and
   unmanages it. New `opencloud.GamePassClient` on the `game-passes/v1` service: create/update are
   **multipart**, create is **synchronous** (no Operation poll, unlike assets), update's PATCH
-  returns an **empty body** so `Update` GETs-after-PATCH to read back, and `gamePassId`/
+  returns an **empty body** so `Update` returns error-only and the resource rebuilds state from the
+  desired config (no read-back), and `gamePassId`/
   `iconAssetId` decode as JSON **numbers** into typed `int64` (opposite of `assetId`, which is a
   wire string). A risk-first live probe found Roblox's `isManagedPricingEnabled` requires prior
   manual acceptance in the Creator Dashboard, so **managed pricing was cut from v1** — `price` is
@@ -151,8 +152,9 @@ list-cursor surprises). Reproduce with `.superpowers/sdd/surface-probe.jq` /`det
   `imageFile`,`isManagedPricingEnabled`); create is **synchronous** (returns `GamePassConfigV2`
   directly, no Operation poll); **`gamePassId` is a JSON _number_, not a string** (opposite of
   `assetId`) and `iconAssetId` is a large int64 number → decode ids into typed `int64`, never
-  `interface{}`/`float64`; **PATCH returns an empty body** → the client's Update must GET-after-PATCH
-  to read back; price nests under `priceInformation.defaultPriceInRobux`; `iconAssetId` is
+  `interface{}`/`float64`; **PATCH returns an empty body** → the client's `Update` returns error-only
+  and the resource rebuilds state from the desired config; price nests under
+  `priceInformation.defaultPriceInRobux`; `iconAssetId` is
   auto-assigned even with no upload (→ computed). Near-clone of `roblox_developer_product`.
   **SHIPPED (slice 7)** — see the Status entry above. Managed pricing (`isManagedPricingEnabled`)
   was cut from v1: it requires prior manual acceptance in the Creator Dashboard, so it isn't
