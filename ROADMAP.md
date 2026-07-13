@@ -70,8 +70,15 @@ Phase 1 design + rationale, and `docs/superpowers/plans/` for the executed task-
 - **DONE (slice 3):** `baseplate import <address> <id>` — classic-CLI, config-required, state-only
   adoption (engine `apply.Import`). Proven live.
 - **DONE (slice 4):** declarative `import {}` block — `plan.ResolveImports` post-pass + one-pass
-  adopt+reconcile apply. Proven live. Follow-up: config generation (`-generate-config-out`
-  equivalent) as its own slice.
+  adopt+reconcile apply. Proven live. Follow-up (done, slice 6): config generation.
+- **DONE (slice 6):** config generation — `baseplate plan --generate-config=FILE` writes HCL for
+  each `import {}` block that has no `resource` block (read-only; never touches state). New pure
+  `internal/config/configgen` emitter (`hclwrite`, introspects `DecodeSpec()`, sources values from
+  `Read`); required-unreadable inputs → placeholder + `# TODO`, optional-unreadable → omitted,
+  **sensitive attrs never emit their value**. CLI partitions declared vs undeclared imports (+ dedup
+  guard). Native flag name `--generate-config` (dropped Terraform's `-out`). Proven live (generated
+  a real experience's config; re-parses valid). See
+  `docs/superpowers/specs/2026-07-12-baseplate-phase2-config-generation-design.md`.
 - **DONE (slice 5):** `roblox_universe_secret` — full CRUD incl. real hard-delete; client-side
   LibSodium sealed box; no-plaintext-in-state (`value_hash` trigger + new `provider.Sensitive`
   render redaction). NOTE: **subscription-products has NO Open Cloud write surface** (read-only
@@ -106,6 +113,13 @@ Phase 1 design + rationale, and `docs/superpowers/plans/` for the executed task-
     `create_time`/`update_time` that `stateAttrs` never populates (harmless dead entries); the
     sensitive-set map is rebuilt at three render sites in `render.go` (factor into a helper); no
     client-level `SecretClient.Update` unit test (the re-seal path is covered by the live rotate).
+  - **From slice 6 (config generation, all defer):** `configgen.zeroValue` defaults a non-primitive
+    required attr (list/map/object) to `""` → type-mismatched placeholder HCL (inert — no resource
+    uses non-primitive attrs today); `configgen.Generate`'s doc comment says "sensitive is always a
+    placeholder" but optional+sensitive is actually omitted (value still never leaks; only sensitive
+    attr today, `secret.value`, is Required); `roblox_asset` "one-of" `creator_user_id`/
+    `creator_group_id` is omitted from generated config (a `# TODO`-worthy gap the generic emitter
+    can't flag — a future `GenerateHints()` capability could).
 
 **Documentation (user-facing) — markdown-first, started 2026-07-12:**
 - **DONE:** `README.md` (front door); `docs/getting-started.md` (install → API key + scopes → first
