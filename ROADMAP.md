@@ -66,7 +66,8 @@ Phase 1 design + rationale, and `docs/superpowers/plans/` for the executed task-
   fixed by marshaling state against `cty.DynamicPseudoType`).
 - **DONE (slice 2):** `roblox_place` (.rbxl/.rbxlx publish + versioning) + the reusable
   `Triggerable` engine capability. Proven live.
-- More resources: game passes, badges, thumbnails/icons, social links, notifications, localization.
+- More resources — see the **[Resource surface audit](#resource-surface-audit-2026-07-13)** below for
+  the per-candidate Open Cloud write-surface findings (which are viable, which are not, and why).
 - **DONE (slice 3):** `baseplate import <address> <id>` — classic-CLI, config-required, state-only
   adoption (engine `apply.Import`). Proven live.
 - **DONE (slice 4):** declarative `import {}` block — `plan.ResolveImports` post-pass + one-pass
@@ -85,9 +86,9 @@ Phase 1 design + rationale, and `docs/superpowers/plans/` for the executed task-
   per-user GET only; products are Creator-Dashboard-managed only), so the roadmap's
   `subscription-products` monetization resource is not implementable — secrets was chosen
   instead.
-- More resources: game passes, badges, thumbnails/icons, social links, notifications, localization
-  (NOTE: game-passes/badges are LEGACY-API-only — no `/cloud/v2` writable surface; create-via-Open-
-  Cloud is uncertain).
+- More candidate resources — see the **[Resource surface audit](#resource-surface-audit-2026-07-13)**
+  below (supersedes the old one-line "game passes, badges, thumbnails, social links, notifications,
+  localization" list, which mixed viable and non-viable candidates together).
 - Richer env overlays; config modules.
 - **NEW deferrals (from slice-1 review):**
   - `stateResource` (apply.go) silently drops an attribute on a `ctyjson.Marshal` error
@@ -120,6 +121,60 @@ Phase 1 design + rationale, and `docs/superpowers/plans/` for the executed task-
     attr today, `secret.value`, is Required); `roblox_asset` "one-of" `creator_user_id`/
     `creator_group_id` is omitted from generated config (a `# TODO`-worthy gap the generic emitter
     can't flag — a future `GenerateHints()` capability could).
+
+### Resource surface audit (2026-07-13)
+Audit of the vendored unified Open Cloud spec (`opencloud/specs/openapi-unified.json`) for the
+candidate resources, so we stop losing which are actually buildable. **Method-verified against the
+spec, not yet live-verified** — Roblox specs routinely lie about what an API key can do, so every
+"viable" row still needs a live probe before we commit a slice (cf. the assetId-is-a-string and
+list-cursor surprises). Reproduce with `.superpowers/sdd/surface-probe.jq` /`detail-probe.jq`.
+
+**Viable — has an advertised writable surface (build candidates):**
+- **`roblox_game_pass`** — dedicated `game-passes/v1` service (NOT `legacy-`; the old roadmap note
+  claiming "legacy-only, create-via-Open-Cloud uncertain" was **wrong**). `POST
+  /game-passes/v1/universes/{universeId}/game-passes` (create), `PATCH …/{gamePassId}` (update),
+  `GET …/game-passes/creator` (list) + `…/{gamePassId}/creator` (read). No DELETE → destroy
+  unmanages/disables, same pattern as `roblox_developer_product`. **LIVE-VERIFIED 2026-07-13** (probe
+  `TestLiveGamePassProbe`; the API key created+got+updated a real game pass on the test universe).
+  Wire facts learned live: create/update are **multipart** (`name`,`description`,`price`,`isForSale`,
+  `imageFile`,`isManagedPricingEnabled`); create is **synchronous** (returns `GamePassConfigV2`
+  directly, no Operation poll); **`gamePassId` is a JSON _number_, not a string** (opposite of
+  `assetId`) and `iconAssetId` is a large int64 number → decode ids into typed `int64`, never
+  `interface{}`/`float64`; **PATCH returns an empty body** → the client's Update must GET-after-PATCH
+  to read back; price nests under `priceInformation.defaultPriceInRobux`; `iconAssetId` is
+  auto-assigned even with no upload (→ computed). Near-clone of `roblox_developer_product` →
+  the chosen next slice.
+- **`roblox_creator_store_product`** — clean modern `/cloud/v2` CRUD, not in any prior roadmap list.
+  `POST /cloud/v2/creator-store-products`, `GET`/`PATCH …/{creator_store_product_id}`. API-key
+  advertised. **No DELETE.** Best structural fit for our existing `/cloud/v2` patterns; needs a
+  spec-schema read to learn the resource shape (what a "creator store product" spans).
+- **`roblox_badge`** — `POST /legacy-badges/v1/universes/{universeId}/badges` (create, api-key
+  advertised), `PATCH /legacy-badges/v1/badges/{badgeId}` (update), `POST
+  /legacy-publish/v1/badges/{badgeId}/icon` (icon). Legacy-prefixed → **higher live-probe risk**
+  (legacy bridges sometimes reject api-keys in practice). No DELETE. Viable but confirm live first.
+- **Localization tables** — `POST /v1/localization-table/tables` + `GET`/`PATCH …/{tableId}` +
+  entries endpoints. Legacy, and entry management makes it a **heavy** resource; defer unless asked.
+
+**Not viable — no writable Open Cloud surface (do NOT chase; kept here so we don't rediscover):**
+- **`subscription-products`** — confirmed read-only: the only path is
+  `/cloud/v2/universes/{id}/subscription-products/{productId}/subscriptions/{subscriptionId}` (read a
+  single user's subscription). No product create/update. Creator-Dashboard-managed only. (Already
+  noted at slice 5; re-confirmed.)
+- **Experience/universe social links** — social-links write surface exists **only for groups**
+  (`/v1/groups/{groupId}/social-links`), not universes/experiences. Out of scope unless Baseplate
+  grows group management.
+- **Universe `displayName`/`description`/`visibility`/`ageRating`** — read-only on the v2 API (set
+  via the root place); see `CLAUDE.md`. Only device/voice/private-server fields are writable, which
+  `roblox_experience` already covers.
+
+**Actions, not resources (one-shot side effects — don't model as declarative state):**
+`POST …/users/{id}/notifications` (send notification), `…:translateText`, `…:publishMessage`,
+`…:restartServers`, `users/{id}:generateThumbnail`. These are imperative operations, not reconcilable
+state — if ever wanted, they belong behind a CLI verb, not a `resource` block.
+
+**Marginal / needs design:** game **thumbnails/icons** — only per-language legacy endpoints
+(`/v1/game-thumbnails/games/{gameId}/language-codes/{lang}/…`) and user-avatar
+`:generateThumbnail`; no clean experience-icon write resource surfaced. Revisit if users ask.
 
 **Documentation (user-facing) — markdown-first, started 2026-07-12:**
 - **DONE:** `README.md` (front door); `docs/getting-started.md` (install → API key + scopes → first
