@@ -28,6 +28,23 @@ func DeveloperProduct(pc opencloud.DeveloperProductClient) provider.Resource {
 
 func (d *developerProduct) Type() string { return "roblox_developer_product" }
 
+func (d *developerProduct) Doc() provider.ResourceDoc {
+	return provider.ResourceDoc{
+		Summary: "Manages a developer product (an in-experience consumable purchase).",
+		Attributes: map[string]string{
+			"universe_id": "The universe. Often a reference to an experience.",
+			"name":        "Product name.",
+			"price":       "Price in Robux.",
+			"description": "Product description.",
+			"icon_file":   "Path to an icon image (direct upload).",
+			"is_for_sale": "On sale (default `true`).",
+		},
+		Notes:       "Developer products can't be hard-deleted, so `destroy` sets `is_for_sale = false` and unmanages it.",
+		Scopes:      []string{"developer-product:read", "developer-product:write"},
+		ExampleFile: "examples/baseplate.bp.hcl",
+	}
+}
+
 func (d *developerProduct) DecodeSpec() hcldec.Spec {
 	return hcldec.ObjectSpec{
 		"universe_id": &hcldec.AttrSpec{Name: "universe_id", Type: cty.String, Required: true},

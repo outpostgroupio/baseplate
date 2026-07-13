@@ -21,6 +21,22 @@ func Asset(ac opencloud.AssetClient) provider.Resource { return &asset{ac: ac} }
 
 func (a *asset) Type() string { return "roblox_asset" }
 
+func (a *asset) Doc() provider.ResourceDoc {
+	return provider.ResourceDoc{
+		Summary: "Uploads a user- or group-owned image/decal asset.",
+		Attributes: map[string]string{
+			"file":             "Path to the image to upload.",
+			"display_name":     "Asset name.",
+			"description":      "Asset description.",
+			"asset_type":       "Asset type (e.g. image/decal).",
+			"creator_user_id":  "Owning user id (set exactly one of creator_user_id/creator_group_id).",
+			"creator_group_id": "Owning group id (set exactly one of creator_user_id/creator_group_id).",
+		},
+		Notes:  "The `id` output is the `assetId` (a numeric string). Image/decal assets are not archivable, so `destroy` unmanages the asset in place (drops it from state, leaves it uploaded).",
+		Scopes: []string{"asset:read", "asset:write"},
+	}
+}
+
 func (a *asset) DecodeSpec() hcldec.Spec {
 	return hcldec.ObjectSpec{
 		"file":             &hcldec.AttrSpec{Name: "file", Type: cty.String, Required: true},

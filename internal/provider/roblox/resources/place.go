@@ -24,6 +24,20 @@ func Place(pc opencloud.PlaceClient) provider.Resource { return &place{pc: pc} }
 
 func (p *place) Type() string { return "roblox_place" }
 
+func (p *place) Doc() provider.ResourceDoc {
+	return provider.ResourceDoc{
+		Summary: "Publishes a place file (`.rbxl`/`.rbxlx`) to an existing place and re-publishes when the file content changes.",
+		Attributes: map[string]string{
+			"universe_id":  "The universe the place belongs to.",
+			"place_id":     "The existing place to publish to.",
+			"file":         "Path to the `.rbxl`/`.rbxlx`. Change detected via content hash.",
+			"version_type": "`Published` (default) or `Saved`.",
+		},
+		Notes:  "Place content isn't remotely readable, so change detection is by file content hash. `destroy` is a no-op (a place can't be unpublished).",
+		Scopes: []string{"universe-places:write"},
+	}
+}
+
 func (p *place) DecodeSpec() hcldec.Spec {
 	return hcldec.ObjectSpec{
 		"universe_id":  &hcldec.AttrSpec{Name: "universe_id", Type: cty.String, Required: true},
