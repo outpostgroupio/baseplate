@@ -71,16 +71,28 @@ Dashboard, so Baseplate can't and won't manage them):
 
 ## Install
 
-Baseplate is a single self-contained binary — no runtime dependencies. Download the build for your
-platform from the [Releases](https://github.com/outpostgroupio/baseplate/releases) page and put it on
+Baseplate is a single self-contained binary — no runtime dependencies.
+
+**Download a release build** for your platform from the
+[Releases](https://github.com/outpostgroupio/baseplate/releases) page, extract it, and put it on
 your `PATH`:
 
 ```console
+$ tar xzf baseplate_*_linux_amd64.tar.gz   # or unzip on Windows
 $ chmod +x baseplate && mv baseplate /usr/local/bin/
-$ baseplate --help
+$ baseplate version
 ```
 
-> Release binaries and a Rokit/Foreman install are in progress — see the [roadmap](ROADMAP.md).
+Each release ships `checksums.txt`; verify your download with `sha256sum -c checksums.txt`.
+
+**Or install from source** (requires Go 1.24+):
+
+```console
+$ go install github.com/outpostgroupio/baseplate/cmd/baseplate@latest
+```
+
+> Pre-1.0 builds are published as pre-releases (tags like `v0.1.0-rc.1`). A Rokit/Foreman install
+> is on the [roadmap](ROADMAP.md).
 
 ## Quick start
 
