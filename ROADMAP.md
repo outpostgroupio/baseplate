@@ -205,13 +205,15 @@ state — if ever wanted, they belong behind a CLI verb, not a `resource` block.
 - **DONE — how-to guides** (`docs/how-to/`): importing existing resources (classic + `import {}`),
   managing secrets, references + `env()`, API-key scopes per resource.
 - **REMAINING — annotated examples:** grow `examples/` into a walk-through set.
-- **PLANNED SLICE — autodocs generator (`resource-docs`):** a Go generator (à la Terraform
-  `tfplugindocs`) that walks `provider.Resources()`, introspects each resource's `DecodeSpec()` +
-  `Computed()`, and emits the resource-reference markdown so attribute tables never drift from code.
-  Prereq: add an attribute-description capability to resources (`hcldec.AttrSpec` carries no
-  description) — likely a small `Describe() map[string]string` (or richer schema) that both the
-  generator and future validation can read. Emits markdown, so it is framework-independent. Until it
-  lands, the resource reference is hand-authored (`docs/resource-reference.md`).
+- **DONE — autodocs generator (`resource-docs`):** `internal/provider/resourcedocs.Generate` walks
+  `provider.Resources()`, derives each attribute's type + kind tags from `DecodeSpec()`/`Computed()`/
+  `Sensitive()`, and merges in-code authored descriptions from the new `provider.Documented`
+  capability (`Doc() ResourceDoc{Summary, Attributes, Notes, Scopes, TriggerAttrs, ExampleFile}`) to
+  emit `docs/resource-reference.md`. Keyless `roblox.SchemaProvider()` feeds it (no API key needed);
+  a `//go:generate` main writes the file and a golden test (`TestResourceReferenceUpToDate`) fails on
+  drift. Generation errors if any attribute lacks a description, so docs can't silently drift. Examples
+  are linked (`ExampleFile`), not inlined. `ResourceDoc` is the schema-description seam a future config
+  validation can reuse. See `docs/superpowers/specs/2026-07-13-baseplate-resource-docs-design.md`.
 - **Docs site (deferred):** publish the markdown to GitHub Pages. Target framework: **MkDocs Material**
   (simple, reference-doc-friendly, one-command `gh-deploy`); Astro Starlight if a slicker product site
   is wanted later. The autodocs generator is ours regardless of framework.
