@@ -175,6 +175,21 @@ func TestHTTPLockingDisabledWhenNoLockAddress(t *testing.T) {
 	}
 }
 
+func TestHTTPPutRejectedUnderForeignLock(t *testing.T) {
+	fs := &fakeTFServer{}
+	srv := httptest.NewServer(fs.handler())
+	defer srv.Close()
+	cfg := HTTPConfig{Address: srv.URL, LockAddress: srv.URL + "/lock", LockMethod: "POST", Version: "test"}
+	holder, _ := NewHTTP(cfg)
+	if _, err := holder.Lock(); err != nil {
+		t.Fatal(err)
+	}
+	other, _ := NewHTTP(cfg)
+	if err := other.Put(state.New()); err == nil {
+		t.Fatal("put without the held lock ID should be rejected")
+	}
+}
+
 func TestNewHTTPRequiresAddress(t *testing.T) {
 	if _, err := NewHTTP(HTTPConfig{}); err == nil {
 		t.Fatal("expected error when address is empty")
