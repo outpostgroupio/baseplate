@@ -77,3 +77,22 @@ type Triggerable interface {
 type Sensitive interface {
 	Sensitive() []string
 }
+
+// Documented is an optional Resource capability. Doc returns authored
+// documentation for a resource — its summary, per-attribute descriptions, any
+// caveats, and the API-key scopes it needs. The resource-docs generator merges
+// this with the schema-derived structure (types + kind tags) to render the
+// resource reference. Descriptions live here, next to DecodeSpec, so a missing
+// one fails generation rather than drifting.
+type Documented interface {
+	Doc() ResourceDoc
+}
+
+// ResourceDoc is the authored documentation for one resource.
+type ResourceDoc struct {
+	Summary     string            // 1–2 sentence resource description
+	Attributes  map[string]string // per-attribute description, keyed by DecodeSpec attr name
+	Notes       string            // optional caveats paragraph (destroy behavior, read-only fields…)
+	Scopes      []string          // e.g. []string{"universe:write"}; rendered + linked to api-key-scopes.md
+	ExampleFile string            // optional; repo-relative path to an example, rendered as a link
+}
