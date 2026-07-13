@@ -1,0 +1,19 @@
+name: baseplate apply
+on:
+  push:
+    branches: [main]
+concurrency:
+  group: baseplate-apply-main
+  cancel-in-progress: false
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: outpostgroupio/baseplate@v0.1.0 # pin to a released tag or commit SHA
+        with:
+          command: apply
+          args: --config baseplate.bp.hcl --auto-approve
+          api-key: ${{ secrets.ROBLOX_API_KEY }}

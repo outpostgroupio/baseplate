@@ -1,0 +1,69 @@
+name: "Baseplate"
+description: "Run Baseplate (plan/apply/destroy/validate) for Roblox infrastructure-as-code."
+inputs:
+  command:
+    description: "Baseplate subcommand: plan, apply, destroy, or validate."
+    required: false
+    default: "plan"
+  args:
+    description: "Extra arguments (e.g. --config infra.bp.hcl --auto-approve)."
+    required: false
+    default: ""
+  version:
+    description: "Baseplate version/ref to install (a tag like v0.1.0, a commit SHA, or latest)."
+    required: false
+    default: "latest"
+  api-key:
+    description: "Roblox Open Cloud API key, exported as ROBLOX_API_KEY."
+    required: false
+    default: ""
+  working-directory:
+    description: "Directory to run in."
+    required: false
+    default: "."
+outputs:
+  output:
+    description: "Captured stdout+stderr of the command."
+    value: ${{ steps.run.outputs.output }}
+  changes:
+    description: "For plan: 'true' if there are changes, 'false' if converged."
+    value: ${{ steps.run.outputs.changes }}
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-go@v5
+      with:
+        go-version: "1.24"
+    - shell: bash
+      env:
+        BP_VERSION: ${{ inputs.version }}
+      run: |
+        go install "github.com/outpostgroupio/baseplate/cmd/baseplate@${BP_VERSION}"
+        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+    - id: run
+      shell: bash
+      env:
+        ROBLOX_API_KEY: ${{ inputs.api-key }}
+        BP_COMMAND: ${{ inputs.command }}
+        BP_ARGS: ${{ inputs.args }}
+        BP_WORKDIR: ${{ inputs.working-directory }}
+      run: |
+        set +e
+        cd "$BP_WORKDIR" || exit 1
+        out="$(baseplate "$BP_COMMAND" $BP_ARGS 2>&1)"
+        code=$?
+        echo "$out"
+        delim="BP_$(openssl rand -hex 8)"
+        {
+          echo "output<<$delim"
+          echo "$out"
+          echo "$delim"
+        } >> "$GITHUB_OUTPUT"
+        if [ "$BP_COMMAND" = "plan" ]; then
+          case $code in
+            0) echo "changes=false" >> "$GITHUB_OUTPUT"; exit 0 ;;
+            2) echo "changes=true" >> "$GITHUB_OUTPUT"; exit 0 ;;
+            *) exit $code ;;
+          esac
+        fi
+        exit $code
