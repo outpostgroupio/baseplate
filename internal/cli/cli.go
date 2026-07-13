@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -45,6 +46,47 @@ type planResult struct {
 type importResult struct {
 	Address string `json:"address"`
 	ID      string `json:"id"`
+}
+
+type applyResult struct {
+	Applied int               `json:"applied"`
+	Changes []plan.JSONChange `json:"changes"`
+}
+
+var errCancelled = errors.New("cancelled at confirmation prompt")
+
+var confirmPrompts = map[string]string{
+	"apply":   "Do you want to perform these actions?",
+	"destroy": "Do you really want to destroy all resources?",
+}
+
+var cancelLabel = map[string]string{
+	"apply":   "Apply",
+	"destroy": "Destroy",
+}
+
+// confirm decides whether an apply/destroy may proceed. It auto-approves when
+// --auto-approve is set or the session is non-interactive (CI). On an
+// interactive TTY it prompts and accepts only "yes". Combining --json with an
+// interactive TTY (no auto-approve) is rejected, since a text prompt would
+// corrupt the JSON stream.
+func confirm(s streams, format output.Format, autoApprove bool, verb string) (bool, error) {
+	if autoApprove || !s.isTTY() {
+		return true, nil
+	}
+	if format == output.JSON {
+		return false, fmt.Errorf("%s with --json requires --auto-approve", verb)
+	}
+	fmt.Fprintf(s.out, "\n%s Only 'yes' will be accepted to confirm.\nEnter a value: ", confirmPrompts[verb])
+	line, _ := bufio.NewReader(s.in).ReadString('\n')
+	return strings.TrimSpace(line) == "yes", nil
+}
+
+// autoApproved reports whether --auto-approve or its --yes alias was set.
+func autoApproved(cmd *cobra.Command) bool {
+	a, _ := cmd.Flags().GetBool("auto-approve")
+	y, _ := cmd.Flags().GetBool("yes")
+	return a || y
 }
 
 type streams struct {
@@ -146,14 +188,21 @@ func run(args []string, s streams) int {
 	planCmd.Flags().StringVar(&generateConfigOut, "generate-config", "", "write generated HCL for undeclared import blocks to this file")
 	root.AddCommand(planCmd)
 
-	root.AddCommand(&cobra.Command{Use: "apply", RunE: func(cmd *cobra.Command, _ []string) error {
+	applyCmd := &cobra.Command{Use: "apply", RunE: func(cmd *cobra.Command, _ []string) error {
 		cmdName = cmd.Name()
-		return applyRun(p, cfgPath, statePath, target, false, s)
-	}})
-	root.AddCommand(&cobra.Command{Use: "destroy", RunE: func(cmd *cobra.Command, _ []string) error {
+		return applyRun(p, cfgPath, statePath, target, false, autoApproved(cmd), fmtOf(jsonOut), s)
+	}}
+	applyCmd.Flags().Bool("auto-approve", false, "skip the interactive approval prompt")
+	applyCmd.Flags().Bool("yes", false, "alias for --auto-approve")
+	root.AddCommand(applyCmd)
+
+	destroyCmd := &cobra.Command{Use: "destroy", RunE: func(cmd *cobra.Command, _ []string) error {
 		cmdName = cmd.Name()
-		return applyRun(p, cfgPath, statePath, target, true, s)
-	}})
+		return applyRun(p, cfgPath, statePath, target, true, autoApproved(cmd), fmtOf(jsonOut), s)
+	}}
+	destroyCmd.Flags().Bool("auto-approve", false, "skip the interactive approval prompt")
+	destroyCmd.Flags().Bool("yes", false, "alias for --auto-approve")
+	root.AddCommand(destroyCmd)
 	root.AddCommand(&cobra.Command{
 		Use:   "import <address> <id>",
 		Short: "Adopt an existing resource into state",
@@ -165,13 +214,20 @@ func run(args []string, s streams) int {
 	})
 
 	if err := root.Execute(); err != nil {
+		if errors.Is(err, errCancelled) {
+			return 1
+		}
 		output.EmitError(s.err, fmtOf(jsonOut), cmdName, err)
 		return 1
 	}
 	return exit
 }
 
-func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy bool, s streams) error {
+func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, autoApprove bool, format output.Format, s streams) error {
+	verb := "apply"
+	if destroy {
+		verb = "destroy"
+	}
 	var desired []plan.DesiredResource
 	var imports []plan.ImportBlock
 	if !destroy {
@@ -199,11 +255,26 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy bo
 		return err
 	}
 	filterPlanByTarget(pl, target)
+
+	if pl.HasChanges() {
+		if format == output.Text {
+			fmt.Fprint(s.out, pl.RenderText(true))
+		}
+		ok, err := confirm(s, format, autoApprove, verb)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			fmt.Fprintf(s.out, "%s cancelled.\n", cancelLabel[verb])
+			return errCancelled
+		}
+	}
 	if err := apply.Apply(context.Background(), p, b, st, pl); err != nil {
 		return err
 	}
-	fmt.Fprintf(s.out, "Apply complete. %d change(s).\n", len(pl.Changes))
-	return nil
+	return output.Emit(s.out, format, verb,
+		fmt.Sprintf("Apply complete. %d change(s).\n", len(pl.Changes)),
+		applyResult{Applied: len(pl.Changes), Changes: pl.JSONChanges()})
 }
 
 // importRun adopts an existing resource (declared in config) into state by id,
