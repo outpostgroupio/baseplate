@@ -15,6 +15,7 @@ during `apply`/`destroy`, so grant both sides.
 | `roblox_place` | `universe-places:write` |
 | `roblox_asset` | `asset:read`, `asset:write` |
 | `roblox_developer_product` | `developer-product:read`, `developer-product:write` |
+| `roblox_game_pass` | `game-pass:read`, `game-pass:write` |
 | `roblox_universe_secret` | `universe.secret:read`, `universe.secret:write` |
 
 A few are easy to miss because they don't match the "obvious" name:

@@ -51,13 +51,14 @@ $ baseplate destroy   # tear down what's managed
 | `roblox_place` | Publishes a place's `.rbxl`/`.rbxlx` and re-publishes on content change. |
 | `roblox_asset` | User- or group-owned image/decal assets (multipart upload). |
 | `roblox_developer_product` | Developer products (name, price, description, icon, on-sale). |
+| `roblox_game_pass` | Game passes (name, price, description, icon, on-sale). |
 | `roblox_universe_secret` | Open Cloud secrets — full CRUD incl. real delete; values sealed client-side, never stored. |
 
 Plus declarative `import { to = <address>  id = "<id>" }` blocks to adopt existing resources during a
 normal `apply`.
 
-**Planned:** game passes, badges, and creator-store products all have a usable Open Cloud write
-surface and are candidate resources — see the [roadmap](ROADMAP.md#resource-surface-audit-2026-07-13).
+**Planned:** badges and creator-store products both have a usable Open Cloud write surface and are
+candidate resources — see the [roadmap](ROADMAP.md#resource-surface-audit-2026-07-13).
 
 **Not manageable via Open Cloud** (no write API — Roblox exposes these only through the Creator
 Dashboard, so Baseplate can't and won't manage them):
