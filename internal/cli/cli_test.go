@@ -243,6 +243,97 @@ func TestPlanJSONHasEnvelopeAndSummary(t *testing.T) {
 	}
 }
 
+// applyStreams builds streams with a scripted stdin and a chosen TTY-ness.
+func applyStreams(stdin string, tty bool, out *bytes.Buffer) streams {
+	return streams{in: strings.NewReader(stdin), out: out, err: out, isTTY: func() bool { return tty }}
+}
+
+func writeCfg(t *testing.T, dir string) (cfg, statePath string) {
+	t.Helper()
+	cfg = filepath.Join(dir, "baseplate.bp.hcl")
+	os.WriteFile(cfg, []byte("resource \"mock_thing\" \"a\" {\n  name = \"root\"\n}\n"), 0o644)
+	return cfg, filepath.Join(dir, "s.bpstate")
+}
+
+func TestApplyPromptAcceptsYes(t *testing.T) {
+	dir := t.TempDir()
+	cfg, st := writeCfg(t, dir)
+	var out bytes.Buffer
+	code := run([]string{"apply", "--config", cfg, "--state", st}, applyStreams("yes\n", true, &out))
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "Apply complete") {
+		t.Fatalf("apply should have run: %s", out.String())
+	}
+	if _, err := backend.NewLocal(st).Get(); err != nil {
+		t.Fatalf("state should exist: %v", err)
+	}
+}
+
+func TestApplyPromptCancelsOnNo(t *testing.T) {
+	dir := t.TempDir()
+	cfg, st := writeCfg(t, dir)
+	var out bytes.Buffer
+	code := run([]string{"apply", "--config", cfg, "--state", st}, applyStreams("no\n", true, &out))
+	if code != 1 {
+		t.Fatalf("expected exit 1 on cancel, got %d\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "Apply cancelled") {
+		t.Fatalf("expected cancellation message: %s", out.String())
+	}
+}
+
+func TestApplyNonTTYAutoApplies(t *testing.T) {
+	dir := t.TempDir()
+	cfg, st := writeCfg(t, dir)
+	var out bytes.Buffer
+	// Empty stdin, non-TTY: must NOT block and must apply.
+	code := run([]string{"apply", "--config", cfg, "--state", st}, applyStreams("", false, &out))
+	if code != 0 || !strings.Contains(out.String(), "Apply complete") {
+		t.Fatalf("non-TTY apply should proceed: code=%d out=%s", code, out.String())
+	}
+}
+
+func TestApplyAutoApproveSkipsPrompt(t *testing.T) {
+	dir := t.TempDir()
+	cfg, st := writeCfg(t, dir)
+	var out bytes.Buffer
+	// TTY true but --auto-approve: must not read stdin, must apply.
+	code := run([]string{"apply", "--auto-approve", "--config", cfg, "--state", st}, applyStreams("", true, &out))
+	if code != 0 || !strings.Contains(out.String(), "Apply complete") {
+		t.Fatalf("--auto-approve should apply: code=%d out=%s", code, out.String())
+	}
+}
+
+func TestApplyJSONOnTTYRequiresAutoApprove(t *testing.T) {
+	dir := t.TempDir()
+	cfg, st := writeCfg(t, dir)
+	var out, errBuf bytes.Buffer
+	code := run([]string{"apply", "--json", "--config", cfg, "--state", st}, streams{
+		in: strings.NewReader("yes\n"), out: &out, err: &errBuf, isTTY: func() bool { return true },
+	})
+	if code != 1 {
+		t.Fatalf("expected exit 1, got %d", code)
+	}
+	if !strings.Contains(errBuf.String(), "requires --auto-approve") {
+		t.Fatalf("expected auto-approve guidance on stderr: %s", errBuf.String())
+	}
+}
+
+func TestApplyJSONResultEnvelope(t *testing.T) {
+	dir := t.TempDir()
+	cfg, st := writeCfg(t, dir)
+	var out bytes.Buffer
+	code := run([]string{"apply", "--json", "--auto-approve", "--config", cfg, "--state", st}, applyStreams("", false, &out))
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), `"command": "apply"`) || !strings.Contains(out.String(), `"applied"`) {
+		t.Fatalf("apply --json envelope wrong: %s", out.String())
+	}
+}
+
 func TestValidateJSONResult(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "baseplate.bp.hcl")
