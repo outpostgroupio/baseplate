@@ -12,7 +12,7 @@ resource "roblox_badge" "first_login" {
   name        = "Welcome!"
   description = "Awarded on your first visit"
   enabled     = true
-  icon_file   = "./assets/welcome.png" # optional; change detected via content hash
+  icon_file   = "./assets/welcome.png" # required; change detected via content hash
 
   # Opt-in acknowledgement of the Robux cost to create a badge (free in practice).
   expected_cost  = 0
