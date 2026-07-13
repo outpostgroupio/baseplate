@@ -66,9 +66,11 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   See `docs/superpowers/specs/2026-07-13-baseplate-phase2-game-pass-design.md`.
 - **Phase 2 slice 8 COMPLETE (`roblox_badge`), proven live:** first resource with a **split
   read/write host** — write (create/update/icon) goes through the Open Cloud legacy bridge on
-  `apis.roblox.com` (api-key + the two badge scopes, `legacy-universe.badge:manage-and-spend-robux`
-  for create and `legacy-universe.badge:write` for update), while `Get` is a **public, unauthenticated
-  single-GET** on a different host, `GET https://badges.roblox.com/v1/badges/{badgeId}`. New
+  `apis.roblox.com` (api-key + the three badge scopes per the spec:
+  `legacy-universe.badge:manage-and-spend-robux` for create, `legacy-universe.badge:write` for
+  update, and `legacy-badge:manage` for icon upload — see `docs/how-to/api-key-scopes.md`), while
+  `Get` is a **public, unauthenticated single-GET** on a different host,
+  `GET https://badges.roblox.com/v1/badges/{badgeId}`. New
   `opencloud.BadgeClient` takes two `*opencloud.Client`s (`write`, `read`) for this reason. Live-
   confirmed: create is **free** (`expectedCost=0` accepted) but the icon (`files` multipart part) is
   **required** — omitting it 400s with code `11` ("The badge icon is invalid"); `id`/`iconImageId`
