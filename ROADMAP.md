@@ -159,10 +159,16 @@ list-cursor surprises). Reproduce with `.superpowers/sdd/surface-probe.jq` /`det
   **SHIPPED (slice 7)** — see the Status entry above. Managed pricing (`isManagedPricingEnabled`)
   was cut from v1: it requires prior manual acceptance in the Creator Dashboard, so it isn't
   something Baseplate can turn on for you; `price` is Required instead of that being optional.
-- **`roblox_creator_store_product`** — clean modern `/cloud/v2` CRUD, not in any prior roadmap list.
-  `POST /cloud/v2/creator-store-products`, `GET`/`PATCH …/{creator_store_product_id}`. API-key
-  advertised. **No DELETE.** Best structural fit for our existing `/cloud/v2` patterns; needs a
-  spec-schema read to learn the resource shape (what a "creator store product" spans).
+- **`roblox_creator_store_product`** — clean modern `/cloud/v2` CRUD (`POST /cloud/v2/creator-store-products`,
+  `GET`/`PATCH …/{creator_store_product_id}` with `updateMask`; JSON, no DELETE). **DEPRIORITIZED after
+  a 2026-07-13 schema spike:** it manages **selling an uploaded asset on the Creator Store
+  marketplace** (a `oneOf` over plugin/model/audio/decal/meshPart/video/fontFamily asset id, each
+  `x-immutable`/create-only; a nested USD `Money` `base_price` = `{significand, exponent}`; a
+  `published` bool; read-only seller/purchasable/restrictions). That's **marketplace asset selling for
+  asset creators**, NOT experience monetization — the latter is already covered by
+  `roblox_developer_product` + `roblox_game_pass`. Still a viable slice if we ever target the
+  asset-seller persona; design wrinkles noted (nested Money price → expose `price_usd` and convert;
+  7-way create-only oneOf; scope string unconfirmed → live-probe first).
 - **`roblox_badge`** — `POST /legacy-badges/v1/universes/{universeId}/badges` (create, api-key
   advertised), `PATCH /legacy-badges/v1/badges/{badgeId}` (update), `POST
   /legacy-publish/v1/badges/{badgeId}/icon` (icon). Legacy-prefixed → **higher live-probe risk**
