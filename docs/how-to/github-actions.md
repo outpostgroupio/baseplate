@@ -1,0 +1,38 @@
+# GitHub Actions
+
+Baseplate ships a composite action and two example workflows so you can run plan-on-PR and
+apply-on-merge in your own repo.
+
+## The action
+
+`uses: outpostgroupio/baseplate@<ref>` — installs Baseplate and runs a subcommand.
+
+Inputs: `command` (default `plan`), `args`, `version` (default `latest`), `api-key`,
+`working-directory`. Outputs: `output` (the command's text output) and `changes` (`true`/`false` for
+`plan`). **Pin `<ref>` to a released tag (e.g. `@v0.1.0`) or a commit SHA — not `@latest`.**
+
+## Plan on pull requests
+
+Copy `examples/github-actions/plan-on-pr.yml` into `.github/workflows/`. On each PR it runs
+`baseplate plan` and posts (or updates) a single comment with the diff. `plan` exits `2` when there are
+changes; the action treats that as success, so a PR with changes doesn't fail CI.
+
+Fork PRs are skipped (they have no secrets and a read-only token). The plan comment shows resource
+attribute values — sensitive attributes (e.g. secret values) are redacted, but other values are
+visible to anyone who can see the PR.
+
+## Apply on merge
+
+Copy `examples/github-actions/apply-on-merge.yml`. On push to `main` it runs
+`baseplate apply --auto-approve` (non-interactive). A `concurrency` group serializes applies.
+
+## State in CI (important)
+
+The default local state file does not persist between CI runs. For real team CI, configure a remote
+[HTTP state backend](remote-state.md) and store its `password` as a GitHub secret, so state persists
+and concurrent runs lock.
+
+## Secrets
+
+- `ROBLOX_API_KEY` — required. Passed to the action's `api-key` input.
+- Any state backend `password` — if you use a remote backend.

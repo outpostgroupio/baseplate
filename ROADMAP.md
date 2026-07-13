@@ -285,7 +285,11 @@ state — if ever wanted, they belong behind a CLI verb, not a `resource` block.
   newer-format state file with an upgrade message, and there's a migration seam (`migrations[v]`) for
   future format changes. `CurrentVersion` is 1 (no format change this slice). See
   `docs/superpowers/specs/2026-07-13-baseplate-phase3-state-versioning-design.md`.
-- Remaining: prebuilt GitHub Actions (plan-on-PR comment, apply-on-merge).
+- **DONE (slice 4 — GitHub Actions):** a composite `action.yml` + example `plan-on-pr` (comments the
+  diff, treats plan exit-2 as success) and `apply-on-merge` (`--auto-approve`, concurrency-guarded)
+  workflows, hardened against script injection and fork-PR token issues. See
+  `docs/how-to/github-actions.md` and `docs/superpowers/specs/2026-07-13-baseplate-phase3-github-actions-design.md`.
+  **Phase 3 (CI layer) complete.**
 
 **Phase 4 — churn resilience:** the schema-drift watcher (`regen.sh` + the vendored spec seed
 it — fetch Roblox/creator-docs `openapi.json`, semantic-diff on change, open an issue/PR),
