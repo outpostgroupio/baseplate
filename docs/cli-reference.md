@@ -18,6 +18,8 @@ These are accepted by every command.
 | `--target` | *(none)* | Limit the operation to a single resource address (e.g. `roblox_asset.icon`). |
 | `--json` | `false` | Emit machine-readable output on **every** command. Results are a versioned envelope `{ "format_version": 1, "command": ..., "result": ... }` on stdout; errors are `{ "format_version": 1, "command": ..., "error": { "message": ... } }` on stderr. |
 
+State can also be stored remotely via a `backend "http" {}` block — see [Remote state](how-to/remote-state.md).
+
 ### Approval flags (`apply` / `destroy`)
 
 | Flag | Default | Description |

@@ -228,8 +228,13 @@ state — if ever wanted, they belong behind a CLI verb, not a `resource` block.
   (`--auto-approve`/`--yes`, non-TTY auto-skips), `--json` result envelopes + structured errors on
   **all** commands (versioned `format_version: 1`), stdout/stderr discipline via injected streams.
   See `docs/superpowers/specs/2026-07-13-baseplate-phase3-cli-hardening-design.md`.
-- Remaining: prebuilt GitHub Actions (plan-on-PR comment, apply-on-merge), remote state backend +
-  CI locking, state-file version/migration.
+- **DONE (slice 2 — remote state):** pluggable backend selection via a `backend "http" {}` block; a
+  generic HTTP backend speaking the OpenTofu/Terraform http protocol (GET/update + LOCK/UNLOCK, Basic
+  auth, custom methods) — GitLab-style managed state works. Local file backend remains the default.
+  S3/R2 are additive follow-ups on the same seam. See
+  `docs/superpowers/specs/2026-07-13-baseplate-phase3-remote-state-design.md`.
+- Remaining: prebuilt GitHub Actions (plan-on-PR comment, apply-on-merge), state-file
+  version/migration.
 
 **Phase 4 — churn resilience:** the schema-drift watcher (`regen.sh` + the vendored spec seed
 it — fetch Roblox/creator-docs `openapi.json`, semantic-diff on change, open an issue/PR),
