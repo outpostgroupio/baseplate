@@ -233,6 +233,14 @@ thumbnail/notification candidates). The genuinely new items we chose to adopt:
   - **Collaborators / permissions** — manage universe/place collaborator access. Likely
     `legacy-develop/v1/universes/{id}/permissions` + team-create; legacy-prefixed → live-probe risk
     like `roblox_badge`.
+- **Resource enhancements:**
+  - **`roblox_game_pass` managed pricing** — re-add the `managed_pricing_enabled` attribute that was
+    cut from the slice-7 v1. Live-verified blocker: enabling it via `game-passes/v1` returns
+    `400 InvalidManagedPricing` ("Managed pricing must be accepted before it can be enabled") unless
+    the creator has already accepted managed-pricing terms in the Creator Dashboard. To re-add
+    safely, expose it as a documented "you must accept managed pricing in the dashboard first"
+    attribute, and translate that 400 into an actionable error. See the slice-7 spec's
+    "Managed-pricing live findings" section.
 - **DX / observability:** a `--debug` flag (or `BASEPLATE_DEBUG`) that dumps raw Open Cloud
   requests/responses, **redacting the api-key and sealed/sensitive values**. Small, high
   troubleshooting value; folds into the Phase 3 DX hardening.
