@@ -19,6 +19,66 @@ var symbols = map[provider.ChangeAction]string{
 	provider.ActionNoop:   " ",
 }
 
+type JSONAttr struct {
+	Name string `json:"name"`
+	Old  string `json:"old,omitempty"`
+	New  string `json:"new,omitempty"`
+}
+type JSONChange struct {
+	Address  string     `json:"address"`
+	Action   string     `json:"action"`
+	ImportID string     `json:"import_id,omitempty"`
+	Attrs    []JSONAttr `json:"attributes,omitempty"`
+}
+type Summary struct {
+	Import  int `json:"import"`
+	Add     int `json:"add"`
+	Change  int `json:"change"`
+	Destroy int `json:"destroy"`
+}
+
+// JSONChanges renders every change as a machine-readable value. Sensitive
+// attribute values are redacted. The result is never nil (empty plan -> []).
+func (p *Plan) JSONChanges() []JSONChange {
+	out := make([]JSONChange, 0, len(p.Changes))
+	for _, c := range p.Changes {
+		jc := JSONChange{Address: c.Address, Action: c.Action.String(), ImportID: c.ImportID}
+		sensitive := map[string]bool{}
+		for _, k := range c.Sensitive {
+			sensitive[k] = true
+		}
+		for _, d := range c.AttrDiffs {
+			if sensitive[d.Name] {
+				jc.Attrs = append(jc.Attrs, JSONAttr{Name: d.Name, Old: "(sensitive value)", New: "(sensitive value)"})
+				continue
+			}
+			jc.Attrs = append(jc.Attrs, JSONAttr{Name: d.Name, Old: ctyString(d.Old), New: ctyString(d.New)})
+		}
+		out = append(out, jc)
+	}
+	return out
+}
+
+// Summary counts changes by action, matching the RenderText footer.
+func (p *Plan) Summary() Summary {
+	var s Summary
+	for _, c := range p.Changes {
+		if c.ImportID != "" {
+			s.Import++
+			continue
+		}
+		switch c.Action {
+		case provider.ActionCreate:
+			s.Add++
+		case provider.ActionUpdate:
+			s.Change++
+		case provider.ActionDelete:
+			s.Destroy++
+		}
+	}
+	return s
+}
+
 func (p *Plan) RenderText(color bool) string {
 	var b strings.Builder
 	var add, chg, del, imp int
@@ -91,34 +151,7 @@ func (p *Plan) RenderText(color bool) string {
 }
 
 func (p *Plan) RenderJSON() ([]byte, error) {
-	type jsonAttr struct {
-		Name string `json:"name"`
-		Old  string `json:"old,omitempty"`
-		New  string `json:"new,omitempty"`
-	}
-	type jsonChange struct {
-		Address  string     `json:"address"`
-		Action   string     `json:"action"`
-		ImportID string     `json:"import_id,omitempty"`
-		Attrs    []jsonAttr `json:"attributes,omitempty"`
-	}
-	var out []jsonChange
-	for _, c := range p.Changes {
-		jc := jsonChange{Address: c.Address, Action: c.Action.String(), ImportID: c.ImportID}
-		sensitive := map[string]bool{}
-		for _, k := range c.Sensitive {
-			sensitive[k] = true
-		}
-		for _, d := range c.AttrDiffs {
-			if sensitive[d.Name] {
-				jc.Attrs = append(jc.Attrs, jsonAttr{Name: d.Name, Old: "(sensitive value)", New: "(sensitive value)"})
-				continue
-			}
-			jc.Attrs = append(jc.Attrs, jsonAttr{Name: d.Name, Old: ctyString(d.Old), New: ctyString(d.New)})
-		}
-		out = append(out, jc)
-	}
-	return json.MarshalIndent(out, "", "  ")
+	return json.MarshalIndent(p.JSONChanges(), "", "  ")
 }
 
 func ctyString(v cty.Value) string {
