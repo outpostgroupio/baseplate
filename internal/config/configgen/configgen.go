@@ -13,7 +13,7 @@ import (
 	"github.com/hashicorp/hcl/v2/hclwrite"
 	"github.com/zclconf/go-cty/cty"
 
-	"github.com/outpostgroup/baseplate/internal/provider"
+	"github.com/outpostgroupio/baseplate/internal/provider"
 )
 
 // Generate builds an HCL `resource "<type>" "<name>"` block for an adopted

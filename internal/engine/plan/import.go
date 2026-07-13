@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/outpostgroup/baseplate/internal/provider"
-	"github.com/outpostgroup/baseplate/internal/state"
+	"github.com/outpostgroupio/baseplate/internal/provider"
+	"github.com/outpostgroupio/baseplate/internal/state"
 )
 
 // ImportBlock is a declarative `import {}` block: adopt the resource at Address

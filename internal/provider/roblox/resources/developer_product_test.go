@@ -7,8 +7,8 @@ import (
 
 	"github.com/zclconf/go-cty/cty"
 
-	"github.com/outpostgroup/baseplate/internal/provider"
-	"github.com/outpostgroup/baseplate/internal/provider/roblox/opencloud"
+	"github.com/outpostgroupio/baseplate/internal/provider"
+	"github.com/outpostgroupio/baseplate/internal/provider/roblox/opencloud"
 )
 
 type fakeProduct struct {

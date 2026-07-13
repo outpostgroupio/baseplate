@@ -3,9 +3,9 @@ package roblox
 import (
 	"errors"
 
-	"github.com/outpostgroup/baseplate/internal/provider"
-	"github.com/outpostgroup/baseplate/internal/provider/roblox/opencloud"
-	"github.com/outpostgroup/baseplate/internal/provider/roblox/resources"
+	"github.com/outpostgroupio/baseplate/internal/provider"
+	"github.com/outpostgroupio/baseplate/internal/provider/roblox/opencloud"
+	"github.com/outpostgroupio/baseplate/internal/provider/roblox/resources"
 )
 
 const (

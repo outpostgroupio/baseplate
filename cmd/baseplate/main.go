@@ -1,6 +1,6 @@
 package main
 
-import "github.com/outpostgroup/baseplate/internal/cli"
+import "github.com/outpostgroupio/baseplate/internal/cli"
 
 func main() {
 	cli.Execute()

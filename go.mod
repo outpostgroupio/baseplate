@@ -1,4 +1,4 @@
-module github.com/outpostgroup/baseplate
+module github.com/outpostgroupio/baseplate
 
 go 1.24.0
 

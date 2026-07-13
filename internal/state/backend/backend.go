@@ -1,6 +1,6 @@
 package backend
 
-import "github.com/outpostgroup/baseplate/internal/state"
+import "github.com/outpostgroupio/baseplate/internal/state"
 
 type Backend interface {
 	Get() (*state.State, error)

@@ -11,7 +11,7 @@ import (
 	"github.com/hashicorp/hcl/v2/hclwrite"
 	"github.com/zclconf/go-cty/cty"
 
-	"github.com/outpostgroup/baseplate/internal/provider"
+	"github.com/outpostgroupio/baseplate/internal/provider"
 )
 
 // fakeRes is a minimal provider.Resource for exercising the emitter.

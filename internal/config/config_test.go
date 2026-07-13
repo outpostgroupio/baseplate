@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/outpostgroup/baseplate/internal/engine/plan"
-	"github.com/outpostgroup/baseplate/internal/provider/mock"
+	"github.com/outpostgroupio/baseplate/internal/engine/plan"
+	"github.com/outpostgroupio/baseplate/internal/provider/mock"
 )
 
 func TestLoadResourcesAndDeps(t *testing.T) {
