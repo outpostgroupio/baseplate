@@ -10,6 +10,69 @@ import (
 	"github.com/outpostgroupio/baseplate/internal/provider/mock"
 )
 
+func TestLoadBackendParsesHTTPBlock(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "c.bp.hcl")
+	os.WriteFile(p, []byte(`
+backend "http" {
+  address  = "https://example.com/state"
+  username = "u"
+  password = env("BP_TEST_PW")
+}
+resource "mock_thing" "a" { name = "x" }
+`), 0o644)
+	t.Setenv("BP_TEST_PW", "secret")
+
+	bc, err := LoadBackend(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bc == nil || bc.Type != "http" {
+		t.Fatalf("want http backend, got %+v", bc)
+	}
+	if bc.Attributes["address"].AsString() != "https://example.com/state" {
+		t.Fatalf("address wrong: %v", bc.Attributes["address"])
+	}
+	if bc.Attributes["password"].AsString() != "secret" {
+		t.Fatalf("env() not resolved in backend block: %v", bc.Attributes["password"])
+	}
+}
+
+func TestLoadBackendAbsentAndMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "c.bp.hcl")
+	os.WriteFile(p, []byte(`resource "mock_thing" "a" { name = "x" }`), 0o644)
+	if bc, err := LoadBackend(p); err != nil || bc != nil {
+		t.Fatalf("no block -> nil,nil; got %+v, %v", bc, err)
+	}
+	if bc, err := LoadBackend(filepath.Join(dir, "nope.hcl")); err != nil || bc != nil {
+		t.Fatalf("missing file -> nil,nil; got %+v, %v", bc, err)
+	}
+}
+
+func TestLoadBackendRejectsTwoBlocks(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "c.bp.hcl")
+	os.WriteFile(p, []byte("backend \"http\" { address = \"a\" }\nbackend \"http\" { address = \"b\" }\n"), 0o644)
+	if _, err := LoadBackend(p); err == nil {
+		t.Fatal("expected error for two backend blocks")
+	}
+}
+
+// C1 regression: a config WITH a backend block must still load via config.Load.
+func TestLoadToleratesBackendBlock(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "c.bp.hcl")
+	os.WriteFile(p, []byte("backend \"http\" { address = \"a\" }\nresource \"mock_thing\" \"a\" { name = \"x\" }\n"), 0o644)
+	_, res, _, err := Load(p, mock.New())
+	if err != nil {
+		t.Fatalf("Load must tolerate a backend block: %v", err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("want 1 resource, got %d", len(res))
+	}
+}
+
 func TestLoadResourcesAndDeps(t *testing.T) {
 	t.Setenv("BP_TEST_KEY", "secret123")
 	pc, resources, _, err := Load(filepath.Join("..", "..", "testdata", "sample.bp.hcl"), mock.New())

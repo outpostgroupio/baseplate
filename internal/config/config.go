@@ -18,11 +18,68 @@ type ProviderConfig struct {
 	Attributes provider.Attributes
 }
 
+type BackendConfig struct {
+	Type       string
+	Attributes map[string]cty.Value
+}
+
+var backendSchema = &hcl.BodySchema{
+	Blocks: []hcl.BlockHeaderSchema{{Type: "backend", LabelNames: []string{"type"}}},
+}
+
+// LoadBackend returns the single `backend` block from the config file, or nil if
+// there is none or the file does not exist (callers then use the local backend).
+func LoadBackend(path string) (*BackendConfig, error) {
+	src, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	f, diags := hclsyntax.ParseConfig(src, path, hcl.InitialPos)
+	if diags.HasErrors() {
+		return nil, diags
+	}
+	content, _, diags := f.Body.PartialContent(backendSchema)
+	if diags.HasErrors() {
+		return nil, diags
+	}
+	var blocks []*hcl.Block
+	for _, b := range content.Blocks {
+		if b.Type == "backend" {
+			blocks = append(blocks, b)
+		}
+	}
+	if len(blocks) == 0 {
+		return nil, nil
+	}
+	if len(blocks) > 1 {
+		return nil, fmt.Errorf("%s: only one backend block is allowed", path)
+	}
+	b := blocks[0]
+	ctx := &hcl.EvalContext{Functions: map[string]function.Function{"env": envFunc()}}
+	attrs, d := b.Body.JustAttributes()
+	if d.HasErrors() {
+		return nil, d
+	}
+	out := &BackendConfig{Type: b.Labels[0], Attributes: map[string]cty.Value{}}
+	for k, a := range attrs {
+		v, vd := a.Expr.Value(ctx)
+		if vd.HasErrors() {
+			return nil, vd
+		}
+		out.Attributes[k] = v
+	}
+	return out, nil
+}
+
 var rootSchema = &hcl.BodySchema{
 	Blocks: []hcl.BlockHeaderSchema{
 		{Type: "provider", LabelNames: []string{"name"}},
 		{Type: "resource", LabelNames: []string{"type", "name"}},
 		{Type: "import"},
+		{Type: "backend", LabelNames: []string{"type"}},
 	},
 }
 
