@@ -16,7 +16,20 @@ These are accepted by every command.
 | `--config` | `baseplate.bp.hcl` | Path to the HCL config file. |
 | `--state` | `baseplate.bpstate` | Path to the state file. |
 | `--target` | *(none)* | Limit the operation to a single resource address (e.g. `roblox_asset.icon`). |
-| `--json` | `false` | Emit machine-readable output. **`plan` only** — `apply`/`destroy` ignore it. |
+| `--json` | `false` | Emit machine-readable output on **every** command. Results are a versioned envelope `{ "format_version": 1, "command": ..., "result": ... }` on stdout; errors are `{ "format_version": 1, "command": ..., "error": { "message": ... } }` on stderr. |
+
+### Approval flags (`apply` / `destroy`)
+
+| Flag | Default | Description |
+|---|---|---|
+| `--auto-approve` | `false` | Skip the interactive approval prompt and apply immediately. |
+| `--yes` | `false` | Alias for `--auto-approve`. |
+
+`apply` and `destroy` render the plan and then, on an interactive terminal, prompt for
+confirmation — only `yes` proceeds. In a non-interactive session (no TTY, e.g. CI) the prompt is
+skipped automatically, so jobs never hang waiting on stdin. Because a text prompt would corrupt the
+JSON stream, `--json` on an interactive terminal requires `--auto-approve` (otherwise the command
+errors).
 
 ## Environment
 
@@ -32,7 +45,8 @@ These are accepted by every command.
 | `2` | (`plan` only) Success, and there are changes to apply. |
 | `1` | Error. |
 
-The `2` code lets CI branch on "is there drift?" without parsing output.
+The `2` code lets CI branch on "is there drift?" without parsing output. `apply`/`destroy` return
+`1` both on error and when a confirmation prompt is declined.
 
 ## Commands
 
@@ -74,6 +88,9 @@ $ baseplate apply
 Apply complete. 1 change(s).
 ```
 
+On a terminal it prompts before mutating; pass `--auto-approve` (or `--yes`) to skip the prompt in
+scripts. CI (no TTY) skips it automatically.
+
 ### `destroy`
 
 Remove everything the state manages. Equivalent to applying an empty config: every managed resource
@@ -88,6 +105,9 @@ state, leaves them on the platform) rather than deleting: `roblox_asset` (image/
 $ baseplate destroy
 Apply complete. 1 change(s).
 ```
+
+On a terminal it prompts before mutating; pass `--auto-approve` (or `--yes`) to skip the prompt in
+scripts. CI (no TTY) skips it automatically.
 
 ### `import <address> <id>`
 

@@ -218,8 +218,13 @@ state — if ever wanted, they belong behind a CLI verb, not a `resource` block.
   (simple, reference-doc-friendly, one-command `gh-deploy`); Astro Starlight if a slicker product site
   is wanted later. The autodocs generator is ours regardless of framework.
 
-**Phase 3 — CI layer:** prebuilt GitHub Actions (plan-on-PR comment, apply-on-merge), remote
-state backend + CI locking, `--json`/exit-code hardening, non-interactive mode.
+**Phase 3 — CI layer:**
+- **DONE (slice 1 — CLI automation hardening):** confirmation prompt on `apply`/`destroy`
+  (`--auto-approve`/`--yes`, non-TTY auto-skips), `--json` result envelopes + structured errors on
+  **all** commands (versioned `format_version: 1`), stdout/stderr discipline via injected streams.
+  See `docs/superpowers/specs/2026-07-13-baseplate-phase3-cli-hardening-design.md`.
+- Remaining: prebuilt GitHub Actions (plan-on-PR comment, apply-on-merge), remote state backend +
+  CI locking, state-file version/migration.
 
 **Phase 4 — churn resilience:** the schema-drift watcher (`regen.sh` + the vendored spec seed
 it — fetch Roblox/creator-docs `openapi.json`, semantic-diff on change, open an issue/PR),
