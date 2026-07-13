@@ -64,6 +64,11 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   manual acceptance in the Creator Dashboard, so **managed pricing was cut from v1** — `price` is
   Required instead. Live lifecycle verified (create→converge→update→converge→off-sale destroy).
   See `docs/superpowers/specs/2026-07-13-baseplate-phase2-game-pass-design.md`.
+- **Release automation COMPLETE:** goreleaser pipeline (`.goreleaser.yaml` + `.github/workflows/release.yml`)
+  — a `v*` tag push cross-compiles 6 static `CGO_ENABLED=0` binaries (linux/darwin/windows ×
+  amd64/arm64) and publishes a GitHub Release (archives, `checksums.txt`, grouped changelog,
+  `prerelease: auto`). New `internal/version` stamped via `-ldflags`, surfaced by `baseplate version`.
+  See `docs/superpowers/specs/2026-07-13-baseplate-release-automation-design.md`.
 - Next: **Phase 2** remaining slices (see Roadmap below).
 
 Read `docs/superpowers/specs/2026-07-03-baseplate-phase1-roblox-provider-design.md` for the
