@@ -24,17 +24,22 @@ func attrTypeName(t cty.Type) string {
 
 // attrKind renders the Kind column for one attribute. createOnly means the
 // attribute is in the resource's Computed() set (excluded from diffing);
-// sensitive means it is in Sensitive().
-func attrKind(required, createOnly, sensitive bool) string {
+// trigger means it is in the resource's TriggerAttrs (change detected via a
+// trigger, forcing an update); sensitive means it is in Sensitive(). trigger
+// takes precedence over createOnly for the middle segment.
+func attrKind(required, createOnly, sensitive, trigger bool) string {
 	parts := make([]string, 0, 3)
 	if required {
 		parts = append(parts, "required")
 	} else {
 		parts = append(parts, "optional")
 	}
-	if createOnly {
+	switch {
+	case trigger:
+		parts = append(parts, "trigger")
+	case createOnly:
 		parts = append(parts, "create-only")
-	} else {
+	default:
 		parts = append(parts, "diffable")
 	}
 	if sensitive {

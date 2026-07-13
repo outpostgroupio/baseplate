@@ -95,4 +95,7 @@ type ResourceDoc struct {
 	Notes       string            // optional caveats paragraph (destroy behavior, read-only fields…)
 	Scopes      []string          // e.g. []string{"universe:write"}; rendered + linked to api-key-scopes.md
 	ExampleFile string            // optional; repo-relative path to an example, rendered as a link
+	// TriggerAttrs names attributes whose changes are detected via a trigger and
+	// force an update (rendered with the "trigger" kind instead of "create-only").
+	TriggerAttrs []string
 }

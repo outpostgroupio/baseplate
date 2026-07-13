@@ -12,6 +12,7 @@ The resources Baseplate can manage, and their attributes.
   excluded from the diff). To change it, taint/recreate the resource.
 - **diffable** — a normal managed attribute; a config change plans an update.
 - **sensitive** — redacted from all plan output and never written to state.
+- **trigger** — not diffed directly; a change is detected via a hash/marker and forces an update.
 
 Every resource also has an implicit `id` (Baseplate's state id) — you never set it in config.
 
@@ -32,7 +33,7 @@ Uploads a user- or group-owned image/decal asset.
 
 The `id` output is the `assetId` (a numeric string). Image/decal assets are not archivable, so `destroy` unmanages the asset in place (drops it from state, leaves it uploaded).
 
-Requires the `asset:read`, `asset:write` [scope](how-to/api-key-scopes.md).
+Requires the `asset:read`, `asset:write` [scopes](how-to/api-key-scopes.md).
 
 ---
 
@@ -51,7 +52,7 @@ Manages a developer product (an in-experience consumable purchase).
 
 Developer products can't be hard-deleted, so `destroy` sets `is_for_sale = false` and unmanages it.
 
-Requires the `developer-product:read`, `developer-product:write` [scope](how-to/api-key-scopes.md).
+Requires the `developer-product:read`, `developer-product:write` [scopes](how-to/api-key-scopes.md).
 
 Example: [`examples/baseplate.bp.hcl`](../examples/baseplate.bp.hcl).
 
@@ -92,7 +93,7 @@ Manages a game pass (a one-time, permanent in-experience purchase).
 
 Game passes can't be hard-deleted, so `destroy` sets `is_for_sale = false` and unmanages it. Managed pricing is intentionally not exposed — it requires prior manual acceptance of Roblox's managed-pricing terms in the Creator Dashboard.
 
-Requires the `game-pass:read`, `game-pass:write` [scope](how-to/api-key-scopes.md).
+Requires the `game-pass:read`, `game-pass:write` [scopes](how-to/api-key-scopes.md).
 
 Example: [`examples/game-pass.bp.hcl`](../examples/game-pass.bp.hcl).
 
@@ -104,10 +105,10 @@ Publishes a place file (`.rbxl`/`.rbxlx`) to an existing place and re-publishes 
 
 | Attribute | Type | Kind | Description |
 |---|---|---|---|
-| `file` | string | required, create-only | Path to the `.rbxl`/`.rbxlx`. Change detected via content hash. |
+| `file` | string | required, trigger | Path to the `.rbxl`/`.rbxlx`. Change detected via content hash. |
 | `place_id` | string | required, create-only | The existing place to publish to. |
 | `universe_id` | string | required, create-only | The universe the place belongs to. |
-| `version_type` | string | optional, create-only | `Published` (default) or `Saved`. |
+| `version_type` | string | optional, trigger | `Published` (default) or `Saved`. |
 
 Place content isn't remotely readable, so change detection is by file content hash. `destroy` is a no-op (a place can't be unpublished).
 
@@ -124,8 +125,8 @@ Manages an Open Cloud secret for a universe — the only resource with a full cr
 | `domain` | string | optional, diffable | HttpService domain wildcard (e.g. `api.example.com`, `*`). Omit for a private key. |
 | `name` | string | required, create-only | Secret name (the API id): 1-64 chars, alphanumeric/underscore, not starting with a digit. |
 | `universe_id` | string | required, create-only | The universe. |
-| `value` | string | required, create-only, sensitive | The plaintext. Usually `env("…")`. Sealed client-side; change detected via a hash. |
+| `value` | string | required, trigger, sensitive | The plaintext. Usually `env("…")`. Sealed client-side; change detected via a hash. |
 
 Renaming a secret (`name`) is a recreate, not an in-place rename.
 
-Requires the `universe.secret:read`, `universe.secret:write` [scope](how-to/api-key-scopes.md).
+Requires the `universe.secret:read`, `universe.secret:write` [scopes](how-to/api-key-scopes.md).

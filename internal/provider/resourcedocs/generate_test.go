@@ -21,11 +21,11 @@ type fakeRes struct {
 	noDoc    bool
 }
 
-func (f *fakeRes) Type() string                                                  { return f.typ }
-func (f *fakeRes) DecodeSpec() hcldec.Spec                                        { return f.spec }
-func (f *fakeRes) Computed() []string                                            { return f.computed }
-func (f *fakeRes) Dependencies(provider.Attributes) []provider.Ref               { return nil }
-func (f *fakeRes) Read(context.Context, string) (provider.Attributes, error)     { return nil, nil }
+func (f *fakeRes) Type() string                                              { return f.typ }
+func (f *fakeRes) DecodeSpec() hcldec.Spec                                   { return f.spec }
+func (f *fakeRes) Computed() []string                                        { return f.computed }
+func (f *fakeRes) Dependencies(provider.Attributes) []provider.Ref           { return nil }
+func (f *fakeRes) Read(context.Context, string) (provider.Attributes, error) { return nil, nil }
 func (f *fakeRes) Create(context.Context, provider.Attributes) (string, provider.Attributes, error) {
 	return "", nil, nil
 }
@@ -90,6 +90,38 @@ func TestGenerateErrorsOnMissingDoc(t *testing.T) {
 	_, err := resourcedocs.Generate(p)
 	if err == nil || !strings.Contains(err.Error(), "name") {
 		t.Fatalf("want error naming the undocumented attribute, got %v", err)
+	}
+}
+
+func TestGenerateRendersTriggerKind(t *testing.T) {
+	p := fakeProv{res: map[string]provider.Resource{
+		"roblox_t": &fakeRes{typ: "roblox_t", spec: specWith("universe_id", "file"),
+			computed: []string{"id", "universe_id", "file"},
+			doc: provider.ResourceDoc{Summary: "Tee.", Attributes: map[string]string{
+				"universe_id": "The universe.", "file": "The file."},
+				TriggerAttrs: []string{"file"}}},
+	}}
+	out, err := resourcedocs.Generate(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// file is optional (not "universe_id") + in TriggerAttrs → "optional, trigger",
+	// which takes precedence over its also being in Computed() ("create-only").
+	if !strings.Contains(out, "| `file` | string | optional, trigger | The file. |") {
+		t.Errorf("missing/incorrect trigger row:\n%s", out)
+	}
+}
+
+func TestGenerateErrorsOnStaleTriggerKey(t *testing.T) {
+	p := fakeProv{res: map[string]provider.Resource{
+		"roblox_x": &fakeRes{typ: "roblox_x", spec: specWith("universe_id"),
+			computed: []string{"id"},
+			doc: provider.ResourceDoc{Summary: "X.", Attributes: map[string]string{
+				"universe_id": "u"}, TriggerAttrs: []string{"ghost"}}},
+	}}
+	_, err := resourcedocs.Generate(p)
+	if err == nil || !strings.Contains(err.Error(), "ghost") {
+		t.Fatalf("want error naming the stale trigger key, got %v", err)
 	}
 }
 
