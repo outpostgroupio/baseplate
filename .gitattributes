@@ -1,0 +1,11 @@
+# Normalize line endings across platforms.
+#
+# Text files are stored as LF in the repository and checked out as LF on every
+# platform (including Windows). Without this, a Windows checkout with
+# core.autocrlf produces a CRLF working tree, which breaks golden-file tests
+# that compare committed fixtures against LF-generating code
+# (e.g. TestRenderTextGolden, TestResourceReferenceUpToDate).
+#
+# `text=auto` lets Git auto-detect text vs. binary, so binary files are left
+# untouched; `eol=lf` pins the checkout line ending for detected text files.
+* text=auto eol=lf

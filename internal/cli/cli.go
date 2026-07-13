@@ -21,6 +21,7 @@ import (
 	"github.com/outpostgroupio/baseplate/internal/provider/mock"
 	"github.com/outpostgroupio/baseplate/internal/provider/roblox"
 	"github.com/outpostgroupio/baseplate/internal/state/backend"
+	"github.com/outpostgroupio/baseplate/internal/version"
 )
 
 // newProvider selects the real Roblox provider when ROBLOX_API_KEY is set,
@@ -116,6 +117,7 @@ func run(args []string, s streams) int {
 	var cmdName string
 
 	root := &cobra.Command{Use: "baseplate", SilenceUsage: true, SilenceErrors: true}
+	root.Version = version.Version
 	root.PersistentFlags().StringVar(&cfgPath, "config", "baseplate.bp.hcl", "config file")
 	root.PersistentFlags().StringVar(&statePath, "state", "baseplate.bpstate", "state file")
 	root.PersistentFlags().StringVar(&target, "target", "", "limit to a single resource address")
@@ -210,6 +212,15 @@ func run(args []string, s streams) int {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmdName = cmd.Name()
 			return importRun(p, cfgPath, statePath, args[0], args[1], fmtOf(jsonOut), s)
+		},
+	})
+	root.AddCommand(&cobra.Command{
+		Use:   "version",
+		Short: "Print the baseplate version",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			fmt.Fprintln(cmd.OutOrStdout(), version.String())
+			return nil
 		},
 	})
 
