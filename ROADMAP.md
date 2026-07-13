@@ -132,6 +132,15 @@ Phase 1 design + rationale, and `docs/superpowers/plans/` for the executed task-
     attr today, `secret.value`, is Required); `roblox_asset` "one-of" `creator_user_id`/
     `creator_group_id` is omitted from generated config (a `# TODO`-worthy gap the generic emitter
     can't flag — a future `GenerateHints()` capability could).
+  - **From slice 8 (`roblox_badge`) — trigger-aware Update (own engine slice, general/reusable):**
+    `Update(ctx, id, desired)` is stateless — it never receives the prior triggers — so a resource
+    that backs an upload with a `content_hash` Trigger *and* also has normal diffable attrs (badge:
+    icon trigger + name/description/enabled) can't tell which fired, and must re-run the upload on
+    *every* Update (badge re-uploads/re-moderates its icon even on a name-only edit; no correctness
+    impact, just churn). Fix: an optional capability that passes the old triggers map into `Update`
+    so the upload fires only when its trigger actually changed. Deliberately NOT folded into the
+    badge slice — it's a general engine capability. (`roblox_place` doesn't hit this because it is
+    all-computed: the trigger is its *only* change signal.)
 
 ### Resource surface audit (2026-07-13)
 Audit of the vendored unified Open Cloud spec (`opencloud/specs/openapi-unified.json`) for the
