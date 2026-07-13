@@ -28,8 +28,10 @@ A few are easy to miss because they don't match the "obvious" name:
 - **`roblox_badge`** needs three legacy scopes: `legacy-universe.badge:manage-and-spend-robux`
   (create — the "spend-robux" name is a legacy of the old per-badge fee; creation is free in
   practice), `legacy-universe.badge:write` (update name/description/enabled), and
-  `legacy-badge:manage` (icon upload). Reads are public. The badge itself is never hard-deleted;
-  `destroy` disables it.
+  `legacy-badge:manage`, which the spec advertises for icon upload — though live testing found the
+  two `legacy-universe.badge:*` scopes alone sufficient for the full lifecycle, including icon
+  upload. Grant all three to match the spec. Reads are public. The badge itself is never
+  hard-deleted; `destroy` disables it.
 
 ## Scopes are per-universe — and you must save
 
