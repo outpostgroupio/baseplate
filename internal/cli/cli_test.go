@@ -188,3 +188,13 @@ func TestGenerateConfigRejectsDuplicateUndeclaredImports(t *testing.T) {
 		t.Fatalf("expected a duplicate error, got %v", err)
 	}
 }
+
+func TestVersionCommandPrintsBanner(t *testing.T) {
+	var out bytes.Buffer
+	if code := run([]string{"version"}, &out); code != 0 {
+		t.Fatalf("run(version) exit = %d, want 0", code)
+	}
+	if got := out.String(); !strings.Contains(got, "baseplate ") || !strings.Contains(got, "commit") {
+		t.Fatalf("version output = %q, want the version banner", got)
+	}
+}
