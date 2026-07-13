@@ -12,7 +12,7 @@ func TestGamePassCreateGetUpdateDelete(t *testing.T) {
 	base := "/game-passes/v1/universes/42/game-passes"
 	// gamePassId and iconAssetId are LARGE int64s returned as JSON NUMBERS.
 	body := `{"gamePassId":1907972157,"name":"VIP","description":"d","isForSale":true,` +
-		`"iconAssetId":133448903949274,"priceInformation":{"defaultPriceInRobux":100}}`
+		`"iconAssetId":9007199254740993,"priceInformation":{"defaultPriceInRobux":100}}`
 	var createHit, getHit, updateHit, deleteOffSale bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -48,7 +48,7 @@ func TestGamePassCreateGetUpdateDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !createHit || got.ID != "1907972157" || got.PriceInRobux != 100 || got.IconAssetID != "133448903949274" {
+	if !createHit || got.ID != "1907972157" || got.PriceInRobux != 100 || got.IconAssetID != "9007199254740993" {
 		t.Fatalf("create got %+v (hit=%v)", got, createHit)
 	}
 
