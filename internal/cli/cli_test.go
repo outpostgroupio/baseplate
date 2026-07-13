@@ -359,3 +359,67 @@ func TestVersionCommandPrintsBanner(t *testing.T) {
 		t.Fatalf("version output = %q, want the version banner", got)
 	}
 }
+
+func TestOpenBackendLocalWhenNoBlock(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "c.bp.hcl")
+	os.WriteFile(cfg, []byte(`resource "mock_thing" "a" { name = "x" }`), 0o644)
+	b, _, err := openBackend(cfg, filepath.Join(dir, "s.bpstate"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := b.(*backend.Local); !ok {
+		t.Fatalf("want *backend.Local, got %T", b)
+	}
+}
+
+func TestOpenBackendHTTPForHTTPBlock(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "c.bp.hcl")
+	os.WriteFile(cfg, []byte("backend \"http\" { address = \"https://x/state\" }\n"), 0o644)
+	b, _, err := openBackend(cfg, filepath.Join(dir, "s.bpstate"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := b.(*backend.HTTP); !ok {
+		t.Fatalf("want *backend.HTTP, got %T", b)
+	}
+}
+
+func TestOpenBackendUnknownType(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "c.bp.hcl")
+	os.WriteFile(cfg, []byte("backend \"s3\" { bucket = \"b\" }\n"), 0o644)
+	if _, _, err := openBackend(cfg, filepath.Join(dir, "s.bpstate")); err == nil {
+		t.Fatal("expected error for unknown backend type")
+	}
+}
+
+func TestOpenBackendRejectsUnknownAttr(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "c.bp.hcl")
+	os.WriteFile(cfg, []byte("backend \"http\" { address = \"a\"\n adress = \"typo\" }\n"), 0o644)
+	if _, _, err := openBackend(cfg, filepath.Join(dir, "s.bpstate")); err == nil {
+		t.Fatal("expected error for unknown backend attribute")
+	}
+}
+
+// The destroy safety note (spec I3): a destroy that falls back to the local
+// backend because no backend block was found must say so on stderr, so a
+// remote-state user isn't misled by a silent "destroyed nothing".
+func TestDestroyLocalFallbackPrintsNote(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "baseplate.bp.hcl")
+	os.WriteFile(cfg, []byte(`resource "mock_thing" "a" { name = "x" }`), 0o644)
+	st := filepath.Join(dir, "s.bpstate")
+	var out, errBuf bytes.Buffer
+	code := run([]string{"destroy", "--auto-approve", "--config", cfg, "--state", st}, streams{
+		in: strings.NewReader(""), out: &out, err: &errBuf, isTTY: func() bool { return false },
+	})
+	if code != 0 {
+		t.Fatalf("destroy exit = %d, want 0\n%s", code, out.String()+errBuf.String())
+	}
+	if !strings.Contains(errBuf.String(), "using local state backend") {
+		t.Fatalf("expected local-fallback note on stderr, got %q", errBuf.String())
+	}
+}

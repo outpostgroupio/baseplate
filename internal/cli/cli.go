@@ -11,6 +11,7 @@ import (
 
 	"github.com/hashicorp/hcl/v2/hclwrite"
 	"github.com/spf13/cobra"
+	"github.com/zclconf/go-cty/cty"
 
 	"github.com/outpostgroupio/baseplate/internal/cli/output"
 	"github.com/outpostgroupio/baseplate/internal/config"
@@ -33,6 +34,78 @@ func newProvider() provider.Provider {
 		}
 	}
 	return mock.New()
+}
+
+// openBackend selects the state backend from the config's `backend` block,
+// falling back to the local file backend when there is none. The bool is true
+// when the local fallback was used (so destroy can warn on a remote-shaped setup).
+func openBackend(cfgPath, statePath string) (backend.Backend, bool, error) {
+	bc, err := config.LoadBackend(cfgPath)
+	if err != nil {
+		return nil, false, err
+	}
+	if bc == nil {
+		return backend.NewLocal(statePath), true, nil
+	}
+	switch bc.Type {
+	case "http":
+		hc, err := httpConfigFromAttrs(bc.Attributes)
+		if err != nil {
+			return nil, false, err
+		}
+		hc.Version = version.Version
+		h, err := backend.NewHTTP(hc)
+		if err != nil {
+			return nil, false, err
+		}
+		return h, false, nil
+	default:
+		return nil, false, fmt.Errorf("unsupported backend type %q", bc.Type)
+	}
+}
+
+var httpBackendAttrs = map[string]bool{
+	"address": true, "update_method": true, "lock_address": true, "unlock_address": true,
+	"lock_method": true, "unlock_method": true, "username": true, "password": true,
+}
+
+func httpConfigFromAttrs(attrs map[string]cty.Value) (backend.HTTPConfig, error) {
+	for k := range attrs {
+		if !httpBackendAttrs[k] {
+			return backend.HTTPConfig{}, fmt.Errorf("http backend: unknown attribute %q", k)
+		}
+	}
+	str := func(k string) (string, error) {
+		v, ok := attrs[k]
+		if !ok {
+			return "", nil
+		}
+		if v.IsNull() || v.Type() != cty.String {
+			return "", fmt.Errorf("http backend: attribute %q must be a string", k)
+		}
+		return v.AsString(), nil
+	}
+	var c backend.HTTPConfig
+	var err error
+	if c.Address, err = str("address"); err != nil {
+		return c, err
+	}
+	if c.Address == "" {
+		return c, fmt.Errorf("http backend: address is required")
+	}
+	for _, f := range []struct {
+		key string
+		dst *string
+	}{
+		{"update_method", &c.UpdateMethod}, {"lock_address", &c.LockAddress},
+		{"unlock_address", &c.UnlockAddress}, {"lock_method", &c.LockMethod},
+		{"unlock_method", &c.UnlockMethod}, {"username", &c.Username}, {"password", &c.Password},
+	} {
+		if *f.dst, err = str(f.key); err != nil {
+			return c, err
+		}
+	}
+	return c, nil
 }
 
 type validateResult struct {
@@ -151,7 +224,10 @@ func run(args []string, s streams) int {
 		if err != nil {
 			return err
 		}
-		b := backend.NewLocal(statePath)
+		b, _, err := openBackend(cfgPath, statePath)
+		if err != nil {
+			return err
+		}
 		st, err := b.Get()
 		if err != nil {
 			return err
@@ -248,7 +324,13 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 		}
 		desired, imports = res, imps
 	}
-	b := backend.NewLocal(statePath)
+	b, localFallback, err := openBackend(cfgPath, statePath)
+	if err != nil {
+		return err
+	}
+	if destroy && localFallback {
+		fmt.Fprintf(s.err, "note: using local state backend at %s (no backend block found)\n", statePath)
+	}
 	unlock, err := b.Lock()
 	if err != nil {
 		return err
@@ -295,7 +377,10 @@ func importRun(p provider.Provider, cfgPath, statePath, address, id string, form
 	if err != nil {
 		return err
 	}
-	b := backend.NewLocal(statePath)
+	b, _, err := openBackend(cfgPath, statePath)
+	if err != nil {
+		return err
+	}
 	unlock, err := b.Lock()
 	if err != nil {
 		return err
