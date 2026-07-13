@@ -32,9 +32,10 @@ type HTTPConfig struct {
 }
 
 type HTTP struct {
-	cfg    HTTPConfig
-	client *http.Client
-	lockID string
+	cfg      HTTPConfig
+	client   *http.Client
+	lockID   string
+	lockBody []byte
 }
 
 func NewHTTP(cfg HTTPConfig) (*HTTP, error) {
@@ -156,6 +157,7 @@ func (h *HTTP) Lock() (func() error, error) {
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		h.lockID = info.ID
+		h.lockBody = body
 		return h.unlock, nil
 	case resp.StatusCode == http.StatusLocked || resp.StatusCode == http.StatusConflict:
 		var held lockInfo
@@ -180,8 +182,7 @@ func (h *HTTP) unlock() error {
 	if addr == "" {
 		return nil
 	}
-	body, _ := json.Marshal(lockInfo{ID: h.lockID, Path: h.cfg.Address})
-	resp, err := h.request(h.cfg.UnlockMethod, addr, body)
+	resp, err := h.request(h.cfg.UnlockMethod, addr, h.lockBody)
 	if err != nil {
 		return err
 	}
@@ -191,6 +192,7 @@ func (h *HTTP) unlock() error {
 		return fmt.Errorf("http backend: unlock: %s: %s", resp.Status, strings.TrimSpace(string(b)))
 	}
 	h.lockID = ""
+	h.lockBody = nil
 	return nil
 }
 
