@@ -33,8 +33,9 @@ func (u *universeSecret) Doc() provider.ResourceDoc {
 			"value":       "The plaintext. Usually `env(\"…\")`. Sealed client-side; change detected via a hash.",
 			"domain":      "HttpService domain wildcard (e.g. `api.example.com`, `*`). Omit for a private key.",
 		},
-		Notes:  "Renaming a secret (`name`) is a recreate, not an in-place rename.",
-		Scopes: []string{"universe.secret:read", "universe.secret:write"},
+		Notes:        "Renaming a secret (`name`) is a recreate, not an in-place rename.",
+		Scopes:       []string{"universe.secret:read", "universe.secret:write"},
+		TriggerAttrs: []string{"value"},
 	}
 }
 

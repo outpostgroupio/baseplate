@@ -33,8 +33,9 @@ func (p *place) Doc() provider.ResourceDoc {
 			"file":         "Path to the `.rbxl`/`.rbxlx`. Change detected via content hash.",
 			"version_type": "`Published` (default) or `Saved`.",
 		},
-		Notes:  "Place content isn't remotely readable, so change detection is by file content hash. `destroy` is a no-op (a place can't be unpublished).",
-		Scopes: []string{"universe-places:write"},
+		Notes:        "Place content isn't remotely readable, so change detection is by file content hash. `destroy` is a no-op (a place can't be unpublished).",
+		Scopes:       []string{"universe-places:write"},
+		TriggerAttrs: []string{"file", "version_type"},
 	}
 }
 

@@ -21,7 +21,8 @@ const preamble = "# Resource reference\n\n" +
 	"- **create-only** — set at create; changing it in config does **not** produce an update (it's\n" +
 	"  excluded from the diff). To change it, taint/recreate the resource.\n" +
 	"- **diffable** — a normal managed attribute; a config change plans an update.\n" +
-	"- **sensitive** — redacted from all plan output and never written to state.\n\n" +
+	"- **sensitive** — redacted from all plan output and never written to state.\n" +
+	"- **trigger** — not diffed directly; a change is detected via a hash/marker and forces an update.\n\n" +
 	"Every resource also has an implicit `id` (Baseplate's state id) — you never set it in config.\n"
 
 // Generate renders the full resource-reference markdown for the provider's
@@ -70,6 +71,10 @@ func renderResource(r provider.Resource) (string, error) {
 			sensitive[name] = true
 		}
 	}
+	trigger := map[string]bool{}
+	for _, name := range rd.TriggerAttrs {
+		trigger[name] = true
+	}
 
 	// Collect + sort attribute names from the schema.
 	names := make([]string, 0, len(spec))
@@ -90,6 +95,12 @@ func renderResource(r provider.Resource) (string, error) {
 			return "", fmt.Errorf("Doc().Attributes has key %q which is not a DecodeSpec attribute", k)
 		}
 	}
+	// Error on any TriggerAttrs entry that is not a schema attribute.
+	for _, k := range rd.TriggerAttrs {
+		if _, ok := spec[k]; !ok {
+			return "", fmt.Errorf("Doc().TriggerAttrs has key %q which is not a DecodeSpec attribute", k)
+		}
+	}
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "## `%s`\n\n", r.Type())
@@ -102,7 +113,7 @@ func renderResource(r provider.Resource) (string, error) {
 		if !ok {
 			return "", fmt.Errorf("attribute %q is not an *hcldec.AttrSpec", name)
 		}
-		kind := attrKind(as.Required, computed[name], sensitive[name])
+		kind := attrKind(as.Required, computed[name], sensitive[name], trigger[name])
 		fmt.Fprintf(&b, "| `%s` | %s | %s | %s |\n", name, attrTypeName(as.Type), kind, rd.Attributes[name])
 	}
 	if rd.Notes != "" {
@@ -113,7 +124,11 @@ func renderResource(r provider.Resource) (string, error) {
 		for i, s := range rd.Scopes {
 			quoted[i] = "`" + s + "`"
 		}
-		fmt.Fprintf(&b, "\nRequires the %s [scope](how-to/api-key-scopes.md).\n", strings.Join(quoted, ", "))
+		word := "scope"
+		if len(rd.Scopes) > 1 {
+			word = "scopes"
+		}
+		fmt.Fprintf(&b, "\nRequires the %s [%s](how-to/api-key-scopes.md).\n", strings.Join(quoted, ", "), word)
 	}
 	if rd.ExampleFile != "" {
 		fmt.Fprintf(&b, "\nExample: [`%s`](../%s).\n", rd.ExampleFile, rd.ExampleFile)
