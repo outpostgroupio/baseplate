@@ -2,6 +2,7 @@ package opencloud
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -33,7 +34,7 @@ func TestBadgeCreateGetUpdateIcon(t *testing.T) {
 		case r.Method == http.MethodPatch && r.URL.Path == "/legacy-badges/v1/badges/2124567890":
 			// JSON body: {name, description, enabled}
 			buf := make([]byte, r.ContentLength)
-			r.Body.Read(buf)
+			io.ReadFull(r.Body, buf)
 			if strings.Contains(string(buf), `"enabled":false`) {
 				disableHit = true
 			} else {

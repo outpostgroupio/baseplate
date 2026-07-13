@@ -66,9 +66,11 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   See `docs/superpowers/specs/2026-07-13-baseplate-phase2-game-pass-design.md`.
 - **Phase 2 slice 8 COMPLETE (`roblox_badge`), proven live:** first resource with a **split
   read/write host** — write (create/update/icon) goes through the Open Cloud legacy bridge on
-  `apis.roblox.com` (api-key + the three badge scopes per the spec:
-  `legacy-universe.badge:manage-and-spend-robux` for create, `legacy-universe.badge:write` for
-  update, and `legacy-badge:manage` for icon upload — see `docs/how-to/api-key-scopes.md`), while
+  `apis.roblox.com` (api-key; create used `legacy-universe.badge:manage-and-spend-robux`, update
+  used `legacy-universe.badge:write`. The icon-overwrite endpoint is spec-documented as requiring
+  `legacy-badge:manage`, but the live lifecycle — including the icon upload — passed with only the
+  two `legacy-universe.badge:*` scopes granted, so the third scope's necessity is unconfirmed; see
+  `docs/how-to/api-key-scopes.md`), while
   `Get` is a **public, unauthenticated single-GET** on a different host,
   `GET https://badges.roblox.com/v1/badges/{badgeId}`. New
   `opencloud.BadgeClient` takes two `*opencloud.Client`s (`write`, `read`) for this reason. Live-
@@ -161,6 +163,16 @@ Phase 1 design + rationale, and `docs/superpowers/plans/` for the executed task-
     so the upload fires only when its trigger actually changed. Deliberately NOT folded into the
     badge slice — it's a general engine capability. (`roblox_place` doesn't hit this because it is
     all-computed: the trigger is its *only* change signal.)
+  - **From slice 8 (`roblox_badge`) review, minor deferrals:** `Delete` PATCHes
+    `{name:"",description:"",enabled:false}` (zero-valued name/description, no updateMask) — may
+    blank the abandoned badge's name on Roblox's side; untested. A read-then-patch or
+    enabled-only disable would avoid mutating fields destroy shouldn't touch. The read-host
+    not-found path (404 on `badges.roblox.com` → `provider.ErrNotFound` → drift-recreate) is
+    unit-tested but not live-confirmed; the live probe only read an existing badge — relevant only
+    to the rare dashboard-side-deletion / stale-state edge. The badge READ client is constructed
+    with the api-key (`opencloud.New(apiKey, badgesBase)`) even though `badges.roblox.com` reads
+    are public/unauthenticated; a keyless read client would avoid sending the credential to an
+    endpoint that ignores it.
 
 ### Resource surface audit (2026-07-13)
 Audit of the vendored unified Open Cloud spec (`opencloud/specs/openapi-unified.json`) for the
