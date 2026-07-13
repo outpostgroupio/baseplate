@@ -6,7 +6,7 @@ universe. It assumes you have a Roblox account and an experience (universe) you 
 ## 1. Install
 
 Download the prebuilt binary for your platform from the
-[Releases](https://github.com/outpostgroup/baseplate/releases) page and put it on your `PATH`:
+[Releases](https://github.com/outpostgroupio/baseplate/releases) page and put it on your `PATH`:
 
 ```console
 $ chmod +x baseplate && mv baseplate /usr/local/bin/

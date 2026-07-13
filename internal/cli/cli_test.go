@@ -10,10 +10,10 @@ import (
 
 	"github.com/zclconf/go-cty/cty"
 
-	"github.com/outpostgroup/baseplate/internal/engine/plan"
-	"github.com/outpostgroup/baseplate/internal/provider"
-	"github.com/outpostgroup/baseplate/internal/provider/mock"
-	"github.com/outpostgroup/baseplate/internal/state/backend"
+	"github.com/outpostgroupio/baseplate/internal/engine/plan"
+	"github.com/outpostgroupio/baseplate/internal/provider"
+	"github.com/outpostgroupio/baseplate/internal/provider/mock"
+	"github.com/outpostgroupio/baseplate/internal/state/backend"
 )
 
 // TestImportRunWritesStateAndReports is the CLI happy path: importRun takes an

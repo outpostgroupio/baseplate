@@ -8,7 +8,7 @@ import (
 
 	"github.com/zclconf/go-cty/cty"
 
-	"github.com/outpostgroup/baseplate/internal/provider"
+	"github.com/outpostgroupio/baseplate/internal/provider"
 )
 
 func TestRenderNumbersBoolsAndKnownAfterApply(t *testing.T) {

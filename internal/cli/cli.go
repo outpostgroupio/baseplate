@@ -11,14 +11,14 @@ import (
 	"github.com/hashicorp/hcl/v2/hclwrite"
 	"github.com/spf13/cobra"
 
-	"github.com/outpostgroup/baseplate/internal/config"
-	"github.com/outpostgroup/baseplate/internal/config/configgen"
-	"github.com/outpostgroup/baseplate/internal/engine/apply"
-	"github.com/outpostgroup/baseplate/internal/engine/plan"
-	"github.com/outpostgroup/baseplate/internal/provider"
-	"github.com/outpostgroup/baseplate/internal/provider/mock"
-	"github.com/outpostgroup/baseplate/internal/provider/roblox"
-	"github.com/outpostgroup/baseplate/internal/state/backend"
+	"github.com/outpostgroupio/baseplate/internal/config"
+	"github.com/outpostgroupio/baseplate/internal/config/configgen"
+	"github.com/outpostgroupio/baseplate/internal/engine/apply"
+	"github.com/outpostgroupio/baseplate/internal/engine/plan"
+	"github.com/outpostgroupio/baseplate/internal/provider"
+	"github.com/outpostgroupio/baseplate/internal/provider/mock"
+	"github.com/outpostgroupio/baseplate/internal/provider/roblox"
+	"github.com/outpostgroupio/baseplate/internal/state/backend"
 )
 
 // newProvider selects the real Roblox provider when ROBLOX_API_KEY is set,

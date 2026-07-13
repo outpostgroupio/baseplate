@@ -7,7 +7,7 @@ import (
 
 	"github.com/gofrs/flock"
 
-	"github.com/outpostgroup/baseplate/internal/state"
+	"github.com/outpostgroupio/baseplate/internal/state"
 )
 
 type Local struct {

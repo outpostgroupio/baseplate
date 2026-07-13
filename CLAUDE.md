@@ -3,7 +3,7 @@
 **Baseplate is a Terraform-style Infrastructure-as-Code tool for Roblox, in Go.** It manages
 Roblox resources declaratively via Open Cloud: `baseplate plan/apply/destroy` over an HCL
 config, backed by a state file. A maintained, Go-native successor to Mantle. Module:
-`github.com/outpostgroup/baseplate`.
+`github.com/outpostgroupio/baseplate`.
 
 ## Status & roadmap
 Current status (phase/slice), completed work, the remaining roadmap, and tracked deferrals live

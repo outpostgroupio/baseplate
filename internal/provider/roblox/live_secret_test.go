@@ -10,12 +10,12 @@ import (
 
 	"github.com/zclconf/go-cty/cty"
 
-	"github.com/outpostgroup/baseplate/internal/engine/apply"
-	"github.com/outpostgroup/baseplate/internal/engine/plan"
-	"github.com/outpostgroup/baseplate/internal/provider"
-	"github.com/outpostgroup/baseplate/internal/provider/roblox/opencloud"
-	"github.com/outpostgroup/baseplate/internal/state"
-	"github.com/outpostgroup/baseplate/internal/state/backend"
+	"github.com/outpostgroupio/baseplate/internal/engine/apply"
+	"github.com/outpostgroupio/baseplate/internal/engine/plan"
+	"github.com/outpostgroupio/baseplate/internal/provider"
+	"github.com/outpostgroupio/baseplate/internal/provider/roblox/opencloud"
+	"github.com/outpostgroupio/baseplate/internal/state"
+	"github.com/outpostgroupio/baseplate/internal/state/backend"
 )
 
 // TestLiveSecretLifecycle creates a real secret, converges, rotates the value,

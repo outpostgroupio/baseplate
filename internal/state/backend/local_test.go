@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/outpostgroup/baseplate/internal/state"
+	"github.com/outpostgroupio/baseplate/internal/state"
 )
 
 func TestLocalPutGetAndLock(t *testing.T) {

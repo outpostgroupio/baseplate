@@ -10,8 +10,8 @@ import (
 	"github.com/zclconf/go-cty/cty"
 	"github.com/zclconf/go-cty/cty/function"
 
-	"github.com/outpostgroup/baseplate/internal/engine/plan"
-	"github.com/outpostgroup/baseplate/internal/provider"
+	"github.com/outpostgroupio/baseplate/internal/engine/plan"
+	"github.com/outpostgroupio/baseplate/internal/provider"
 )
 
 type ProviderConfig struct {

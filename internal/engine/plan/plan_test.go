@@ -8,9 +8,9 @@ import (
 	"github.com/hashicorp/hcl/v2/hcldec"
 	"github.com/zclconf/go-cty/cty"
 
-	"github.com/outpostgroup/baseplate/internal/provider"
-	"github.com/outpostgroup/baseplate/internal/provider/mock"
-	"github.com/outpostgroup/baseplate/internal/state"
+	"github.com/outpostgroupio/baseplate/internal/provider"
+	"github.com/outpostgroupio/baseplate/internal/provider/mock"
+	"github.com/outpostgroupio/baseplate/internal/state"
 )
 
 func TestBuildCreateAndOrder(t *testing.T) {

@@ -9,10 +9,10 @@ import (
 	"github.com/zclconf/go-cty/cty"
 	ctyjson "github.com/zclconf/go-cty/cty/json"
 
-	"github.com/outpostgroup/baseplate/internal/engine/plan"
-	"github.com/outpostgroup/baseplate/internal/provider"
-	"github.com/outpostgroup/baseplate/internal/state"
-	"github.com/outpostgroup/baseplate/internal/state/backend"
+	"github.com/outpostgroupio/baseplate/internal/engine/plan"
+	"github.com/outpostgroupio/baseplate/internal/provider"
+	"github.com/outpostgroupio/baseplate/internal/state"
+	"github.com/outpostgroupio/baseplate/internal/state/backend"
 )
 
 func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state.State, pl *plan.Plan) error {
