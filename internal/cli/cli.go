@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/hcl/v2/hclwrite"
 	"github.com/spf13/cobra"
 
+	"github.com/outpostgroupio/baseplate/internal/cli/output"
 	"github.com/outpostgroupio/baseplate/internal/config"
 	"github.com/outpostgroupio/baseplate/internal/config/configgen"
 	"github.com/outpostgroupio/baseplate/internal/engine/apply"
@@ -32,19 +33,39 @@ func newProvider() provider.Provider {
 	return mock.New()
 }
 
-func Execute() { os.Exit(run(os.Args[1:], os.Stdout)) }
+type streams struct {
+	in    io.Reader
+	out   io.Writer
+	err   io.Writer
+	isTTY func() bool
+}
 
-func run(args []string, stdout io.Writer) int {
+func fmtOf(jsonOut bool) output.Format {
+	if jsonOut {
+		return output.JSON
+	}
+	return output.Text
+}
+
+func Execute() {
+	stat, _ := os.Stdin.Stat()
+	isTTY := func() bool { return stat != nil && stat.Mode()&os.ModeCharDevice != 0 }
+	os.Exit(run(os.Args[1:], streams{in: os.Stdin, out: os.Stdout, err: os.Stderr, isTTY: isTTY}))
+}
+
+func run(args []string, s streams) int {
 	var cfgPath, statePath, target string
 	var jsonOut bool
 	var generateConfigOut string
+	var cmdName string
 
 	root := &cobra.Command{Use: "baseplate", SilenceUsage: true, SilenceErrors: true}
 	root.PersistentFlags().StringVar(&cfgPath, "config", "baseplate.bp.hcl", "config file")
 	root.PersistentFlags().StringVar(&statePath, "state", "baseplate.bpstate", "state file")
 	root.PersistentFlags().StringVar(&target, "target", "", "limit to a single resource address")
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "machine-readable output")
-	root.SetOut(stdout)
+	root.SetOut(s.out)
+	root.SetErr(s.err)
 	root.SetArgs(args)
 
 	exit := 0
@@ -58,21 +79,23 @@ func run(args []string, stdout io.Writer) int {
 		return res, imports, nil
 	}
 
-	root.AddCommand(&cobra.Command{Use: "validate", RunE: func(_ *cobra.Command, _ []string) error {
+	root.AddCommand(&cobra.Command{Use: "validate", RunE: func(cmd *cobra.Command, _ []string) error {
+		cmdName = cmd.Name()
 		if _, _, err := load(); err != nil {
 			return err
 		}
-		fmt.Fprintln(stdout, "Configuration is valid.")
+		fmt.Fprintln(s.out, "Configuration is valid.")
 		return nil
 	}})
 
-	planCmd := &cobra.Command{Use: "plan", RunE: func(_ *cobra.Command, _ []string) error {
+	planCmd := &cobra.Command{Use: "plan", RunE: func(cmd *cobra.Command, _ []string) error {
+		cmdName = cmd.Name()
 		desired, imports, err := load()
 		if err != nil {
 			return err
 		}
 		b := backend.NewLocal(statePath)
-		s, err := b.Get()
+		st, err := b.Get()
 		if err != nil {
 			return err
 		}
@@ -84,24 +107,24 @@ func run(args []string, stdout io.Writer) int {
 		if generateConfigOut != "" {
 			toResolve = declaredImports(imports, declared)
 		}
-		pl, err := plan.Build(context.Background(), p, s, desired)
+		pl, err := plan.Build(context.Background(), p, st, desired)
 		if err != nil {
 			return err
 		}
-		if err := plan.ResolveImports(context.Background(), p, s, pl, toResolve); err != nil {
+		if err := plan.ResolveImports(context.Background(), p, st, pl, toResolve); err != nil {
 			return err
 		}
 		if generateConfigOut != "" {
-			if err := generateConfig(context.Background(), p, imports, declared, generateConfigOut, stdout); err != nil {
+			if err := generateConfig(context.Background(), p, imports, declared, generateConfigOut, s.out); err != nil {
 				return err
 			}
 		}
 		filterPlanByTarget(pl, target)
 		if jsonOut {
 			out, _ := pl.RenderJSON()
-			fmt.Fprintln(stdout, string(out))
+			fmt.Fprintln(s.out, string(out))
 		} else {
-			fmt.Fprint(stdout, pl.RenderText(true))
+			fmt.Fprint(s.out, pl.RenderText(true))
 		}
 		if pl.HasChanges() {
 			exit = 2
@@ -111,29 +134,32 @@ func run(args []string, stdout io.Writer) int {
 	planCmd.Flags().StringVar(&generateConfigOut, "generate-config", "", "write generated HCL for undeclared import blocks to this file")
 	root.AddCommand(planCmd)
 
-	root.AddCommand(&cobra.Command{Use: "apply", RunE: func(_ *cobra.Command, _ []string) error {
-		return applyRun(p, cfgPath, statePath, target, false, stdout)
+	root.AddCommand(&cobra.Command{Use: "apply", RunE: func(cmd *cobra.Command, _ []string) error {
+		cmdName = cmd.Name()
+		return applyRun(p, cfgPath, statePath, target, false, s)
 	}})
-	root.AddCommand(&cobra.Command{Use: "destroy", RunE: func(_ *cobra.Command, _ []string) error {
-		return applyRun(p, cfgPath, statePath, target, true, stdout)
+	root.AddCommand(&cobra.Command{Use: "destroy", RunE: func(cmd *cobra.Command, _ []string) error {
+		cmdName = cmd.Name()
+		return applyRun(p, cfgPath, statePath, target, true, s)
 	}})
 	root.AddCommand(&cobra.Command{
 		Use:   "import <address> <id>",
 		Short: "Adopt an existing resource into state",
 		Args:  cobra.ExactArgs(2),
-		RunE: func(_ *cobra.Command, args []string) error {
-			return importRun(p, cfgPath, statePath, args[0], args[1], stdout)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cmdName = cmd.Name()
+			return importRun(p, cfgPath, statePath, args[0], args[1], s)
 		},
 	})
 
 	if err := root.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
+		output.EmitError(s.err, fmtOf(jsonOut), cmdName, err)
 		return 1
 	}
 	return exit
 }
 
-func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy bool, stdout io.Writer) error {
+func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy bool, s streams) error {
 	var desired []plan.DesiredResource
 	var imports []plan.ImportBlock
 	if !destroy {
@@ -149,28 +175,28 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy bo
 		return err
 	}
 	defer unlock()
-	s, err := b.Get()
+	st, err := b.Get()
 	if err != nil {
 		return err
 	}
-	pl, err := plan.Build(context.Background(), p, s, desired)
+	pl, err := plan.Build(context.Background(), p, st, desired)
 	if err != nil {
 		return err
 	}
-	if err := plan.ResolveImports(context.Background(), p, s, pl, imports); err != nil {
+	if err := plan.ResolveImports(context.Background(), p, st, pl, imports); err != nil {
 		return err
 	}
 	filterPlanByTarget(pl, target)
-	if err := apply.Apply(context.Background(), p, b, s, pl); err != nil {
+	if err := apply.Apply(context.Background(), p, b, st, pl); err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "Apply complete. %d change(s).\n", len(pl.Changes))
+	fmt.Fprintf(s.out, "Apply complete. %d change(s).\n", len(pl.Changes))
 	return nil
 }
 
 // importRun adopts an existing resource (declared in config) into state by id,
 // under the state lock. It never mutates the remote.
-func importRun(p provider.Provider, cfgPath, statePath, address, id string, stdout io.Writer) error {
+func importRun(p provider.Provider, cfgPath, statePath, address, id string, s streams) error {
 	_, desired, _, err := config.Load(cfgPath, p)
 	if err != nil {
 		return err
@@ -181,14 +207,14 @@ func importRun(p provider.Provider, cfgPath, statePath, address, id string, stdo
 		return err
 	}
 	defer unlock()
-	s, err := b.Get()
+	st, err := b.Get()
 	if err != nil {
 		return err
 	}
-	if err := apply.Import(context.Background(), p, b, s, address, id, desired); err != nil {
+	if err := apply.Import(context.Background(), p, b, st, address, id, desired); err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "Imported %s (id %s).\n", address, id)
+	fmt.Fprintf(s.out, "Imported %s (id %s).\n", address, id)
 	return nil
 }
 
