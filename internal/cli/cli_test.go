@@ -404,10 +404,29 @@ func TestOpenBackendRejectsUnknownAttr(t *testing.T) {
 	}
 }
 
-// The destroy safety note (spec I3): a destroy that falls back to the local
-// backend because no backend block was found must say so on stderr, so a
-// remote-state user isn't misled by a silent "destroyed nothing".
-func TestDestroyLocalFallbackPrintsNote(t *testing.T) {
+// The destroy safety note (spec I3, refined): a destroy that falls back to the
+// local backend because NO config file was found warns on stderr, so a
+// remote-state user who forgot --config isn't misled by a silent "destroyed
+// nothing". A config that merely lacks a backend block stays quiet (below).
+func TestDestroyNoConfigPrintsNote(t *testing.T) {
+	dir := t.TempDir()
+	st := filepath.Join(dir, "s.bpstate")
+	var out, errBuf bytes.Buffer
+	// --config points at a nonexistent file.
+	code := run([]string{"destroy", "--auto-approve", "--config", filepath.Join(dir, "nope.bp.hcl"), "--state", st}, streams{
+		in: strings.NewReader(""), out: &out, err: &errBuf, isTTY: func() bool { return false },
+	})
+	if code != 0 {
+		t.Fatalf("destroy exit = %d, want 0\n%s", code, out.String()+errBuf.String())
+	}
+	if !strings.Contains(errBuf.String(), "using local state backend") {
+		t.Fatalf("expected local-fallback note on stderr, got %q", errBuf.String())
+	}
+}
+
+// A destroy with a config file present (but no backend block) is a deliberate
+// local setup and must NOT print the note (avoids per-destroy noise).
+func TestDestroyWithConfigNoNote(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "baseplate.bp.hcl")
 	os.WriteFile(cfg, []byte(`resource "mock_thing" "a" { name = "x" }`), 0o644)
@@ -419,7 +438,7 @@ func TestDestroyLocalFallbackPrintsNote(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("destroy exit = %d, want 0\n%s", code, out.String()+errBuf.String())
 	}
-	if !strings.Contains(errBuf.String(), "using local state backend") {
-		t.Fatalf("expected local-fallback note on stderr, got %q", errBuf.String())
+	if strings.Contains(errBuf.String(), "using local state backend") {
+		t.Fatalf("no note expected when a config file exists, got %q", errBuf.String())
 	}
 }

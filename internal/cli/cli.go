@@ -328,14 +328,24 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 	if err != nil {
 		return err
 	}
+	// Warn only when there is NO config file: a remote-state user who forgot
+	// --config (or mistyped it) would otherwise silently destroy local/empty
+	// state and be told "0 change(s)". A config that exists but omits a backend
+	// block is a deliberate local setup, so it stays quiet.
 	if destroy && localFallback {
-		fmt.Fprintf(s.err, "note: using local state backend at %s (no backend block found)\n", statePath)
+		if _, statErr := os.Stat(cfgPath); os.IsNotExist(statErr) {
+			fmt.Fprintf(s.err, "note: no config at %s; using local state backend at %s\n", cfgPath, statePath)
+		}
 	}
 	unlock, err := b.Lock()
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer func() {
+		if uerr := unlock(); uerr != nil {
+			fmt.Fprintf(s.err, "warning: failed to release state lock: %v\n", uerr)
+		}
+	}()
 	st, err := b.Get()
 	if err != nil {
 		return err
@@ -385,7 +395,11 @@ func importRun(p provider.Provider, cfgPath, statePath, address, id string, form
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer func() {
+		if uerr := unlock(); uerr != nil {
+			fmt.Fprintf(s.err, "warning: failed to release state lock: %v\n", uerr)
+		}
+	}()
 	st, err := b.Get()
 	if err != nil {
 		return err
