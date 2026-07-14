@@ -1,6 +1,8 @@
 package backend
 
 import (
+	"crypto/md5"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -20,6 +22,7 @@ type fakeTFServer struct {
 	lockWho         string
 	sawLockMethod   string
 	sawUnlockMethod string
+	sawContentMD5   string
 	requireAuth     bool
 }
 
@@ -67,6 +70,7 @@ func (f *fakeTFServer) handler() http.Handler {
 				w.WriteHeader(http.StatusConflict)
 				return
 			}
+			f.sawContentMD5 = r.Header.Get("Content-MD5")
 			f.body, _ = io.ReadAll(r.Body)
 			w.WriteHeader(http.StatusOK)
 		}
@@ -105,6 +109,23 @@ func TestHTTPPutThenGetRoundTrips(t *testing.T) {
 	}
 	if out.Serial != 7 || len(out.Resources) != 1 || out.Resources[0].ID != "9" {
 		t.Fatalf("round-trip mismatch: %+v", out)
+	}
+}
+
+func TestHTTPPutSendsContentMD5(t *testing.T) {
+	fs := &fakeTFServer{}
+	srv := httptest.NewServer(fs.handler())
+	defer srv.Close()
+	h, _ := NewHTTP(HTTPConfig{Address: srv.URL})
+	s := state.New()
+	if err := h.Put(s); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := s.Marshal()
+	sum := md5.Sum(b)
+	want := base64.StdEncoding.EncodeToString(sum[:])
+	if fs.sawContentMD5 != want {
+		t.Fatalf("Content-MD5 = %q, want %q", fs.sawContentMD5, want)
 	}
 }
 

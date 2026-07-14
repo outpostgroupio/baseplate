@@ -2,7 +2,9 @@ package backend
 
 import (
 	"bytes"
+	"crypto/md5"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -58,7 +60,7 @@ func NewHTTP(cfg HTTPConfig) (*HTTP, error) {
 	return &HTTP{cfg: cfg, client: client}, nil
 }
 
-func (h *HTTP) request(method, url string, body []byte) (*http.Response, error) {
+func (h *HTTP) request(method, url string, body []byte, extra map[string]string) (*http.Response, error) {
 	var r io.Reader
 	if body != nil {
 		r = bytes.NewReader(body)
@@ -73,11 +75,14 @@ func (h *HTTP) request(method, url string, body []byte) (*http.Response, error) 
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	for k, v := range extra {
+		req.Header.Set(k, v)
+	}
 	return h.client.Do(req)
 }
 
 func (h *HTTP) Get() (*state.State, error) {
-	resp, err := h.request(http.MethodGet, h.cfg.Address, nil)
+	resp, err := h.request(http.MethodGet, h.cfg.Address, nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +118,13 @@ func (h *HTTP) Put(s *state.State) error {
 		}
 		target += sep + "ID=" + url.QueryEscape(h.lockID)
 	}
-	resp, err := h.request(h.cfg.UpdateMethod, target, b)
+	// Content-MD5 is an integrity advisory the Terraform http backend sends on
+	// state writes; some hosts (e.g. GitLab) record it. MD5 here is a checksum,
+	// not a security primitive.
+	sum := md5.Sum(b)
+	resp, err := h.request(h.cfg.UpdateMethod, target, b, map[string]string{
+		"Content-MD5": base64.StdEncoding.EncodeToString(sum[:]),
+	})
 	if err != nil {
 		return err
 	}
@@ -149,7 +160,7 @@ func (h *HTTP) Lock() (func() error, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := h.request(h.cfg.LockMethod, h.cfg.LockAddress, body)
+	resp, err := h.request(h.cfg.LockMethod, h.cfg.LockAddress, body, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +193,7 @@ func (h *HTTP) unlock() error {
 	if addr == "" {
 		return nil
 	}
-	resp, err := h.request(h.cfg.UnlockMethod, addr, h.lockBody)
+	resp, err := h.request(h.cfg.UnlockMethod, addr, h.lockBody, nil)
 	if err != nil {
 		return err
 	}
