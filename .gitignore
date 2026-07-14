@@ -12,3 +12,6 @@
 # + Phase 4 drift watcher, but not committed (3MB unified spec, legacy place-publish).
 /internal/provider/roblox/opencloud/specs/openapi-unified.json
 /internal/provider/roblox/opencloud/specs/universes.json
+
+# Local planning docs (specs/plans) — kept out of the public repo.
+/docs/superpowers/
