@@ -47,7 +47,7 @@ checksum:
 changelog:
   use: github
   sort: asc
-  abbrev: 7
+  format: '[{{ printf "%.7s" .SHA }}](https://github.com/outpostgroupio/baseplate/commit/{{ .SHA }}) {{ .Message }}{{ with .AuthorUsername }} (@{{ . }}){{ end }}'
   groups:
     - title: Features
       regexp: '^.*?feat(\(.+\))??!?:.+$'
