@@ -64,6 +64,44 @@ func TestConfigGetPublishedNeverPublishedIsEmpty(t *testing.T) {
 	}
 }
 
+// The values endpoint was seen (live) to 404 transiently right after a publish.
+// With published revisions on record, that's retried, never read as "empty".
+func TestConfigGetPublishedTransient404IsRetried(t *testing.T) {
+	valueCalls := 0
+	cc := newConfigTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == cfgPath+"/revisions" {
+			if r.URL.Query().Get("MaxPageSize") != "1" {
+				t.Errorf("query %s", r.URL.RawQuery)
+			}
+			io.WriteString(w, `{"revisions":[{"revisionId":"1","version":3}]}`)
+			return
+		}
+		valueCalls++
+		if valueCalls == 1 {
+			w.WriteHeader(404)
+			return
+		}
+		io.WriteString(w, liveValuesBody)
+	})
+	got, err := cc.GetPublished(context.Background(), "42", "InExperienceConfig")
+	if err != nil || got.Version != 3 || valueCalls != 2 {
+		t.Fatalf("got=%+v err=%v calls=%d", got, err, valueCalls)
+	}
+}
+
+func TestConfigGetPublishedPersistent404WithRevisionsIsError(t *testing.T) {
+	cc := newConfigTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == cfgPath+"/revisions" {
+			io.WriteString(w, `{"revisions":[{"revisionId":"1"}]}`)
+			return
+		}
+		w.WriteHeader(404)
+	})
+	if _, err := cc.GetPublished(context.Background(), "42", "InExperienceConfig"); err == nil || !strings.Contains(err.Error(), "temporarily unavailable") {
+		t.Fatalf("err = %v, must not silently read as empty", err)
+	}
+}
+
 func TestConfigGetPublishedForbiddenIsError(t *testing.T) {
 	cc := newConfigTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(403)
@@ -147,6 +185,33 @@ func TestConfigOverwriteDraftOmitsAbsentRulesAndHash(t *testing.T) {
 	}
 }
 
+func TestConfigPatchDraftSendsChangesAndNullDeletes(t *testing.T) {
+	var got map[string]json.RawMessage
+	cc := newConfigTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch || r.URL.Path != cfgPath+"/draft" {
+			t.Errorf("got %s %s", r.Method, r.URL.Path)
+		}
+		json.NewDecoder(r.Body).Decode(&got)
+		io.WriteString(w, `{"draftHash":"P"}`)
+	})
+	h, err := cc.PatchDraft(context.Background(), "42", "InExperienceConfig", map[string]json.RawMessage{
+		"keep": json.RawMessage(`{"a":1}`),
+		"gone": nil,
+	})
+	if err != nil || h != "P" {
+		t.Fatalf("h=%q err=%v", h, err)
+	}
+	if string(got["entries"]) != `{"gone":null,"keep":{"a":1}}` {
+		t.Fatalf("entries = %s", got["entries"])
+	}
+	if _, ok := got["conditionalRules"]; ok {
+		t.Fatal("PATCH must not send conditionalRules (omitting leaves rules unchanged)")
+	}
+	if _, ok := got["draftHash"]; ok {
+		t.Fatal("PATCH sends no draftHash")
+	}
+}
+
 func TestConfigPublish(t *testing.T) {
 	var got configPublishWire
 	cc := newConfigTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -180,17 +245,55 @@ func TestConfigPublishEmptyDraftIsClassified(t *testing.T) {
 }
 
 func TestConfigOverwriteDuringRolloutIsClassified(t *testing.T) {
+	calls := 0
 	cc := newConfigTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(400)
 		io.WriteString(w, "MultipleDraftNotSupported") // verbatim live response
 	})
-	_, err := cc.OverwriteDraft(context.Background(), "42", "InExperienceConfig", ConfigOverwrite{})
+	_, err := cc.PatchDraft(context.Background(), "42", "InExperienceConfig", nil)
 	if !IsMultipleDraft(err) {
 		t.Fatalf("IsMultipleDraft(%v) = false", err)
 	}
+	if calls != len(etagRetryDelays)+1 {
+		t.Fatalf("calls = %d: a transient in-flight publish must be retried briefly", calls)
+	}
 	if IsEmptyDraft(err) {
 		t.Fatal("not an empty draft")
+	}
+}
+
+func TestConfigWritesRetryTransientETagMismatch(t *testing.T) {
+	calls := 0
+	cc := newConfigTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls <= 2 {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(400)
+			io.WriteString(w, "ETagMismatch") // verbatim live response
+			return
+		}
+		io.WriteString(w, `{"draftHash":"OK"}`)
+	})
+	h, err := cc.OverwriteDraft(context.Background(), "42", "InExperienceConfig", ConfigOverwrite{})
+	if err != nil || h != "OK" || calls != 3 {
+		t.Fatalf("h=%q err=%v calls=%d", h, err, calls)
+	}
+}
+
+func TestConfigETagMismatchGivesUpEventually(t *testing.T) {
+	calls := 0
+	cc := newConfigTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(400)
+		io.WriteString(w, "ETagMismatch")
+	})
+	if _, err := cc.Publish(context.Background(), "42", "InExperienceConfig", "H", "", ""); err == nil {
+		t.Fatal("expected an error")
+	}
+	if calls != len(etagRetryDelays)+1 {
+		t.Fatalf("calls = %d", calls)
 	}
 }
 
