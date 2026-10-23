@@ -25,7 +25,7 @@ resource "roblox_universe_secret" "discord" {
 }
 ```
 
-Provide the value in the environment (e.g. a gitignored `.env.local`), then apply:
+Provide the value in the environment (e.g. a gitignored `.env`), then apply:
 
 ```console
 $ export DISCORD_TOKEN="…"

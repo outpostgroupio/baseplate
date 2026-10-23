@@ -107,6 +107,19 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   amd64/arm64) and publishes a GitHub Release (archives, `checksums.txt`, grouped changelog,
   `prerelease: auto`). New `internal/version` stamped via `-ldflags`, surfaced by `baseplate version`.
   See `docs/superpowers/specs/2026-07-13-baseplate-release-automation-design.md`.
+- **`for_each`, `locals`, config functions and `baseplate show` (GitHub #2 items 3 and 5, slice A):**
+  new `internal/addr` (single source of truth for `type.name["key"]` render/parse); state **v2**
+  (`index_key`, no-op v1 migration, so older binaries refuse keyed state); `for_each` on `resource`
+  and `import` blocks (map or set of strings, known at load time) with `each`; indexed references
+  (`type.name["k"].attr`, `type.name[each.key].attr`; bare `type.name` depends on every instance);
+  `locals {}` + `path.config` + a function library (`fileset` via doublestar, `file`, `basename`,
+  `dirname`, go-cty stdlib subset); `--target`/`import` parse addresses (resource-wide or instance,
+  malformed is an error); `baseplate show [address] [--json]` (state inventory, no lock/network);
+  a plan warning when one resource both destroys and creates instances (key rename);
+  `--generate-config` refuses `for_each` imports. Docs: `docs/how-to/many-assets.md`,
+  `docs/config-reference.md`. **Deferred to slice B:** `moved {}` blocks (state-only rename,
+  including singular → keyed adoption). Later, if wanted: `output {}` blocks, repeatable
+  `--target`, `--generate-config` for keyed imports.
 - Next: **Phase 2** remaining slices (see Roadmap below).
 
 Read `docs/superpowers/specs/2026-07-03-baseplate-phase1-roblox-provider-design.md` for the
@@ -256,17 +269,62 @@ list-cursor surprises). Reproduce with `.superpowers/sdd/surface-probe.jq` /`det
   `/cloud/v2/universes/{id}/subscription-products/{productId}/subscriptions/{subscriptionId}` (read a
   single user's subscription). No product create/update. Creator-Dashboard-managed only. (Already
   noted at slice 5; re-confirmed.)
-- **Experience/universe social links** — social-links write surface exists **only for groups**
-  (`/v1/groups/{groupId}/social-links`), not universes/experiences. Out of scope unless Baseplate
-  grows group management.
-- **Universe `displayName`/`description`/`visibility`/`ageRating`** — read-only on the v2 API (set
-  via the root place); see `CLAUDE.md`. Only device/voice/private-server fields are writable, which
-  `roblox_experience` already covers.
+- **Universe `displayName`/`description`/`ageRating`** — read-only on the v2 Universe. Name and
+  description follow the root place, so they're managed via `roblox_place_config` (see below).
 
 **Actions, not resources (one-shot side effects — don't model as declarative state):**
 `POST …/users/{id}/notifications` (send notification), `…:translateText`, `…:publishMessage`,
 `…:restartServers`, `users/{id}:generateThumbnail`. These are imperative operations, not reconcilable
 state — if ever wanted, they belong behind a CLI verb, not a `resource` block.
+- **DONE — `baseplate restart-servers` + `apply --restart-servers`:** the first action verb. Seam:
+  optional `provider.ServerRestarter` capability (`ValidateRestart` + `RestartServers`) that the
+  Roblox provider implements; the CLI type-asserts for it, so it never imports `opencloud`
+  (`mock.Restarter` drives the CLI tests; the default mock deliberately lacks it so a key-less run
+  fails loudly). Uses the **stable** `POST /cloud/v2/universes/{id}:restartServers`
+  (`universe:write`; `placeIds`, `closeAllVersions`, bleed-off 1–60 min). Live-verified: response is
+  `{}`; out-of-range bleed-off → 400 `INVALID_ARGUMENT`; unknown place → 404; the body must be JSON
+  with a JSON content type. `apply --restart-servers` restarts only after a successful apply that
+  created/updated a `roblox_place`, one request per universe scoped to the published place ids
+  (read from post-apply state).
+- **DEFERRED — BETA server-management API** (`/server-management/v1/universes/{id}/restarts`):
+  bleed-off up to 240 min, per-place version filters, a ≤500 B `attributes` payload sent to servers,
+  plus `GET …/restarts` (status) and `GET …/restarts:forecast` (players/instances impacted). Fits as
+  a second implementation behind `ServerRestarter` (extra `RestartRequest` fields, a `--forecast`/
+  status read) once it leaves beta. Note: a stable-endpoint restart did not show up in the beta
+  list endpoint (empty `restartStatuses` right after an accepted restart on an idle universe).
+
+**Re-audit (2026-10-23, against creator-docs `openapi.json` @ `46be165f`).** No endpoint Baseplate
+calls was removed, renamed or newly deprecated since the June spec. Corrections and new findings:
+- **SHIPPED:** `roblox_experience.console_enabled`/`vr_enabled`, and **`roblox_place_config`**
+  (`GET`/`PATCH /cloud/v2/universes/{u}/places/{p}?updateMask=`, scope `universe.place:write`;
+  writable `displayName`/`description`/`serverSize`, `root` read-only). This closes the "Place
+  config — surface unconfirmed" backlog spike. PATCH returns **409 while the place is open in Team
+  Create** (translated to an actionable error). **Live-verified 2026-10-23** (`live_place_config_test.go`:
+  console/VR + place name/description/server size applied, converged, restored).
+- **Universe social links are writable on v2** (the old "groups only" note was wrong):
+  `facebookSocialLink`, `twitterSocialLink`, `youtubeSocialLink`, `twitchSocialLink`,
+  `discordSocialLink`, `robloxGroupSocialLink`, `guildedSocialLink`, each `{title, uri}`; removable
+  only via an `updateMask`. **Live-probe before shipping** (mask granularity is unconfirmed).
+- **Universe `privateServerPriceRobux`** is writable (null + mask disables private servers) but
+  isn't implemented yet, despite older docs claiming it was. Needs a "disabled" representation.
+- **Universe visibility** — not on v2, but `POST /legacy-develop/v1/universes/{id}/activate` /
+  `deactivate` (scope `legacy-universe:manage`, EXPERIMENTAL) toggles public/private; readable via
+  v2 `visibility`. Candidate `roblox_experience.public` attr after a live probe.
+- **New resource candidate: experience events** — `virtual-events/v3` full CRUD incl. real DELETE
+  (`POST /virtual-events/v3/universes/{u}/game-events`, `GET`/`PATCH`/`DELETE
+  /virtual-events/v3/game-events/{id}`; scopes `universe.event:read`/`:write`; EXPERIMENTAL).
+- **Badges:** all badge endpoints are now marked EXPERIMENTAL; the create icon (`files`) is now
+  optional (Roblox applies a default) — `icon_file` could become optional after a live probe.
+- **Assets:** `PATCH /assets/v1/assets/{id}` is **multipart + `updateMask` and returns an
+  Operation**; content updates are **Model-only** (Image/Decal/Audio/Video can't take new
+  content), so a stable-id in-place image update isn't possible. Audio create accepts
+  mp3/ogg/wav/flac (≤7 min, ≤20 MB; 10 or 100 uploads/month by ID-verification). No Assets-API
+  field exposes a Decal's underlying image id (only `toolbox-service/v2` returns `textureId`, for
+  Creator Store assets).
+- **Thumbnails:** new `thumbnail-personalization-api/v1/universes/{u}/thumbnails`, but its
+  `universe.thumbnail:write` scope is first-party-OAuth-only → still not usable with an API key.
+- Still not viable: subscription products, collaborators/permissions (legacy-develop exposes only
+  GETs + a Team Create toggle).
 
 **Marginal / needs design:** game **thumbnails/icons** — only per-language legacy endpoints
 (`/v1/game-thumbnails/games/{gameId}/language-codes/{lang}/…`) and user-avatar
@@ -327,9 +385,9 @@ translation, capability detection, contract tests, Rokit, and the audit's badge/
 thumbnail/notification candidates). The genuinely new items we chose to adopt:
 
 - **Resources (need a surface spike before slicing, like game passes got):**
-  - **Place config** — max players, streaming, allowed gear on a place (distinct from the `.rbxl`
-    publish `roblox_place` already does). Surface unconfirmed (candidates: `/v2/places/{placeId}`,
-    universe/place `configuration` endpoints) — spike before committing.
+  - **Place config** — **DONE (2026-10-23)** as `roblox_place_config` (name, description, server
+    size). Streaming/allowed gear have no Open Cloud surface (`develop.roblox.com` configuration is
+    cookie-auth only).
   - **Collaborators / permissions** — manage universe/place collaborator access. Likely
     `legacy-develop/v1/universes/{id}/permissions` + team-create; legacy-prefixed → live-probe risk
     like `roblox_badge`.

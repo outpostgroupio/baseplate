@@ -81,10 +81,14 @@ resource "mock_thing" "a" {
 // delete other (untargeted) resources that happen to be in state.
 func TestFilterPlanByTargetDropsUntargetedDeletes(t *testing.T) {
 	pl := &plan.Plan{Changes: []plan.Change{
-		{Address: "mock_thing.other", Action: provider.ActionDelete},
-		{Address: "mock_thing.target", Action: provider.ActionCreate},
+		{Address: "mock_thing.other", Type: "mock_thing", Name: "other", Action: provider.ActionDelete},
+		{Address: "mock_thing.target", Type: "mock_thing", Name: "target", Action: provider.ActionCreate},
 	}}
-	filterPlanByTarget(pl, "mock_thing.target")
+	tgt, err := parseTarget("--target", "mock_thing.target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	filterPlanByTarget(pl, tgt)
 	if len(pl.Changes) != 1 || pl.Changes[0].Address != "mock_thing.target" {
 		t.Fatalf("target must restrict plan to itself and not delete other resources; got %+v", pl.Changes)
 	}

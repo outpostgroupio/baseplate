@@ -40,7 +40,7 @@ Exit codes: `0` no changes, `2` changes present, `1` error. With `ROBLOX_API_KEY
 uses the real provider; otherwise the in-memory mock.
 
 **Live tests** (real Roblox, opt-in): put `ROBLOX_API_KEY` + `BASEPLATE_TEST_UNIVERSE` in a
-gitignored `.env.local`, then `set -a; . ./.env.local; set +a; BASEPLATE_LIVE=1 go test
+gitignored `.env`, then `set -a; . ./.env; set +a; BASEPLATE_LIVE=1 go test
 ./internal/provider/roblox/ -run Live -v`. See `docs/roblox-live-testing.md`. Test universe is
 `10438196190` (user-owned, `users/5822334358`).
 
@@ -69,8 +69,11 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
 
 ## Roblox spec gotchas (learned; verify against vendored specs before assuming)
 - Universe `displayName`/`description`/`visibility`/`ageRating` are **read-only** on the v2 API
-  (set via the root place). Writable: `voiceChatEnabled`, `desktop/mobile/tabletEnabled`,
-  `privateServerPriceRobux`.
+  (name/description follow the root place → `roblox_place_config`). Writable: `voiceChatEnabled`,
+  `desktop/mobile/tablet/console/vrEnabled`, `privateServerPriceRobux`, the `*SocialLink` objects.
+- Place config: `GET/PATCH /cloud/v2/universes/{u}/places/{p}?updateMask=` (scope
+  `universe.place:write`, distinct from publish's `universe-places:write`); PATCH 409s while the
+  place is open in Team Create.
 - Assets are **user- or group-owned** (`creationContext.creator.{userId|groupId}`), not
   universe-owned. Create = multipart (`request` JSON part + `fileContent` file) → async
   Operation → poll `/v1/operations/{id}`. Base `https://apis.roblox.com/assets`.

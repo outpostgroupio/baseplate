@@ -48,7 +48,7 @@ A few scopes are easy to miss because they're distinct from the general universe
 Export the key:
 
 ```console
-$ export ROBLOX_API_KEY="…"        # or put it in a gitignored .env.local and source it
+$ export ROBLOX_API_KEY="…"        # or put it in a gitignored .env and source it
 ```
 
 ## 4. Your first real config
@@ -139,5 +139,7 @@ $ baseplate import roblox_experience.main YOUR_UNIVERSE_ID
 ## 7. Where to go next
 
 - [`examples/`](../examples/) — annotated configs.
+- [Config reference](config-reference.md) — `for_each`, `locals`, references and functions.
+- [How-to: manage many assets](how-to/many-assets.md) — one block for a whole directory of images.
 - [Live testing against real Roblox](roblox-live-testing.md) — the opt-in live test setup.
 - [ROADMAP.md](../ROADMAP.md) — what's built, what's next, and known limitations.

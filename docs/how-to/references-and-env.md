@@ -20,7 +20,7 @@ resource "roblox_universe_secret" "token" {
 }
 ```
 
-Export the variables (or keep them in a gitignored `.env.local` and source it before running):
+Export the variables (or keep them in a gitignored `.env` and source it before running):
 
 ```console
 $ export ROBLOX_API_KEY="…"

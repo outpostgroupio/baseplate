@@ -22,7 +22,7 @@ import (
 // TestLiveBadgeLifecycle runs plan→apply→converge→update→icon-change→destroy for a
 // badge against the real Roblox API. Skipped unless BASEPLATE_LIVE=1.
 //
-//	set -a; . ./.env.local; set +a
+//	set -a; . ./.env; set +a
 //	BASEPLATE_LIVE=1 go test ./internal/provider/roblox/ -run LiveBadge -v
 func TestLiveBadgeLifecycle(t *testing.T) {
 	if os.Getenv("BASEPLATE_LIVE") != "1" {

@@ -17,6 +17,8 @@ var experienceBoolWire = map[string]string{
 	"desktop_enabled":    "desktopEnabled",
 	"mobile_enabled":     "mobileEnabled",
 	"tablet_enabled":     "tabletEnabled",
+	"console_enabled":    "consoleEnabled",
+	"vr_enabled":         "vrEnabled",
 }
 
 type experience struct{ uc opencloud.UniverseClient }
@@ -35,8 +37,10 @@ func (e *experience) Doc() provider.ResourceDoc {
 			"desktop_enabled":    "Playable on desktop.",
 			"mobile_enabled":     "Playable on mobile.",
 			"tablet_enabled":     "Playable on tablet.",
+			"console_enabled":    "Playable on console.",
+			"vr_enabled":         "Playable in VR.",
 		},
-		Notes:       "`displayName`/`description`/`visibility`/`ageRating` are read-only on the Open Cloud v2 API (they're set via the root place), so they are not manageable here. `destroy` unmanages the universe (it is never deleted).",
+		Notes:       "`displayName`/`description`/`visibility`/`ageRating` are read-only on the Open Cloud v2 API. The display name and description follow the root place's, so manage them with `roblox_place_config` on the root place. `destroy` unmanages the universe (it is never deleted).",
 		Scopes:      []string{"universe:write"},
 		ExampleFile: "examples/baseplate.bp.hcl",
 	}
@@ -117,6 +121,10 @@ func universeFromDesired(id string, desired provider.Attributes) (opencloud.Univ
 			u.MobileEnabled = &b
 		case "tablet_enabled":
 			u.TabletEnabled = &b
+		case "console_enabled":
+			u.ConsoleEnabled = &b
+		case "vr_enabled":
+			u.VREnabled = &b
 		}
 		mask = append(mask, wire)
 	}
@@ -137,6 +145,12 @@ func universeAttrs(id string, u opencloud.Universe) provider.Attributes {
 	}
 	if u.TabletEnabled != nil {
 		a["tablet_enabled"] = cty.BoolVal(*u.TabletEnabled)
+	}
+	if u.ConsoleEnabled != nil {
+		a["console_enabled"] = cty.BoolVal(*u.ConsoleEnabled)
+	}
+	if u.VREnabled != nil {
+		a["vr_enabled"] = cty.BoolVal(*u.VREnabled)
 	}
 	return a
 }

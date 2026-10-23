@@ -13,6 +13,7 @@ during `apply`/`destroy`, so grant both sides.
 |---|---|
 | `roblox_experience` | `universe:write` |
 | `roblox_place` | `universe-places:write` |
+| `roblox_place_config` | `universe.place:read`, `universe.place:write` |
 | `roblox_asset` | `asset:read`, `asset:write` |
 | `roblox_developer_product` | `developer-product:read`, `developer-product:write` |
 | `roblox_game_pass` | `game-pass:read`, `game-pass:write` |
@@ -23,7 +24,9 @@ during `apply`/`destroy`, so grant both sides.
 A few are easy to miss because they don't match the "obvious" name:
 
 - **`universe-places:write`** for `roblox_place` is distinct from `universe:write` and from
-  `universe.place:write`. Using the wrong one gives `401 … insufficient scope`.
+  `universe.place:write`. Using the wrong one gives `401 … insufficient scope`. Conversely,
+  `roblox_place_config` (name/description/server size) uses `universe.place:write`, not
+  `universe-places:write`.
 - **`universe.secret:read` / `universe.secret:write`** are separate from `universe:write` — a key
   that can edit universe config still can't touch secrets without them.
 - **`universe.event:read` / `universe.event:write`** for `roblox_experience_event` are also separate
@@ -36,6 +39,17 @@ A few are easy to miss because they don't match the "obvious" name:
   two `legacy-universe.badge:*` scopes alone sufficient for the full lifecycle, including icon
   upload. Grant all three to match the spec. Reads are public. The badge itself is never
   hard-deleted; `destroy` disables it.
+
+## Scopes for commands
+
+Commands that act on Roblox directly, rather than through a resource, need scopes too:
+
+| Command | Scopes |
+|---|---|
+| `baseplate restart-servers`, `apply --restart-servers` | `universe:write` |
+
+`apply --restart-servers` needs `universe:write` on top of the scopes for the resources you apply
+(e.g. `universe-places:write` for the `roblox_place` that gets published).
 
 ## Scopes are per-universe — and you must save
 
@@ -70,7 +84,7 @@ provider "roblox" {
 }
 ```
 
-Export it in your shell, or keep it in a gitignored `.env.local` and source it. Never commit an API
+Export it in your shell, or keep it in a gitignored `.env` and source it. Never commit an API
 key.
 
 ## See also

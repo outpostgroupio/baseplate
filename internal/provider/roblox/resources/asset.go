@@ -23,16 +23,16 @@ func (a *asset) Type() string { return "roblox_asset" }
 
 func (a *asset) Doc() provider.ResourceDoc {
 	return provider.ResourceDoc{
-		Summary: "Uploads a user- or group-owned image/decal asset.",
+		Summary: "Uploads a user- or group-owned image, decal or audio asset.",
 		Attributes: map[string]string{
-			"file":             "Path to the image to upload.",
+			"file":             "Path to the file to upload: `.png`/`.jpg`/`.bmp`/`.tga` for images and decals, `.mp3`/`.ogg`/`.wav`/`.flac` for audio.",
 			"display_name":     "Asset name.",
 			"description":      "Asset description.",
-			"asset_type":       "Asset type (e.g. image/decal).",
+			"asset_type":       "Asset type: `Image`, `Decal` or `Audio`. Defaults to `Audio` for audio files and `Image` otherwise.",
 			"creator_user_id":  "Owning user id (set exactly one of creator_user_id/creator_group_id).",
 			"creator_group_id": "Owning group id (set exactly one of creator_user_id/creator_group_id).",
 		},
-		Notes:  "The `id` output is the `assetId` (a numeric string). Image/decal assets are not archivable, so `destroy` unmanages the asset in place (drops it from state, leaves it uploaded).",
+		Notes:  "The `id` output is the `assetId` (a numeric string). Changing `file` doesn't re-upload: Open Cloud only accepts new content for Model assets, so a changed image or sound needs a new resource (and gets a new id). Audio is limited to 7 minutes and 20 MB, and Roblox caps audio uploads per month (10, or 100 for ID-verified accounts). Image/decal assets are not archivable, so `destroy` unmanages the asset in place (drops it from state, leaves it uploaded).",
 		Scopes: []string{"asset:read", "asset:write"},
 	}
 }
@@ -69,7 +69,7 @@ func (a *asset) Create(ctx context.Context, desired provider.Attributes) (string
 		return "", nil, fmt.Errorf("roblox_asset: exactly one of creator_user_id or creator_group_id is required")
 	}
 	created, err := a.ac.CreateAndAwait(ctx, opencloud.AssetCreate{
-		AssetType:      assetTypeOr(desired, "Image"),
+		AssetType:      assetTypeOr(desired, defaultAssetType(path)),
 		DisplayName:    desired["display_name"].AsString(),
 		Description:    desired["description"].AsString(),
 		CreatorUserID:  uid,
@@ -129,7 +129,7 @@ func (a *asset) stateAttrs(desired provider.Attributes) provider.Attributes {
 		"file":         desired["file"],
 		"display_name": desired["display_name"],
 		"description":  desired["description"],
-		"asset_type":   cty.StringVal(assetTypeOr(desired, "Image")),
+		"asset_type":   cty.StringVal(assetTypeOr(desired, defaultAssetType(desired["file"].AsString()))),
 	}
 	if v, ok := desired["creator_user_id"]; ok && !v.IsNull() {
 		out["creator_user_id"] = v
@@ -147,6 +147,15 @@ func assetTypeOr(desired provider.Attributes, def string) string {
 	return def
 }
 
+// defaultAssetType is the asset type used when asset_type is omitted: Audio for
+// audio files, Image for everything else.
+func defaultAssetType(path string) string {
+	if strings.HasPrefix(contentType(path), "audio/") {
+		return "Audio"
+	}
+	return "Image"
+}
+
 func numOr(desired provider.Attributes, k string) int64 {
 	v, ok := desired[k]
 	if !ok || v.IsNull() {
@@ -162,6 +171,18 @@ func contentType(path string) string {
 		return "image/png"
 	case ".jpg", ".jpeg":
 		return "image/jpeg"
+	case ".bmp":
+		return "image/bmp"
+	case ".tga":
+		return "image/tga"
+	case ".mp3":
+		return "audio/mpeg"
+	case ".ogg":
+		return "audio/ogg"
+	case ".wav":
+		return "audio/wav"
+	case ".flac":
+		return "audio/flac"
 	default:
 		return "application/octet-stream"
 	}
