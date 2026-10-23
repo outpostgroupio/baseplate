@@ -149,6 +149,25 @@ Example: [`examples/baseplate.bp.hcl`](../examples/baseplate.bp.hcl).
 
 ---
 
+## `roblox_experience_config`
+
+Manages a universe's Experience Config (BETA): the key/value settings a published game reads at runtime through `ConfigService` — declarative feature flags and tuning values. Each apply stages the key changes as a draft and publishes it.
+
+| Attribute | Type | Kind | Description |
+|---|---|---|---|
+| `deployment_strategy` | string | optional, create-only | `Immediate` (default) or `GradualRollout` (~15-20 min). Used for every publish, but not readable back, so it isn't diffed (listed as create-only): changing it alone doesn't publish. |
+| `entries` | any | required, diffable | Map of config key to value. Values are written as native HCL: bool, number, string, or an object/list (a JSON config), e.g. `{ enable_tutorial = true, boss_health = 100, shop = { discount = 0.2 } }`. **Authoritative:** keys in the repository but not here are removed on apply. Max 100 keys, 256-char keys; `.RBX.` is reserved in keys. |
+| `repository` | string | optional, create-only | Config repository. Default `InExperienceConfig` (the only one Roblox documents). |
+| `universe_id` | string | required, create-only | The universe. |
+
+The resource owns the repository's base keys: an apply removes any published key that isn't in `entries`. To protect an existing game, the **first** apply (create) refuses if the repository already has keys that aren't declared — `import` it first so the plan shows what would be removed. Conditional rules and the conditional (targeted) values of keys you keep are **preserved** (Baseplate never sends them, and verifies the staged draft and the published result); a removed key's conditional values are removed with it, and a type change for a key with conditional values is rejected by Roblox. Apply refuses if the repository has an unpublished draft (e.g. pending edits in Creator Hub) — publish or discard it first. `destroy` removes every plain key in the repository and publishes (the same ownership as apply; conditional rules are left alone, and an empty or never-published repository is a no-op). Protect production config with [`lifecycle { prevent_destroy = true }`](config-reference.md#lifecycle), which makes any plan that would destroy it fail. With `GradualRollout` (observed ~20 minutes), the API keeps returning the previous values until the rollout completes and rejects new drafts meanwhile, so a re-plan in that window shows the change again and an apply fails with a retry-later error. Numbers are stored as doubles (exact only up to 2^53).
+
+Requires the `universe:read`, `universe:write` [scopes](how-to/api-key-scopes.md).
+
+Example: [`examples/experience-config.bp.hcl`](../examples/experience-config.bp.hcl).
+
+---
+
 ## `roblox_experience_event`
 
 Manages an experience event (virtual event) for live-ops: a scheduled, titled event shown on the experience page. Uses the EXPERIMENTAL `virtual-events/v3` Open Cloud API.
