@@ -23,7 +23,7 @@ import (
 // SKIPPED unless BASEPLATE_LIVE=1 and ROBLOX_API_KEY + BASEPLATE_TEST_UNIVERSE are
 // set (the API key must carry universe.secret:read and universe.secret:write).
 //
-//	set -a; . ./.env.local; set +a
+//	set -a; . ./.env; set +a
 //	BASEPLATE_LIVE=1 go test ./internal/provider/roblox/ -run LiveSecret -v
 func TestLiveSecretLifecycle(t *testing.T) {
 	if os.Getenv("BASEPLATE_LIVE") != "1" {

@@ -48,7 +48,7 @@ A few scopes are easy to miss because they're distinct from the general universe
 Export the key:
 
 ```console
-$ export ROBLOX_API_KEY="…"        # or put it in a gitignored .env.local and source it
+$ export ROBLOX_API_KEY="…"        # or put it in a gitignored .env and source it
 ```
 
 ## 4. Your first real config

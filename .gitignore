@@ -4,7 +4,8 @@
 /baseplate
 /tmp/
 
-# Local credentials for gated live integration tests — NEVER commit.
+# Local credentials (API keys) for the CLI and live tests — NEVER commit.
+.env
 .env.local
 *.env.local
 
