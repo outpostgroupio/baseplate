@@ -212,3 +212,23 @@ resource "mock_thing" "set" {
 		t.Fatalf("the conversion should trigger the rename warning: %v", pl.Warnings())
 	}
 }
+
+// A dependent that stays unchanged while one of its dependency instances is
+// removed keeps the stale dependency in state (no-op changes aren't rewritten).
+// Removing the dependent later must still plan, not fail on that stale edge.
+func TestDeleteWithStaleRecordedDependencyPlans(t *testing.T) {
+	e := newForEachEnv(t)
+	child := `
+resource "mock_child" "c" {
+  name   = "child"
+  parent = mock_thing.set
+}
+`
+	e.apply(e.plan(threeThings + child))
+	e.apply(e.plan(strings.Replace(threeThings, `"a", "b", "c"`, `"a", "c"`, 1) + child))
+	pl := e.plan(strings.Replace(threeThings, `"a", "b", "c"`, `"a", "c"`, 1))
+	if s := pl.Summary(); s.Destroy != 1 {
+		t.Fatalf("want the child deleted, got %+v", s)
+	}
+	e.apply(pl)
+}

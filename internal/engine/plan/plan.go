@@ -79,11 +79,24 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 	}
 	// deletions: in state, not desired. Carry the recorded dependency edges so
 	// deletes are ordered by real (reverse) dependency order, not lexical luck.
+	// A recorded edge can name something that no longer exists (a dependent left
+	// unchanged while one of its dependency instances was removed keeps the old
+	// list), so only edges to resources still in config or state are kept.
+	known := map[string]bool{}
+	for _, r := range s.Resources {
+		known[r.Address()] = true
+	}
 	deletes := map[string]state.Resource{}
 	for _, r := range s.Resources {
 		if _, ok := byAddr[r.Address()]; !ok {
 			deletes[r.Address()] = r
-			nodes = append(nodes, graph.Node{Address: r.Address(), DependsOn: r.Dependencies})
+			var deps []string
+			for _, d := range r.Dependencies {
+				if _, desired := byAddr[d]; desired || known[d] {
+					deps = append(deps, d)
+				}
+			}
+			nodes = append(nodes, graph.Node{Address: r.Address(), DependsOn: deps})
 		}
 	}
 	order, err := graph.TopoSort(nodes)
