@@ -232,6 +232,19 @@ func ctyString(v cty.Value) string {
 		}
 		return bf.Text('f', -1)
 	default:
+		if t := v.Type(); t.IsListType() || t.IsSetType() || t.IsTupleType() {
+			// Render collections HCL-style: ["a", "b"] (strings quoted).
+			parts := []string{}
+			for it := v.ElementIterator(); it.Next(); {
+				_, e := it.Element()
+				if e.IsKnown() && !e.IsNull() && e.Type() == cty.String {
+					parts = append(parts, strconv.Quote(e.AsString()))
+				} else {
+					parts = append(parts, ctyString(e))
+				}
+			}
+			return "[" + strings.Join(parts, ", ") + "]"
+		}
 		return v.GoString()
 	}
 }

@@ -68,6 +68,7 @@ func TestSchemaProviderHasAllResourcesWithSchemas(t *testing.T) {
 	want := []string{
 		"roblox_experience", "roblox_asset", "roblox_developer_product",
 		"roblox_place", "roblox_universe_secret", "roblox_game_pass",
+		"roblox_experience_event",
 	}
 	for _, typ := range want {
 		r, ok := p.Resources()[typ]
