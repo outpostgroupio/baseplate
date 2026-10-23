@@ -101,6 +101,22 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
   **Pagination gotcha (verified live):** the list endpoint **always** returns a non-empty
   `nextPageCursor` — even on the empty final page — so paginate until an **empty `secrets` page**,
   not an empty cursor (a cursor-only loop never terminates and burns the 120-req/min limit → 429).
+- Experience events (`virtual-events/v3`, base `https://apis.roblox.com`, **EXPERIMENTAL**): create
+  `POST /virtual-events/v3/universes/{universeId}/game-events`; single read/PATCH/DELETE on
+  `/virtual-events/v3/game-events/{eventId}` (not universe-scoped, so `roblox_experience_event`'s
+  state/import id is the bare event id). JSON bodies; PATCH is partial (omitted/null = no change)
+  and returns the event; DELETE is a real delete (204). Per spec the event `id` is a JSON **string**
+  (exceeds 2^53) while `universeId`/`placeId`/`hostId`/`mediaId` are int64 numbers; the client
+  decodes all of them leniently (string or number). Errors are RFC 7807 ProblemDetails
+  (`title`/`detail`), which `parseAPIError` now surfaces. `visibility` is lowercase
+  `public`/`private` (`moderated` is server-set). `categories`/`thumbnails` are `{value, rank}`
+  arrays; Baseplate exposes them as ordered lists (rank = position+1). Times are normalised on both
+  sides to UTC whole-second RFC 3339 via the `provider.Normalizer` engine capability. Scopes
+  `universe.event:read`/`universe.event:write`; without them the gateway returns
+  `403 {"errors":[{"code":0,"message":"Scope not authorized."}]}` on every call, reads included
+  (verified live 2026-10-23). **Not yet live-verified beyond that**: the test key lacks the
+  scopes, so response shapes, time precision, rank base, and past/active-event edit rules come from
+  the spec only.
 
 ## Workflow used here
 Superpowers: brainstorm → spec → bite-sized TDD plan → build (subagent-per-task, or inline for

@@ -18,6 +18,7 @@ during `apply`/`destroy`, so grant both sides.
 | `roblox_game_pass` | `game-pass:read`, `game-pass:write` |
 | `roblox_badge` | `legacy-universe.badge:manage-and-spend-robux`, `legacy-universe.badge:write`, `legacy-badge:manage` |
 | `roblox_universe_secret` | `universe.secret:read`, `universe.secret:write` |
+| `roblox_experience_event` | `universe.event:read`, `universe.event:write` |
 
 A few are easy to miss because they don't match the "obvious" name:
 
@@ -25,6 +26,9 @@ A few are easy to miss because they don't match the "obvious" name:
   `universe.place:write`. Using the wrong one gives `401 … insufficient scope`.
 - **`universe.secret:read` / `universe.secret:write`** are separate from `universe:write` — a key
   that can edit universe config still can't touch secrets without them.
+- **`universe.event:read` / `universe.event:write`** for `roblox_experience_event` are also separate
+  from `universe:write`. Without them every events call (even a read) fails with
+  `403 Scope not authorized.`
 - **`roblox_badge`** needs three legacy scopes: `legacy-universe.badge:manage-and-spend-robux`
   (create — the "spend-robux" name is a legacy of the old per-badge fee; creation is free in
   practice), `legacy-universe.badge:write` (update name/description/enabled), and

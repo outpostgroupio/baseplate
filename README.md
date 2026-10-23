@@ -52,6 +52,7 @@ $ baseplate destroy   # tear down what's managed
 | `roblox_asset` | User- or group-owned image/decal assets (multipart upload). |
 | `roblox_developer_product` | Developer products (name, price, description, icon, on-sale). |
 | `roblox_game_pass` | Game passes (name, price, description, icon, on-sale). |
+| `roblox_experience_event` | Experience (virtual) events for live-ops: title, schedule, visibility, categories, thumbnails. Experimental API, not yet live-verified. |
 | `roblox_universe_secret` | Open Cloud secrets — full CRUD incl. real delete; values sealed client-side, never stored. |
 
 Plus declarative `import { to = <address>  id = "<id>" }` blocks to adopt existing resources during a

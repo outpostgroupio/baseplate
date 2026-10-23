@@ -49,6 +49,12 @@ which reuses the same `BASEPLATE_TEST_UNIVERSE` and creates/rotates/destroys a
 throwaway `bp_test_<unixtime>` secret — a real hard delete, verified by listing
 secrets after destroy. Run it in isolation with `-run LiveSecret`.
 
+`TestLiveExperienceEventLifecycle` (`roblox_experience_event`) creates a **private**
+event 30 days out, converges, updates the title and start time, converges, destroys
+it and checks the event is gone (a real delete). It needs the
+`universe.event:read`/`universe.event:write` scopes and **skips** (rather than
+fails) when the key lacks them. Run it alone with `-run LiveExperienceEvent`.
+
 ## Using the CLI directly
 With `ROBLOX_API_KEY` exported, the `baseplate` CLI uses the real provider
 automatically (otherwise it uses the in-memory mock). See
