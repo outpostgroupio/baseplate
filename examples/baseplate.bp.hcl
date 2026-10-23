@@ -1,6 +1,6 @@
 # Example Baseplate config for a Roblox experience.
 #
-# Set ROBLOX_API_KEY in your environment (e.g. via a gitignored .env.local) and
+# Set ROBLOX_API_KEY in your environment (e.g. via a gitignored .env) and
 # run `baseplate plan` / `baseplate apply`. Replace the placeholder IDs below.
 
 provider "roblox" {
@@ -13,6 +13,18 @@ resource "roblox_experience" "main" {
   universe_id        = "YOUR_UNIVERSE_ID"
   voice_chat_enabled = true
   desktop_enabled    = true
+  console_enabled    = false
+  vr_enabled         = false
+}
+
+# Configures an existing place. On the root place, display_name/description are
+# also the experience's name and description (read-only on the universe API).
+resource "roblox_place_config" "root" {
+  universe_id  = roblox_experience.main.id
+  place_id     = "YOUR_ROOT_PLACE_ID"
+  display_name = "My Experience"
+  description  = "Managed by Baseplate"
+  server_size  = 20
 }
 
 # A standalone image asset, owned by a user or group.

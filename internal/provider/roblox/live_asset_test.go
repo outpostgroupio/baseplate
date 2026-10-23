@@ -46,7 +46,7 @@ func writeTestPNG(t *testing.T, path string) {
 //
 // Run it with:
 //
-//	set -a; . ./.env.local; set +a
+//	set -a; . ./.env; set +a
 //	BASEPLATE_LIVE=1 go test ./internal/provider/roblox/ -run Live -v
 func TestLiveAssetLifecycle(t *testing.T) {
 	if os.Getenv("BASEPLATE_LIVE") != "1" {
@@ -116,6 +116,26 @@ func TestLiveAssetLifecycle(t *testing.T) {
 	}
 	if pl2.HasChanges() {
 		t.Fatalf("expected convergence, got changes:\n%s", pl2.RenderText(false))
+	}
+
+	// Metadata update: rename + re-describe, which goes through the multipart
+	// PATCH (updateMask + Operation), then converge again.
+	desired[0].Attributes["display_name"] = cty.StringVal("Baseplate Live Test Icon (renamed)")
+	desired[0].Attributes["description"] = cty.StringVal("Updated by Baseplate's live asset test")
+	pl3, err := plan.Build(ctx, p, s, desired)
+	if err != nil {
+		t.Fatalf("update plan: %v", err)
+	}
+	t.Logf("update plan:\n%s", pl3.RenderText(false))
+	if err := apply.Apply(ctx, p, b, s, pl3); err != nil {
+		t.Fatalf("update apply: %v", err)
+	}
+	pl4, err := plan.Build(ctx, p, s, desired)
+	if err != nil {
+		t.Fatalf("post-update re-plan: %v", err)
+	}
+	if pl4.HasChanges() {
+		t.Fatalf("expected convergence after update, got changes:\n%s", pl4.RenderText(false))
 	}
 
 	// NOTE: destroy runs in t.Cleanup. Image assets are not archivable via Open

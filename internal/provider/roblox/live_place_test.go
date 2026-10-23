@@ -34,7 +34,7 @@ func writeMinimalPlace(t *testing.T, path, marker string) {
 //
 // Run it with:
 //
-//	set -a; . ./.env.local; set +a
+//	set -a; . ./.env; set +a
 //	BASEPLATE_LIVE=1 go test ./internal/provider/roblox/ -run Live -v
 func TestLivePlaceLifecycle(t *testing.T) {
 	if os.Getenv("BASEPLATE_LIVE") != "1" {

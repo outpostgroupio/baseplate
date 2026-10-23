@@ -15,7 +15,7 @@ These are accepted by every command.
 |---|---|---|
 | `--config` | `baseplate.bp.hcl` | Path to the HCL config file. |
 | `--state` | `baseplate.bpstate` | Path to the state file. |
-| `--target` | *(none)* | Limit the operation to a single resource address (e.g. `roblox_asset.icon`). |
+| `--target` | *(none)* | Limit `plan`/`apply`/`destroy` to one resource (`roblox_asset.icon`; for a `for_each` resource, every instance) or one instance (`'roblox_asset.sprites["ui/gem.png"]'`). See [Addresses](#addresses). A malformed address is an error. |
 | `--json` | `false` | Emit machine-readable output on **every** command. Results are a versioned envelope `{ "format_version": 1, "command": ..., "result": ... }` on stdout; errors are `{ "format_version": 1, "command": ..., "error": { "message": ... } }` on stderr. |
 
 State can also be stored remotely via a `backend "http" {}` block — see [Remote state](how-to/remote-state.md).
@@ -32,6 +32,27 @@ confirmation — only `yes` proceeds. In a non-interactive session (no TTY, e.g.
 skipped automatically, so jobs never hang waiting on stdin. Because a text prompt would corrupt the
 JSON stream, `--json` on an interactive terminal requires `--auto-approve` (otherwise the command
 errors).
+
+## Addresses
+
+`--target`, `import` and `show` take a resource address:
+
+| Address | Selects |
+|---|---|
+| `type.name` | A resource. For a `for_each` resource, every instance (`--target`, `show`). |
+| `type.name["key"]` | One instance of a `for_each` resource. |
+
+The key is an HCL quoted string: inside it, write `\"` for a quote and `\\` for a backslash. The
+brackets and quotes mean something to your shell, so wrap the whole address in single quotes:
+
+```console
+$ baseplate apply --target 'roblox_asset.sprites["ui/gem.png"]'
+$ baseplate import 'roblox_asset.sprites["ui/gem.png"]' 1234567890
+```
+
+An unquoted key (`roblox_asset.sprites[ui/gem.png]`) is rejected with
+`invalid address "...": key must be a quoted string`. `plan` and `show` print addresses in exactly
+this form, so you can copy them.
 
 ## Environment
 
@@ -77,7 +98,17 @@ Plan: 0 to import, 1 to add, 0 to change, 0 to destroy.
 ```
 
 `--json` emits the plan as structured JSON instead of the text diff. Sensitive attribute values
-(e.g. a secret's `value`) are redacted in both formats.
+(e.g. a secret's `value`) are redacted in both formats. Each change has an `address` and, for a
+`for_each` instance, its `key`.
+
+When one resource both destroys and creates instances in the same plan (what a renamed `for_each`
+key looks like), `plan` prints a `Warning:` that the created instances are new objects with new ids.
+When a `for_each` resource declares zero instances while state still holds some, it warns that all
+of them will be destroyed. `--json` lists both under `result.warnings`. See
+[managing many assets](how-to/many-assets.md#renaming-or-moving-a-file-replaces-the-asset).
+
+`--generate-config=FILE` writes resource blocks for `import {}` blocks whose target isn't declared.
+It doesn't support `for_each` targets; declare those by hand.
 
 ### `apply`
 
@@ -132,10 +163,13 @@ Reads the live resource and writes a state entry under the state lock; it never 
 
 ```console
 $ baseplate import roblox_experience.main 10438196190
+$ baseplate import 'roblox_asset.sprites["ui/gem.png"]' 1234567890
 ```
 
-Errors if the address isn't declared in the config, is already in state, or can't be found on the
-platform. For a config-driven alternative that runs during `apply`, use an
+For a `for_each` resource, import one instance at a time using its [address](#addresses). Errors if
+the address isn't declared in the config, is already in state, or can't be found on the platform, or
+if another address in state already manages that id (one remote object is only ever managed at one
+address; otherwise destroying one address would delete the object the other still manages). For a config-driven alternative that runs during `apply`, use an
 [`import {}` block](getting-started.md#6-adopting-existing-resources-import).
 
 ### `restart-servers`
@@ -184,7 +218,62 @@ command returns as soon as the request is accepted. Exit codes: `0` when the req
 `place_ids` is empty when every place is targeted. An unknown `--place` fails with
 `Roblox API 404: The desired Place was not found.`
 
+### `show [address]`
+
+Print what the state manages. Reads state through the configured backend (local, or the `backend`
+block in `--config`) without taking the lock, makes no provider calls, and needs no
+`ROBLOX_API_KEY`.
+
+```console
+$ baseplate show
+roblox_asset.sprites["ui/coin.png"]  1234567891
+roblox_asset.sprites["ui/gem.png"]   1234567890
+roblox_experience.main               10438196190
+```
+
+With an [address](#addresses), it prints that resource's (or each matching instance's) attributes:
+
+```console
+$ baseplate show 'roblox_asset.sprites["ui/gem.png"]'
+roblox_asset.sprites["ui/gem.png"]
+    id           = 1234567890
+    asset_type   = Image
+    description  = Game sprite
+    display_name = sprite/ui/gem
+```
+
+`--json` returns the inventory sorted by address. `key` is present only for `for_each` instances,
+and `attributes` are plain JSON values. Sensitive attributes are never included.
+
+```json
+{
+  "format_version": 1,
+  "command": "show",
+  "result": {
+    "serial": 42,
+    "lineage": "…",
+    "resources": [
+      {
+        "address": "roblox_asset.sprites[\"ui/gem.png\"]",
+        "type": "roblox_asset",
+        "name": "sprites",
+        "key": "ui/gem.png",
+        "id": "1234567890",
+        "attributes": { "asset_type": "Image", "display_name": "sprite/ui/gem" }
+      }
+    ]
+  }
+}
+```
+
+This is the stable way to feed deployed ids into other tooling; see
+[managing many assets](how-to/many-assets.md#3-read-the-ids-back-show---json) for a Luau generator.
+An empty or missing state prints `No resources in state.` (`"resources": []` in JSON). Showing an
+address that isn't in state is an error.
+
 ## See also
+
+- [Config reference](config-reference.md)
 
 - [Getting started](getting-started.md)
 - [Resource reference](resource-reference.md)
