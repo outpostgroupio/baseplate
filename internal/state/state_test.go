@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -159,5 +160,35 @@ func TestV2StateRefusedByV1Binary(t *testing.T) {
 	_, err = unmarshal(b, 1, map[int]migrator{})
 	if err == nil || !strings.Contains(err.Error(), "newer version") {
 		t.Fatalf("v1 binary must refuse v2 state, got %v", err)
+	}
+}
+
+func TestFindKeyedAndEscapedAddresses(t *testing.T) {
+	s := New()
+	for _, k := range []string{"a", `q"uote`, "${x}"} {
+		s.Upsert(Resource{Type: "t", Name: "n", Key: k, ID: "id-" + k})
+	}
+	s.Upsert(Resource{Type: "t", Name: "n2", ID: "solo"})
+	for _, r := range s.Resources {
+		got, ok := s.Find(r.Address())
+		if !ok || got.ID != r.ID {
+			t.Fatalf("Find(%s) = %+v, %v", r.Address(), got, ok)
+		}
+	}
+	if _, ok := s.Find(`t.n["missing"]`); ok {
+		t.Fatal("Find must miss an absent key")
+	}
+}
+
+// Find runs once per resource in plan and once per commit in apply, so with
+// thousands of for_each instances it must not allocate per comparison.
+func TestFindDoesNotAllocate(t *testing.T) {
+	s := New()
+	for i := 0; i < 500; i++ {
+		s.Resources = append(s.Resources, Resource{Type: "roblox_asset", Name: "sprites", Key: fmt.Sprintf("ui/%03d.png", i), ID: fmt.Sprint(i)})
+	}
+	allocs := testing.AllocsPerRun(20, func() { s.Find(`roblox_asset.sprites["ui/499.png"]`) })
+	if allocs != 0 {
+		t.Fatalf("Find allocated %v times per call, want 0", allocs)
 	}
 }

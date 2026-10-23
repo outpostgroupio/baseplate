@@ -47,3 +47,52 @@ func TestParseRejectsMalformed(t *testing.T) {
 		}
 	}
 }
+
+// Format's fast path (keys that need no escaping) must render exactly what the
+// HCL writer renders, so addresses stay canonical either way.
+func TestFormatFastPathMatchesHCLQuoting(t *testing.T) {
+	keys := []string{"a", "ui/gem.png", "units/warship-2.png", "with space", "UPPER_lower.123",
+		"~!@#^&*()_+-=[]{}|;':,./<>?", `quo"te`, `back\slash`, "${x}", "$plain", "%{x}", "100%",
+		"tab\there", "new\nline", "ünï", "日本", "\x7f"}
+	for _, k := range keys {
+		want := typAndName + "[" + hclQuote(k) + "]"
+		if got := Format("t", "n", k); got != want {
+			t.Errorf("Format(%q) = %s, want %s", k, got, want)
+		}
+	}
+}
+
+const typAndName = "t.n"
+
+func TestFormatSimpleKeyIsCheap(t *testing.T) {
+	allocs := testing.AllocsPerRun(100, func() { _ = Format("roblox_asset", "sprites", "ui/gem.png") })
+	if allocs > 1 {
+		t.Fatalf("Format of a plain key allocated %v times, want at most 1", allocs)
+	}
+}
+
+func TestMatches(t *testing.T) {
+	cases := []struct {
+		typ, name, key, address string
+		want                    bool
+	}{
+		{"t", "n", "", "t.n", true},
+		{"t", "n", "", `t.n["a"]`, false},
+		{"t", "n", "a", `t.n["a"]`, true},
+		{"t", "n", "a", `t.n["b"]`, false},
+		{"t", "n", "a", "t.n", false},
+		{"t", "n", `q"`, `t.n["q\""]`, true},
+		{"t", "n", "a", `t.nn["a"]`, false},
+		{"t", "nn", "", "t.n", false},
+		{"tt", "n", "", "t.n", false},
+	}
+	for _, c := range cases {
+		if got := Matches(c.typ, c.name, c.key, c.address); got != c.want {
+			t.Errorf("Matches(%q,%q,%q,%s) = %v, want %v", c.typ, c.name, c.key, c.address, got, c.want)
+		}
+	}
+	allocs := testing.AllocsPerRun(100, func() { _ = Matches("roblox_asset", "sprites", "ui/gem.png", `roblox_asset.sprites["ui/gem.png"]`) })
+	if allocs != 0 {
+		t.Fatalf("Matches of a plain key allocated %v times, want 0", allocs)
+	}
+}

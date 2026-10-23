@@ -129,8 +129,20 @@ func unmarshal(b []byte, current int, table map[int]migrator) (*State, error) {
 
 func (s *State) Find(address string) (*Resource, bool) {
 	for i := range s.Resources {
-		if s.Resources[i].Address() == address {
+		r := &s.Resources[i]
+		if addr.Matches(r.Type, r.Name, r.Key, address) {
 			return &s.Resources[i], true
+		}
+	}
+	return nil, false
+}
+
+// find looks a resource up by its parts, without rendering any address.
+func (s *State) find(typ, name, key string) (*Resource, bool) {
+	for i := range s.Resources {
+		r := &s.Resources[i]
+		if r.Type == typ && r.Name == name && r.Key == key {
+			return r, true
 		}
 	}
 	return nil, false
@@ -147,7 +159,7 @@ func (s *State) FindByID(typ, id string) (*Resource, bool) {
 }
 
 func (s *State) Upsert(r Resource) {
-	if existing, ok := s.Find(r.Address()); ok {
+	if existing, ok := s.find(r.Type, r.Name, r.Key); ok {
 		*existing = r
 		return
 	}
@@ -157,7 +169,7 @@ func (s *State) Upsert(r Resource) {
 func (s *State) Remove(address string) {
 	out := s.Resources[:0]
 	for _, r := range s.Resources {
-		if r.Address() != address {
+		if !addr.Matches(r.Type, r.Name, r.Key, address) {
 			out = append(out, r)
 		}
 	}

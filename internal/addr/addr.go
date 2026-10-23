@@ -22,12 +22,57 @@ func Format(typ, name, key string) string {
 	if key == "" {
 		return typ + "." + name
 	}
-	return typ + "." + name + "[" + Quote(key) + "]"
+	if plain(key) {
+		return typ + "." + name + `["` + key + `"]`
+	}
+	return typ + "." + name + "[" + hclQuote(key) + "]"
 }
 
 // Quote renders s as an HCL quoted string literal (`"` and `\` escaped, and
 // template sequences like `${` doubled so they stay literal).
 func Quote(s string) string {
+	if plain(s) {
+		return `"` + s + `"`
+	}
+	return hclQuote(s)
+}
+
+// Matches reports whether address is the canonical address of type/name/key,
+// without allocating for keys that need no escaping. State lookups run this
+// once per resource, so it has to stay cheap with thousands of instances.
+func Matches(typ, name, key, address string) bool {
+	n := len(typ)
+	if len(address) <= n || address[:n] != typ || address[n] != '.' {
+		return false
+	}
+	rest := address[n+1:]
+	if len(rest) < len(name) || rest[:len(name)] != name {
+		return false
+	}
+	rest = rest[len(name):]
+	if key == "" {
+		return rest == ""
+	}
+	if plain(key) {
+		return len(rest) == len(key)+4 && rest[:2] == `["` && rest[2:2+len(key)] == key && rest[2+len(key):] == `"]`
+	}
+	return rest == "["+hclQuote(key)+"]"
+}
+
+// plain reports whether s renders as an HCL string literal unchanged: printable
+// ASCII with no quote, backslash, or template introducer ($ or %).
+func plain(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < 0x20 || c > 0x7e || c == '"' || c == '\\' || c == '$' || c == '%' {
+			return false
+		}
+	}
+	return true
+}
+
+// hclQuote is the canonical (slow) quoting via the HCL writer.
+func hclQuote(s string) string {
 	return strings.TrimSpace(string(hclwrite.TokensForValue(cty.StringVal(s)).Bytes()))
 }
 
