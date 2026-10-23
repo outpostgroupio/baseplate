@@ -20,14 +20,14 @@ These are accepted by every command.
 
 State can also be stored remotely via a `backend "http" {}` block — see [Remote state](how-to/remote-state.md).
 
-### Approval flags (`apply` / `destroy`)
+### Approval flags (`apply` / `destroy` / `restart-servers`)
 
 | Flag | Default | Description |
 |---|---|---|
 | `--auto-approve` | `false` | Skip the interactive approval prompt and apply immediately. |
 | `--yes` | `false` | Alias for `--auto-approve`. |
 
-`apply` and `destroy` render the plan and then, on an interactive terminal, prompt for
+`apply` and `destroy` render the plan (`restart-servers` describes the restart) and then, on an interactive terminal, prompt for
 confirmation — only `yes` proceeds. In a non-interactive session (no TTY, e.g. CI) the prompt is
 skipped automatically, so jobs never hang waiting on stdin. Because a text prompt would corrupt the
 JSON stream, `--json` on an interactive terminal requires `--auto-approve` (otherwise the command
@@ -47,8 +47,8 @@ errors).
 | `2` | (`plan` only) Success, and there are changes to apply. |
 | `1` | Error. |
 
-The `2` code lets CI branch on "is there drift?" without parsing output. `apply`/`destroy` return
-`1` both on error and when a confirmation prompt is declined.
+The `2` code lets CI branch on "is there drift?" without parsing output. `apply`/`destroy`/
+`restart-servers` return `1` both on error and when a confirmation prompt is declined.
 
 ## Commands
 
@@ -93,6 +93,19 @@ Apply complete. 1 change(s).
 On a terminal it prompts before mutating; pass `--auto-approve` (or `--yes`) to skip the prompt in
 scripts. CI (no TTY) skips it automatically.
 
+| Flag | Default | Description |
+|---|---|---|
+| `--restart-servers` | `false` | After a **successful** apply that published at least one `roblox_place` (a create or update), restart the game servers running an older version of those places so players move onto the new version. Nothing is restarted if the apply fails or publishes no place. |
+| `--restart-bleed-off` | *(immediate)* | With `--restart-servers`: stop matchmaking into the old servers and shut them down after this long (whole minutes, `1m`–`60m`). Requires `--restart-servers`. |
+
+With `--restart-servers`, the confirmation prompt lists the places whose servers will be restarted
+and how. The restart is one request per universe, scoped to the published place ids, taken from
+state after the apply (so a `universe_id` that references `roblox_experience.main.id` works).
+The flag is checked before anything is applied: without `ROBLOX_API_KEY` or with an invalid bleed-off
+the command fails up front. If the apply succeeds but the restart request fails, the command exits
+`1` with `apply succeeded, but restarting servers failed: …` (state is already written). `--json`
+adds a `restarts` array to the apply result (same shape as the `restart-servers` result below).
+
 ### `destroy`
 
 Remove everything the state manages. Equivalent to applying an empty config: every managed resource
@@ -124,6 +137,52 @@ $ baseplate import roblox_experience.main 10438196190
 Errors if the address isn't declared in the config, is already in state, or can't be found on the
 platform. For a config-driven alternative that runs during `apply`, use an
 [`import {}` block](getting-started.md#6-adopting-existing-resources-import).
+
+### `restart-servers`
+
+Restart an experience's live game servers so players move onto the latest published place version.
+This is an imperative action, not a resource: it changes no state and needs no state file. It uses
+the stable Open Cloud `POST /cloud/v2/universes/{id}:restartServers` endpoint and needs the
+`universe:write` scope.
+
+**This disconnects live players.** The prompt says exactly what will happen before anything is sent.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--universe` | *(from config)* | Universe id. If omitted, it is taken from the config's `roblox_experience` `universe_id`; this must be unambiguous (exactly one distinct literal id), otherwise pass `--universe`. |
+| `--place` | *(all places)* | Restrict the restart to this place id. Repeatable (`--place 1 --place 2`) or comma-separated. |
+| `--all-versions` | `false` | Restart servers on **every** version, including ones already on the latest. By default only servers running an older version than the latest published one are restarted, and if nothing newer has been published, nothing is restarted. |
+| `--bleed-off` | *(immediate)* | Stop matchmaking new players into the affected servers now, then shut them down after this duration. Whole minutes, `1m`–`60m`. Without it, servers shut down immediately. |
+| `--auto-approve` / `--yes` | `false` | Skip the prompt (see [Approval flags](#approval-flags-apply--destroy--restart-servers)). |
+
+```console
+$ baseplate restart-servers --bleed-off 5m
+Baseplate will restart live game servers in universe 10438196190:
+  places:   every place in the universe
+  servers:  only servers running an older place version than the latest published one
+            (if nothing newer has been published, no servers are restarted)
+  shutdown: after a 5-minute bleed-off: no new players are matched into these servers
+            from now on, and any players still in them after 5 minute(s) are removed
+
+Do you want to restart these servers? Only 'yes' will be accepted to confirm.
+Enter a value: yes
+Restart requested for universe 10438196190. Roblox restarts the servers asynchronously.
+```
+
+Roblox accepts the request and restarts servers asynchronously; it reports no progress, so the
+command returns as soon as the request is accepted. Exit codes: `0` when the request was accepted,
+`1` on error or a declined prompt. `--json` result:
+
+```json
+{
+  "format_version": 1,
+  "command": "restart-servers",
+  "result": { "universe_id": "10438196190", "place_ids": [], "all_versions": false, "bleed_off_minutes": 5 }
+}
+```
+
+`place_ids` is empty when every place is targeted. An unknown `--place` fails with
+`Roblox API 404: The desired Place was not found.`
 
 ## See also
 

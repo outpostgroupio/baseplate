@@ -245,6 +245,22 @@ list-cursor surprises). Reproduce with `.superpowers/sdd/surface-probe.jq` /`det
 `POST …/users/{id}/notifications` (send notification), `…:translateText`, `…:publishMessage`,
 `…:restartServers`, `users/{id}:generateThumbnail`. These are imperative operations, not reconcilable
 state — if ever wanted, they belong behind a CLI verb, not a `resource` block.
+- **DONE — `baseplate restart-servers` + `apply --restart-servers`:** the first action verb. Seam:
+  optional `provider.ServerRestarter` capability (`ValidateRestart` + `RestartServers`) that the
+  Roblox provider implements; the CLI type-asserts for it, so it never imports `opencloud`
+  (`mock.Restarter` drives the CLI tests; the default mock deliberately lacks it so a key-less run
+  fails loudly). Uses the **stable** `POST /cloud/v2/universes/{id}:restartServers`
+  (`universe:write`; `placeIds`, `closeAllVersions`, bleed-off 1–60 min). Live-verified: response is
+  `{}`; out-of-range bleed-off → 400 `INVALID_ARGUMENT`; unknown place → 404; the body must be JSON
+  with a JSON content type. `apply --restart-servers` restarts only after a successful apply that
+  created/updated a `roblox_place`, one request per universe scoped to the published place ids
+  (read from post-apply state).
+- **DEFERRED — BETA server-management API** (`/server-management/v1/universes/{id}/restarts`):
+  bleed-off up to 240 min, per-place version filters, a ≤500 B `attributes` payload sent to servers,
+  plus `GET …/restarts` (status) and `GET …/restarts:forecast` (players/instances impacted). Fits as
+  a second implementation behind `ServerRestarter` (extra `RestartRequest` fields, a `--forecast`/
+  status read) once it leaves beta. Note: a stable-endpoint restart did not show up in the beta
+  list endpoint (empty `restartStatuses` right after an accepted restart on an idle universe).
 
 **Marginal / needs design:** game **thumbnails/icons** — only per-language legacy endpoints
 (`/v1/game-thumbnails/games/{gameId}/language-codes/{lang}/…`) and user-avatar
