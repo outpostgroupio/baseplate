@@ -323,13 +323,3 @@ func importAddress(expr hcl.Expression) (string, bool) {
 	}
 	return te.Traversal.RootName() + "." + name, true
 }
-
-func envFunc() function.Function {
-	return function.New(&function.Spec{
-		Params: []function.Parameter{{Name: "name", Type: cty.String}},
-		Type:   function.StaticReturnType(cty.String),
-		Impl: func(args []cty.Value, _ cty.Type) (cty.Value, error) {
-			return cty.StringVal(os.Getenv(args[0].AsString())), nil
-		},
-	})
-}
