@@ -85,6 +85,21 @@ func TestGenerateRequiredUnreadableIsPlaceholder(t *testing.T) {
 	}
 }
 
+func TestGenerateRequiredUnreadableCollectionPlaceholderIsTyped(t *testing.T) {
+	res := fakeRes{typ: "roblox_thing", spec: hcldec.ObjectSpec{
+		"tags":    &hcldec.AttrSpec{Type: cty.Set(cty.String), Required: true},
+		"filters": &hcldec.AttrSpec{Type: cty.Map(cty.List(cty.String)), Required: true},
+	}}
+	b, err := Generate(res, "a", "id-1", provider.Attributes{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := render(t, b)
+	if !strings.Contains(out, "tags = []") || !strings.Contains(out, "filters = {}") {
+		t.Fatalf("collection placeholders must be typed empty collections, not \"\":\n%s", out)
+	}
+}
+
 func TestGenerateOptionalUnreadableIsOmitted(t *testing.T) {
 	res := fakeRes{typ: "roblox_thing", spec: hcldec.ObjectSpec{
 		"name": strAttr(true),

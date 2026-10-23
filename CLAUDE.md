@@ -150,6 +150,28 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
     The default LIST hides ended events (`endsAfter` defaults to now).
   - Scopes `universe.event:read`/`universe.event:write`; without them the gateway returns
     `403 {"errors":[{"code":0,"message":"Scope not authorized."}]}` on every call, reads included.
+  - **Reads flap after a write (verified live):** for a few seconds after a PATCH, GETs alternate
+    between the old and new values, so `Create`/`Update` wait for 3 consecutive matching reads
+    (bounded, ~10s) before returning; otherwise a plan straight after apply shows phantom drift.
+- Analytics alerts (`/analytics-alert-control-plane/v1/resource/Universe/id/{universeId}/alerts`,
+  base `https://apis.roblox.com`, **EXPERIMENTAL**). JSON CRUD: POST create (201 + full alert),
+  `GET` list (a **bare JSON array**, no pagination per spec; max 20 alerts per universe; `?ids=`
+  repeated-param filter), `PATCH .../{alertId}` (partial: omitted fields are kept; within
+  `condition` sub-fields can be omitted; `filter`/`breakdown` replace wholesale; to remove webhooks
+  send `webhookReceiverConfig: {receivers: []}`, because `null` means "unchanged"), and a real
+  `DELETE` (204). No single-GET. `alertId` is documented as a string-encoded int64. The create body
+  has **no `configState`**, so disable is a follow-up PATCH. `breakdown` allows at most one entry
+  with one dimension, and that dimension must also be in `filter`. Service errors are
+  `{"errorCode","message"}`. Scopes are **`universe.analytics.alert:read`/`:write`**; without them
+  the gateway returns `403 {"errors":[{"code":0,"message":"Scope not authorized."}]}`. With the
+  scopes granted, a universe that isn't eligible gets this on **every** endpoint (list, create,
+  patch and delete alike): `403 {"errorCode":"PERMISSION_DENIED","message":"Universe N is not
+  enrolled in PerformanceMonitoringV2."}`. "PerformanceMonitoringV2" is undocumented. The documented
+  rule (creator-docs `production/analytics/alerts.md`) is that alerts are available to experiences
+  meeting the Performance dashboard eligibility requirement of **100+ DAU**, and no opt-in is
+  documented. The client translates this error to `opencloud.AlertsNotEligibleError`. Both 403s
+  are verified live (2026-10-23). The test universe is below the bar, so the request and response
+  shapes above come from the spec and docs, not from live calls.
 
 ## Workflow used here
 Superpowers: brainstorm → spec → bite-sized TDD plan → build (subagent-per-task, or inline for
@@ -157,7 +179,3 @@ subtle engine bits) → per-task spec+quality review → whole-branch review bef
 transient SDD ledger lives at `.superpowers/sdd/progress.md` (gitignored scratch — the durable
 knowledge is consolidated into this file, `ROADMAP.md`, and the committed specs/plans). End commit messages with
 `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>` only when the user asks to commit.
-
-  **Reads flap after a write (verified live):** for a few seconds after a PATCH, GETs alternate
-  between the old and new values, so `Create`/`Update` wait for 3 consecutive matching reads
-  (bounded, ~10s) before returning; otherwise a plan straight after apply shows phantom drift.

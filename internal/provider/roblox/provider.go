@@ -44,6 +44,7 @@ func New(apiKey string) (*Provider, error) {
 		"roblox_place_config":      resources.PlaceConfig(opencloud.NewPlaceConfigClient(root)),
 		"roblox_universe_secret":   resources.UniverseSecret(opencloud.NewSecretClient(root)),
 		"roblox_experience_event":  resources.ExperienceEvent(opencloud.NewGameEventClient(root)),
+		"roblox_analytics_alert":   resources.AnalyticsAlert(opencloud.NewAnalyticsAlertClient(root)),
 	}, restarter: opencloud.NewServerRestartClient(root)}, nil
 }
 
@@ -64,5 +65,6 @@ func SchemaProvider() *Provider {
 		"roblox_game_pass":         resources.GamePass(nil),
 		"roblox_badge":             resources.Badge(nil),
 		"roblox_experience_event":  resources.ExperienceEvent(nil),
+		"roblox_analytics_alert":   resources.AnalyticsAlert(nil),
 	}}
 }

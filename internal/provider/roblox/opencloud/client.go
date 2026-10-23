@@ -182,6 +182,16 @@ func parseAPIError(resp *http.Response) error {
 	if e.Message == "" {
 		e.Message = altErrorMessage(b)
 	}
+	if e.Code == "" {
+		// The analytics-alerts service uses {"errorCode","message"}; keep its
+		// code (e.g. PERMISSION_DENIED) so callers can classify the error.
+		var alt struct {
+			ErrorCode string `json:"errorCode"`
+		}
+		if json.Unmarshal(b, &alt) == nil {
+			e.Code = alt.ErrorCode
+		}
+	}
 	return e
 }
 
