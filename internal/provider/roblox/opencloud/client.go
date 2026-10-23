@@ -178,5 +178,24 @@ func parseAPIError(resp *http.Response) error {
 	b, _ := io.ReadAll(resp.Body)
 	e := &APIError{Status: resp.StatusCode}
 	_ = json.Unmarshal(b, e) // best-effort; code/message may be absent
+	if e.Message == "" || e.Code == "" {
+		// Other envelopes seen on apis.roblox.com: the analytics-alerts service's
+		// {"errorCode","message"}, and the gateway's {"errors":[{"code":0,"message"}]}
+		// (e.g. 403 "Scope not authorized."). Fill whatever the flat decode missed.
+		var alt struct {
+			ErrorCode string `json:"errorCode"`
+			Errors    []struct {
+				Message string `json:"message"`
+			} `json:"errors"`
+		}
+		if json.Unmarshal(b, &alt) == nil {
+			if e.Code == "" {
+				e.Code = alt.ErrorCode
+			}
+			if e.Message == "" && len(alt.Errors) > 0 {
+				e.Message = alt.Errors[0].Message
+			}
+		}
+	}
 	return e
 }

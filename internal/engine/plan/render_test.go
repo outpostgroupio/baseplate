@@ -11,6 +11,18 @@ import (
 	"github.com/outpostgroupio/baseplate/internal/provider"
 )
 
+func TestCtyStringRendersCollectionsAsJSON(t *testing.T) {
+	v := cty.MapVal(map[string]cty.Value{
+		"Platform": cty.SetVal([]cty.Value{cty.StringVal("Phone"), cty.StringVal("Tablet")}),
+	})
+	if got, want := ctyString(v), `{"Platform":["Phone","Tablet"]}`; got != want {
+		t.Fatalf("ctyString = %s, want %s", got, want)
+	}
+	if got := ctyString(cty.SetValEmpty(cty.String)); got != "[]" {
+		t.Fatalf("empty set = %s", got)
+	}
+}
+
 func TestRenderNumbersBoolsAndKnownAfterApply(t *testing.T) {
 	pl := &Plan{Changes: []Change{
 		{Address: "roblox_developer_product.gems", Type: "roblox_developer_product",

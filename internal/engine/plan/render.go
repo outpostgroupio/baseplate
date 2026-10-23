@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/zclconf/go-cty/cty"
+	ctyjson "github.com/zclconf/go-cty/cty/json"
 
 	"github.com/outpostgroupio/baseplate/internal/provider"
 )
@@ -172,6 +173,11 @@ func ctyString(v cty.Value) string {
 		}
 		return bf.Text('f', -1)
 	default:
+		// Collections/objects (e.g. a map of sets) render as compact JSON rather
+		// than a Go-syntax cty dump.
+		if b, err := (ctyjson.SimpleJSONValue{Value: v}).MarshalJSON(); err == nil {
+			return string(b)
+		}
 		return v.GoString()
 	}
 }
