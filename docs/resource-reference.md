@@ -100,6 +100,34 @@ Example: [`examples/baseplate.bp.hcl`](../examples/baseplate.bp.hcl).
 
 ---
 
+## `roblox_experience_event`
+
+Manages an experience event (virtual event) for live-ops: a scheduled, titled event shown on the experience page. Uses the EXPERIMENTAL `virtual-events/v3` Open Cloud API.
+
+| Attribute | Type | Kind | Description |
+|---|---|---|---|
+| `categories` | list of string | optional, diffable | Ordered list of categories (rank = position), from: contentUpdate, locationUpdate, systemUpdate, activity, newContent, itemDrop, newSeason, newLocation, newMap, moreLevels, newFeature, earlyAccess, expansion, challenge, quest, festival. |
+| `description` | string | optional, diffable | Event description. |
+| `end_time` | string | required, diffable | End time, RFC 3339. Must be after `start_time`. |
+| `featuring_enabled` | bool | optional, diffable | Opt the event into featuring review (`featuringStatus`). Defaults to Roblox's "not featured". |
+| `group_id` | string | optional, create-only | Host group id. When unset, the API key's owner hosts the event. Create-only. |
+| `place_id` | string | optional, diffable | Venue place id. Defaults to the universe's root place when unset. |
+| `start_time` | string | required, diffable | Start time, RFC 3339 (e.g. `2026-12-01T18:00:00Z`). Any offset is accepted; it is compared and stored in UTC at whole-second precision. |
+| `subtitle` | string | required, diffable | Event subtitle (required by Roblox). |
+| `tagline` | string | optional, diffable | Tagline shown to curators when featuring is enabled. |
+| `thumbnail_media_ids` | list of string | optional, diffable | Ordered list of thumbnail image media (asset) ids (rank = position). |
+| `title` | string | required, diffable | Event title. |
+| `universe_id` | string | required, create-only | The universe that owns the event. Often a reference to an experience. Create-only. |
+| `visibility` | string | required, diffable | `public` or `private` (case-insensitive). Roblox may set `moderated` server-side, which then shows as drift. |
+
+`destroy` permanently deletes the event. Import by event id (`baseplate import roblox_experience_event.x <eventId>`). Changing `universe_id` or `group_id` does not move the event (both are create-only). Recurrence is not supported. The API is EXPERIMENTAL and this resource has NOT been verified live; Roblox may reject edits to events that have already started or ended.
+
+Requires the `universe.event:read`, `universe.event:write` [scopes](how-to/api-key-scopes.md).
+
+Example: [`examples/experience-event.bp.hcl`](../examples/experience-event.bp.hcl).
+
+---
+
 ## `roblox_game_pass`
 
 Manages a game pass (a one-time, permanent in-experience purchase).

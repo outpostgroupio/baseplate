@@ -177,6 +177,38 @@ func backoff(attempt int) time.Duration {
 func parseAPIError(resp *http.Response) error {
 	b, _ := io.ReadAll(resp.Body)
 	e := &APIError{Status: resp.StatusCode}
-	_ = json.Unmarshal(b, e) // best-effort; code/message may be absent
+	_ = json.Unmarshal(b, e)   // best-effort; code/message may be absent
+	e.Status = resp.StatusCode // a body "status" field must not override the real one
+	if e.Message == "" {
+		e.Message = altErrorMessage(b)
+	}
 	return e
+}
+
+// altErrorMessage extracts a message from the two non-flat error envelopes Open
+// Cloud also uses: the gateway's {"errors":[{"code":0,"message":"..."}]} (e.g.
+// "Scope not authorized.") and RFC 7807 ProblemDetails {"title","detail"} (e.g.
+// virtual-events). Returns "" when neither is present.
+func altErrorMessage(b []byte) string {
+	var alt struct {
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+		Title  string `json:"title"`
+		Detail string `json:"detail"`
+	}
+	if json.Unmarshal(b, &alt) != nil {
+		return ""
+	}
+	if len(alt.Errors) > 0 && alt.Errors[0].Message != "" {
+		return alt.Errors[0].Message
+	}
+	switch {
+	case alt.Detail != "" && alt.Title != "":
+		return alt.Title + ": " + alt.Detail
+	case alt.Detail != "":
+		return alt.Detail
+	default:
+		return alt.Title
+	}
 }
