@@ -248,7 +248,8 @@ calls was removed, renamed or newly deprecated since the June spec. Corrections 
   (`GET`/`PATCH /cloud/v2/universes/{u}/places/{p}?updateMask=`, scope `universe.place:write`;
   writable `displayName`/`description`/`serverSize`, `root` read-only). This closes the "Place
   config — surface unconfirmed" backlog spike. PATCH returns **409 while the place is open in Team
-  Create** (translated to an actionable error). Not yet live-verified.
+  Create** (translated to an actionable error). **Live-verified 2026-10-23** (`live_place_config_test.go`:
+  console/VR + place name/description/server size applied, converged, restored).
 - **Universe social links are writable on v2** (the old "groups only" note was wrong):
   `facebookSocialLink`, `twitterSocialLink`, `youtubeSocialLink`, `twitchSocialLink`,
   `discordSocialLink`, `robloxGroupSocialLink`, `guildedSocialLink`, each `{title, uri}`; removable
