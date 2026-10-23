@@ -27,6 +27,10 @@ type DesiredResource struct {
 	// (e.g. "icon" -> roblox_asset.gem_icon.id). Referenced attributes are
 	// resolved at apply time and are NOT present in Attributes.
 	Refs map[string]provider.Ref
+	// PreventDestroy is the resource block's lifecycle.prevent_destroy. It is
+	// known only from config (never persisted to state), so removing the block
+	// or its lifecycle setting removes the protection, as in Terraform.
+	PreventDestroy bool
 }
 
 func (d DesiredResource) Address() string { return addr.Format(d.Type, d.Name, d.Key) }

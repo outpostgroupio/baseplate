@@ -151,3 +151,22 @@ func TestWriteFileErrorsIfExists(t *testing.T) {
 		t.Fatalf("expected an already-exists error, got %v", err)
 	}
 }
+
+// TestGenerateNeverEmitsLifecycle guards that generated config carries no
+// lifecycle meta-block: prevent_destroy is a deliberate choice made in config,
+// never inferred from a remote read.
+func TestGenerateNeverEmitsLifecycle(t *testing.T) {
+	res := fakeRes{typ: "roblox_thing", spec: hcldec.ObjectSpec{"name": strAttr(true)}}
+	b, err := Generate(res, "a", "id-1", provider.Attributes{
+		"name":            cty.StringVal("root"),
+		"lifecycle":       cty.StringVal("x"),
+		"prevent_destroy": cty.True,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := render(t, b)
+	if strings.Contains(out, "lifecycle") || strings.Contains(out, "prevent_destroy") {
+		t.Fatalf("generated config must not contain a lifecycle block:\n%s", out)
+	}
+}
