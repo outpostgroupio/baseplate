@@ -119,6 +119,11 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 			continue
 		}
 		d := byAddr[addr]
+		// Validate/canonicalise up front so a bad value (e.g. a malformed
+		// timestamp) fails at plan time, for creates as well as updates.
+		if _, err := normalize(resources[d.Type], addr, d.Attributes); err != nil {
+			return nil, err
+		}
 		st, inState := s.Find(addr)
 		if !inState {
 			pl.Changes = append(pl.Changes, Change{
@@ -141,7 +146,10 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 		// Resolve references from existing state so a referenced attribute
 		// (e.g. an id) diffs against its real resolved value, not null — this
 		// keeps re-plans convergent after apply.
-		effectiveDesired := mergeRefsFromState(d, s)
+		effectiveDesired, err := normalize(resources[d.Type], addr, mergeRefsFromState(d, s))
+		if err != nil {
+			return nil, err
+		}
 		diffs := diffAttrs(actual, effectiveDesired, resources[d.Type].Computed())
 		td, err := triggerDiffs(resources[d.Type], effectiveDesired, st)
 		if err != nil {

@@ -104,6 +104,34 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
   **Pagination gotcha (verified live):** the list endpoint **always** returns a non-empty
   `nextPageCursor` — even on the empty final page — so paginate until an **empty `secrets` page**,
   not an empty cursor (a cursor-only loop never terminates and burns the 120-req/min limit → 429).
+- Experience events (`virtual-events/v3`, base `https://apis.roblox.com`, **EXPERIMENTAL**; all
+  verified live 2026-10-23): create `POST /virtual-events/v3/universes/{universeId}/game-events`;
+  single read/PATCH/DELETE on `/virtual-events/v3/game-events/{eventId}` (not universe-scoped, so
+  `roblox_experience_event`'s state/import id is the bare event id). JSON bodies; PATCH is partial
+  (omitted = no change) and returns the event; DELETE is a real delete (204) but **eventually
+  consistent** (a GET right after can still return the event briefly, then 404 `GameEventNotFound`).
+  - Wire: event `id` is a JSON **string**; `universeId`/`placeId`/`hostId`/`mediaId` are JSON
+    **numbers**. Times read back as `+00:00` with **millisecond** precision (`.123456Z` → `.123`);
+    Baseplate normalises both sides to UTC whole seconds via `provider.Normalizer`. An unset venue
+    reads back as `placeId: 0` (not the root place, despite the spec). Errors are RFC 7807
+    ProblemDetails with a string `code` (`InvalidStartOrEndTime`, `InvalidThumbnails`, ...).
+  - **The single-event GET always returns `"thumbnails": []`** (even with `?fields=thumbnails`); only
+    the universe LIST returns them, so `GameEventClient.Get` does a GET + a list lookup by id.
+  - Thumbnail `rank` is **0-based and contiguous** (rank 1 alone or 5 → `InvalidThumbnails`); `[]`
+    clears them. Any image asset id works (an Image uploaded by the key's user was accepted).
+  - **Categories are unusable:** every payload (each enum value, rank 0 or 1, even `[]` on PATCH)
+    returns 400 `InvalidCategories`, and a **create carrying categories still creates the event**
+    before returning 400 (orphan). Not exposed in v1. Recurrence is also not exposed (no effect).
+  - Validation: start must be in the future on create, and any *changed* start must be in the
+    future (`InvalidStartOrEndTime`); end must be **>= start + 15 min**; `visibility` is lowercase
+    `public`/`private` (`moderated` → `InvalidEventVisibilityTransition`); a bad `placeId` →
+    "The value of PlaceId is invalid". `description: ""` clears it, but **`tagline: ""` is ignored**
+    (a set tagline can't be cleared).
+  - Started (active) events can be edited, including re-sending the unchanged past start. **Ended**
+    events stay readable, editable (title, even extending the end into the future) and deletable.
+    The default LIST hides ended events (`endsAfter` defaults to now).
+  - Scopes `universe.event:read`/`universe.event:write`; without them the gateway returns
+    `403 {"errors":[{"code":0,"message":"Scope not authorized."}]}` on every call, reads included.
 
 ## Workflow used here
 Superpowers: brainstorm → spec → bite-sized TDD plan → build (subagent-per-task, or inline for
@@ -111,3 +139,7 @@ subtle engine bits) → per-task spec+quality review → whole-branch review bef
 transient SDD ledger lives at `.superpowers/sdd/progress.md` (gitignored scratch — the durable
 knowledge is consolidated into this file, `ROADMAP.md`, and the committed specs/plans). End commit messages with
 `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>` only when the user asks to commit.
+
+  **Reads flap after a write (verified live):** for a few seconds after a PATCH, GETs alternate
+  between the old and new values, so `Create`/`Update` wait for 3 consecutive matching reads
+  (bounded, ~10s) before returning; otherwise a plan straight after apply shows phantom drift.
