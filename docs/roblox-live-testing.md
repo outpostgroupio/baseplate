@@ -25,16 +25,20 @@ Set an IP allowlist (`0.0.0.0/0` for quick testing) and an expiration you're
 comfortable with. Copy the key once — you can't view it again.
 
 ## 3. Put credentials in a gitignored file
-Create `.env.local` in the repo root (already gitignored):
+Copy `.env.example` to `.env` in the repo root (`.env` is gitignored) and fill it in.
+At minimum:
 
 ```
 ROBLOX_API_KEY=<your key>
 BASEPLATE_TEST_UNIVERSE=<your universe id>
 ```
 
+`BASEPLATE_TEST_PLACE` (place tests) and `BASEPLATE_TEST_USER` (asset owner) are
+optional; tests that need a variable that isn't set are skipped.
+
 ## 4. Run the live test
 ```bash
-set -a; . ./.env.local; set +a
+set -a; . ./.env; set +a
 BASEPLATE_LIVE=1 go test ./internal/provider/roblox/ -run Live -v
 ```
 
@@ -56,7 +60,7 @@ automatically (otherwise it uses the in-memory mock). See
 placeholder IDs, then:
 
 ```bash
-set -a; . ./.env.local; set +a
+set -a; . ./.env; set +a
 go run ./cmd/baseplate plan   --config examples/baseplate.bp.hcl --state /tmp/bp.bpstate
 go run ./cmd/baseplate apply  --config examples/baseplate.bp.hcl --state /tmp/bp.bpstate
 go run ./cmd/baseplate destroy --config examples/baseplate.bp.hcl --state /tmp/bp.bpstate

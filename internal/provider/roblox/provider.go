@@ -39,6 +39,7 @@ func New(apiKey string) (*Provider, error) {
 		"roblox_game_pass":         resources.GamePass(opencloud.NewGamePassClient(root)),
 		"roblox_badge":             resources.Badge(opencloud.NewBadgeClient(root, badges)),
 		"roblox_place":             resources.Place(opencloud.NewPlaceClient(root)),
+		"roblox_place_config":      resources.PlaceConfig(opencloud.NewPlaceConfigClient(root)),
 		"roblox_universe_secret":   resources.UniverseSecret(opencloud.NewSecretClient(root)),
 	}}, nil
 }
@@ -55,6 +56,7 @@ func SchemaProvider() *Provider {
 		"roblox_asset":             resources.Asset(nil),
 		"roblox_developer_product": resources.DeveloperProduct(nil),
 		"roblox_place":             resources.Place(nil),
+		"roblox_place_config":      resources.PlaceConfig(nil),
 		"roblox_universe_secret":   resources.UniverseSecret(nil),
 		"roblox_game_pass":         resources.GamePass(nil),
 		"roblox_badge":             resources.Badge(nil),
