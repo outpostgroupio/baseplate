@@ -142,6 +142,15 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   `docs/config-reference.md`. **Deferred to slice B:** `moved {}` blocks (state-only rename,
   including singular → keyed adoption). Later, if wanted: `output {}` blocks, repeatable
   `--target`, `--generate-config` for keyed imports.
+- **`lifecycle { prevent_destroy = true }` (2026-10-23):** Terraform-compatible. `internal/config`
+  strips the `lifecycle` block as a meta-argument (like `for_each`); the value must be a literal
+  bool; every other lifecycle argument/block is rejected as not supported. Carried on
+  `plan.DesiredResource.PreventDestroy` (+ `Config.PreventDestroy` for blocks with no desired
+  instance); `Plan.CheckPreventDestroy` runs on the post-`--target` plan in `plan`/`apply`/`destroy`
+  (destroy now loads the config, when it exists, to learn the setting). Config-only, never in state,
+  so removing the block lifts the protection (Terraform parity). The engine has no replace action,
+  so deletes are the only path guarded. **Deferred:** `ignore_changes`, `create_before_destroy`,
+  `replace_triggered_by`, `precondition`/`postcondition`.
 - Next: **Phase 2** remaining slices (see Roadmap below).
 
 Read `docs/superpowers/specs/2026-07-03-baseplate-phase1-roblox-provider-design.md` for the
