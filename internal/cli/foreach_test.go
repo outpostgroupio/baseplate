@@ -266,3 +266,42 @@ func TestShowWithNoState(t *testing.T) {
 		t.Fatal("show must not create a state file")
 	}
 }
+
+func TestPlanWarnsWhenForEachEmptiesState(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "baseplate.bp.hcl")
+	os.WriteFile(cfg, []byte(`
+resource "mock_thing" "set" {
+  for_each = fileset("${path.config}", "*.png")
+  name     = each.key
+}
+`), 0o644)
+	st := filepath.Join(dir, "s.bpstate")
+	s := state.New()
+	s.Upsert(state.Resource{Type: "mock_thing", Name: "set", Key: "a.png", ID: "mock_thing/1"})
+	s.Upsert(state.Resource{Type: "mock_thing", Name: "set", Key: "b.png", ID: "mock_thing/2"})
+	if err := backend.NewLocal(st).Put(s); err != nil {
+		t.Fatal(err)
+	}
+	const want = "for_each for mock_thing.set is empty; all 2 instances will be destroyed."
+
+	var out bytes.Buffer
+	if code := runOut([]string{"plan", "--config", cfg, "--state", st}, &out); code != 2 || !strings.Contains(out.String(), "Warning: "+want) {
+		t.Fatalf("text plan (exit %d) missing warning:\n%s", code, out.String())
+	}
+	out.Reset()
+	if code := runOut([]string{"plan", "--json", "--config", cfg, "--state", st}, &out); code != 2 {
+		t.Fatalf("plan --json exit %d\n%s", code, out.String())
+	}
+	var env struct {
+		Result struct {
+			Warnings []string `json:"warnings"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	if len(env.Result.Warnings) != 1 || env.Result.Warnings[0] != want {
+		t.Fatalf("plan --json warnings = %q", env.Result.Warnings)
+	}
+}

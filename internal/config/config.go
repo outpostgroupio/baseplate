@@ -110,18 +110,40 @@ type loader struct {
 	resources map[string]map[string]*declaredResource // type -> name -> block
 }
 
+// Config is everything Load extracts from a config file.
+type Config struct {
+	Provider  ProviderConfig
+	Resources []plan.DesiredResource
+	Imports   []plan.ImportBlock
+	// EmptyForEach lists the for_each resources (type.name) that declare zero
+	// instances, so plan can warn that every instance in state is destroyed.
+	EmptyForEach []string
+}
+
+// Load is LoadConfig for callers that only need the provider config, the
+// resources and the import blocks.
 func Load(path string, p provider.Provider) (ProviderConfig, []plan.DesiredResource, []plan.ImportBlock, error) {
-	src, err := os.ReadFile(path)
+	cfg, err := LoadConfig(path, p)
 	if err != nil {
 		return ProviderConfig{}, nil, nil, err
 	}
+	return cfg.Provider, cfg.Resources, cfg.Imports, nil
+}
+
+// LoadConfig parses and evaluates a config file: locals, for_each expansion,
+// references and import blocks.
+func LoadConfig(path string, p provider.Provider) (*Config, error) {
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
 	f, diags := hclsyntax.ParseConfig(src, path, hcl.InitialPos)
 	if diags.HasErrors() {
-		return ProviderConfig{}, nil, nil, diags
+		return nil, diags
 	}
 	content, diags := f.Body.Content(rootSchema)
 	if diags.HasErrors() {
-		return ProviderConfig{}, nil, nil, diags
+		return nil, diags
 	}
 
 	resTypes := p.Resources()
@@ -136,7 +158,7 @@ func Load(path string, p provider.Provider) (ProviderConfig, []plan.DesiredResou
 		}
 		typ, name := b.Labels[0], b.Labels[1]
 		if l.resources[typ][name] != nil {
-			return ProviderConfig{}, nil, nil, fmt.Errorf("%s: duplicate resource block %s.%s", path, typ, name)
+			return nil, fmt.Errorf("%s: duplicate resource block %s.%s", path, typ, name)
 		}
 		if l.resources[typ] == nil {
 			l.resources[typ] = map[string]*declaredResource{}
@@ -146,13 +168,14 @@ func Load(path string, p provider.Provider) (ProviderConfig, []plan.DesiredResou
 
 	locals, err := l.evalLocals(content.Blocks)
 	if err != nil {
-		return ProviderConfig{}, nil, nil, err
+		return nil, err
 	}
 	vars := buildRefObject(content.Blocks)
 	vars["local"] = cty.ObjectVal(locals)
 	vars["path"] = pathObject(path)
 	ctx := &hcl.EvalContext{Variables: vars, Functions: functions()}
 
+	var empty []string
 	// Expand for_each on every resource block. Keys must be known now, before
 	// any body is decoded, because references are validated against them.
 	for _, b := range content.Blocks {
@@ -162,22 +185,25 @@ func Load(path string, p provider.Provider) (ProviderConfig, []plan.DesiredResou
 		typ, name := b.Labels[0], b.Labels[1]
 		fe, remain, d := b.Body.PartialContent(forEachSchema)
 		if d.HasErrors() {
-			return ProviderConfig{}, nil, nil, d
+			return nil, d
 		}
 		decl := l.resources[typ][name]
 		decl.body = remain
 		if a, ok := fe.Attributes["for_each"]; ok {
 			keys, values, err := l.evalForEach(a, ctx, typ+"."+name)
 			if err != nil {
-				return ProviderConfig{}, nil, nil, err
+				return nil, err
 			}
 			decl.keyed, decl.keys, decl.values = true, keys, values
+			if len(keys) == 0 {
+				empty = append(empty, typ+"."+name)
+			}
 			decl.keySet = map[string]bool{}
 			for _, k := range keys {
 				decl.keySet[k] = true
 			}
 		} else if err := noEach(bodyTraversals(b.Body)); err != nil {
-			return ProviderConfig{}, nil, nil, err
+			return nil, err
 		}
 	}
 
@@ -190,16 +216,16 @@ func Load(path string, p provider.Provider) (ProviderConfig, []plan.DesiredResou
 		case "provider":
 			attrs, d := b.Body.JustAttributes()
 			if d.HasErrors() {
-				return pc, nil, nil, d
+				return nil, d
 			}
 			pc.Attributes = provider.Attributes{}
 			for k, a := range attrs {
 				if err := noEach(a.Expr.Variables()); err != nil {
-					return pc, nil, nil, err
+					return nil, err
 				}
 				v, vd := a.Expr.Value(ctx)
 				if vd.HasErrors() {
-					return pc, nil, nil, vd
+					return nil, vd
 				}
 				pc.Attributes[k] = v
 			}
@@ -207,7 +233,7 @@ func Load(path string, p provider.Provider) (ProviderConfig, []plan.DesiredResou
 			typ, name := b.Labels[0], b.Labels[1]
 			r, ok := resTypes[typ]
 			if !ok {
-				return pc, nil, nil, fmt.Errorf("%s: unknown resource type %q", path, typ)
+				return nil, fmt.Errorf("%s: unknown resource type %q", path, typ)
 			}
 			decl := l.resources[typ][name]
 			keys := []string{""}
@@ -221,25 +247,26 @@ func Load(path string, p provider.Provider) (ProviderConfig, []plan.DesiredResou
 				}
 				dr, err := l.decodeInstance(b.Body, decl.body, r, typ, name, key, ictx)
 				if err != nil {
-					return pc, nil, nil, err
+					return nil, err
 				}
 				out = append(out, dr)
 			}
 		case "import":
 			imps, err := l.expandImport(b, ctx)
 			if err != nil {
-				return pc, nil, nil, err
+				return nil, err
 			}
 			for _, imp := range imps {
 				if importSeen[imp.Address] {
-					return pc, nil, nil, fmt.Errorf("%s: duplicate import target %s", path, imp.Address)
+					return nil, fmt.Errorf("%s: duplicate import target %s", path, imp.Address)
 				}
 				importSeen[imp.Address] = true
 			}
 			imports = append(imports, imps...)
 		}
 	}
-	return pc, out, imports, nil
+	sort.Strings(empty)
+	return &Config{Provider: pc, Resources: out, Imports: imports, EmptyForEach: empty}, nil
 }
 
 // decodeInstance decodes one resource instance (the whole resource, for a

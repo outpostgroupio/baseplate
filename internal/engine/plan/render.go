@@ -60,8 +60,10 @@ func (p *Plan) JSONChanges() []JSONChange {
 	return out
 }
 
-// Warnings flags plan shapes that are legal but probably unintended. Today that
-// is one: a resource (type.name) that both destroys and creates instances in the
+// Warnings flags plan shapes that are legal but probably unintended. First, a
+// for_each resource that declares zero instances while state still holds some
+// (e.g. a fileset that matched nothing): every instance is destroyed. Second,
+// a resource (type.name) that both destroys and creates instances in the
 // same plan, which is what renaming a for_each key looks like. A created
 // instance is a new remote object with a new id (for roblox_asset, a fresh
 // upload), so it is worth a second look before applying. Instances are not
@@ -95,6 +97,13 @@ func (p *Plan) Warnings() []string {
 	}
 	sort.Strings(bases)
 	var out []string
+	empty := append([]string(nil), p.EmptyForEach...)
+	sort.Strings(empty)
+	for _, b := range empty {
+		if n := byRes[b]; n != nil && n.del > 0 {
+			out = append(out, fmt.Sprintf("for_each for %s is empty; all %d instances will be destroyed.", b, n.del))
+		}
+	}
 	for _, b := range bases {
 		n := byRes[b]
 		out = append(out, fmt.Sprintf(

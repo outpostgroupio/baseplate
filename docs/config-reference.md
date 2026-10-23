@@ -34,7 +34,8 @@ resource "roblox_asset" "icons" {
 - The value must be **known when the config loads**: literals, `local.*`, `env()` and functions
   are fine; resource attributes (known only at apply time) are not.
 - Keys must be non-empty strings. An empty map or set declares no instances, so any instances
-  already in state are planned for deletion.
+  already in state are planned for deletion, and `plan` warns:
+  `for_each for X is empty; all N instances will be destroyed.`
 - `each.key` and `each.value` exist only inside a block that sets `for_each`.
 - A resource is either singular or `for_each`. Adding or removing `for_each` changes every address,
   which plans a delete plus a create.
@@ -63,7 +64,8 @@ import {
 }
 ```
 
-Every expanded `to` must be a declared instance, and two imports can't target the same instance.
+Every expanded `to` must be a declared instance. Two imports can't target the same instance or use
+the same id, and an id that another address in state already manages is refused.
 `id` may be a string or a number. `plan --generate-config` doesn't support `for_each` resources;
 declare those resource blocks by hand.
 

@@ -408,3 +408,29 @@ import {
 }
 `, `duplicate import target mock_thing.sprites["a"]`)
 }
+
+func TestLoadConfigReportsEmptyForEach(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "c.bp.hcl")
+	os.WriteFile(p, []byte(`
+resource "mock_thing" "empty" {
+  for_each = fileset("${path.config}", "*.nothing")
+  name     = each.key
+}
+resource "mock_thing" "full" {
+  for_each = toset(["a"])
+  name     = each.key
+}
+resource "mock_thing" "solo" { name = "x" }
+`), 0o644)
+	cfg, err := LoadConfig(p, mock.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(cfg.EmptyForEach, []string{"mock_thing.empty"}) {
+		t.Fatalf("EmptyForEach = %v, want [mock_thing.empty]", cfg.EmptyForEach)
+	}
+	if len(cfg.Resources) != 2 {
+		t.Fatalf("resources = %v", addrs(cfg.Resources))
+	}
+}

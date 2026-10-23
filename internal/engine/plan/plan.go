@@ -55,6 +55,10 @@ type Change struct {
 
 type Plan struct {
 	Changes []Change
+	// EmptyForEach names for_each resources (type.name) whose for_each declared
+	// zero instances. Set by the caller from config; Warnings uses it to call
+	// out that every instance of such a resource still in state is destroyed.
+	EmptyForEach []string
 }
 
 func (p *Plan) HasChanges() bool {

@@ -122,3 +122,37 @@ func TestWarningsReportCountsWithoutPairing(t *testing.T) {
 		}
 	}
 }
+
+// A for_each that expands to nothing (e.g. a fileset that matched no files)
+// destroys every instance in state; the plan must say so loudly.
+func TestWarningsEmptyForEachDestroysAll(t *testing.T) {
+	s := state.New()
+	s.Upsert(state.Resource{Type: "mock_thing", Name: "set", Key: "a", ID: "mock_thing/1"})
+	s.Upsert(state.Resource{Type: "mock_thing", Name: "set", Key: "b", ID: "mock_thing/2"})
+	pl, err := Build(context.Background(), mock.New(), s, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ws := pl.Warnings(); ws != nil {
+		t.Fatalf("a removed resource block is not an empty for_each: %v", ws)
+	}
+	pl.EmptyForEach = []string{"mock_thing.set"}
+	ws := pl.Warnings()
+	if len(ws) != 1 || ws[0] != "for_each for mock_thing.set is empty; all 2 instances will be destroyed." {
+		t.Fatalf("want the empty for_each warning, got %q", ws)
+	}
+	if !strings.Contains(pl.RenderText(false), "Warning: for_each for mock_thing.set is empty; all 2 instances will be destroyed.") {
+		t.Fatalf("text plan must show it:\n%s", pl.RenderText(false))
+	}
+}
+
+func TestWarningsEmptyForEachQuietWithNothingInState(t *testing.T) {
+	pl, err := Build(context.Background(), mock.New(), state.New(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pl.EmptyForEach = []string{"mock_thing.set"}
+	if ws := pl.Warnings(); ws != nil {
+		t.Fatalf("nothing to destroy, nothing to warn about: %v", ws)
+	}
+}

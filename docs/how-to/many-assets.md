@@ -164,26 +164,27 @@ destroys the old instance and creates a new one:
 `plan` warns when one resource both destroys and creates instances:
 
 ```console
-Warning: roblox_asset.sprites: 1 instance(s) will be destroyed and 1 created in the same plan. If a
-for_each key was renamed, the new instance is a new remote object with a new id. ...
+Warning: roblox_asset.sprites: this plan destroys 1 instance(s) and creates 1. Each created instance
+is a new remote object with a new id (for roblox_asset, a new upload), so if a for_each key was
+renamed the object is replaced, not moved. moved {} blocks, which will rename an instance in place,
+are planned.
 ```
 
-To keep the existing asset under its new key, before applying the rename:
+Until `moved {}` blocks land, a rename can't keep the old id: Baseplate refuses to import an id that
+another address in state already manages, because two addresses managing one object would let a
+later destroy of one delete the object the other still uses. If the new id matters, keep the old
+key (for example by keeping the file where it is) until `moved {}` is available.
 
-1. Drop the old instance from state. For `roblox_asset`, a targeted apply does exactly that, since
-   destroying an image asset only unmanages it:
-   ```console
-   $ baseplate apply --target 'roblox_asset.sprites["ui/gem.png"]'
-   ```
-2. Adopt the same id under the new key:
-   ```console
-   $ baseplate import 'roblox_asset.sprites["icons/gem.png"]' 1234567890
-   ```
-3. `baseplate plan` now shows at most a metadata update (for example `display_name`).
+## An empty `for_each` destroys everything
 
-Baseplate can't see content changes to an existing image asset (Open Cloud has no content update for
-images), so this only makes sense when the file itself is unchanged. `moved {}` blocks that do this
-rename in config are planned for a later release.
+If `fileset` matches nothing (a renamed directory, a wrong pattern), `for_each` declares zero
+instances and the plan destroys every instance in state. `plan` calls this out separately:
+
+```console
+Warning: for_each for roblox_asset.sprites is empty; all 230 instances will be destroyed.
+```
+
+Both warnings are also listed under `result.warnings` in `plan --json`, so CI can stop on them.
 
 ## See also
 

@@ -204,17 +204,13 @@ func run(args []string, s streams) int {
 	exit := 0
 	p := newProvider()
 
-	load := func() ([]plan.DesiredResource, []plan.ImportBlock, error) {
-		_, res, imports, err := config.Load(cfgPath, p)
-		if err != nil {
-			return nil, nil, err
-		}
-		return res, imports, nil
+	load := func() (*config.Config, error) {
+		return config.LoadConfig(cfgPath, p)
 	}
 
 	root.AddCommand(&cobra.Command{Use: "validate", RunE: func(cmd *cobra.Command, _ []string) error {
 		cmdName = cmd.Name()
-		if _, _, err := load(); err != nil {
+		if _, err := load(); err != nil {
 			return err
 		}
 		return output.Emit(s.out, fmtOf(jsonOut), "validate", "Configuration is valid.\n", validateResult{Valid: true})
@@ -226,10 +222,11 @@ func run(args []string, s streams) int {
 		if err != nil {
 			return err
 		}
-		desired, imports, err := load()
+		cfg, err := load()
 		if err != nil {
 			return err
 		}
+		desired, imports := cfg.Resources, cfg.Imports
 		b, _, err := openBackend(cfgPath, statePath)
 		if err != nil {
 			return err
@@ -250,6 +247,7 @@ func run(args []string, s streams) int {
 		if err != nil {
 			return err
 		}
+		pl.EmptyForEach = cfg.EmptyForEach
 		if err := plan.ResolveImports(context.Background(), p, st, pl, toResolve); err != nil {
 			return err
 		}
@@ -340,12 +338,13 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 	}
 	var desired []plan.DesiredResource
 	var imports []plan.ImportBlock
+	var emptyForEach []string
 	if !destroy {
-		_, res, imps, err := config.Load(cfgPath, p)
+		cfg, err := config.LoadConfig(cfgPath, p)
 		if err != nil {
 			return err
 		}
-		desired, imports = res, imps
+		desired, imports, emptyForEach = cfg.Resources, cfg.Imports, cfg.EmptyForEach
 	}
 	b, localFallback, err := openBackend(cfgPath, statePath)
 	if err != nil {
@@ -377,6 +376,7 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 	if err != nil {
 		return err
 	}
+	pl.EmptyForEach = emptyForEach
 	if err := plan.ResolveImports(context.Background(), p, st, pl, imports); err != nil {
 		return err
 	}

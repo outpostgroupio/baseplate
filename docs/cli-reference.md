@@ -102,8 +102,9 @@ Plan: 0 to import, 1 to add, 0 to change, 0 to destroy.
 `for_each` instance, its `key`.
 
 When one resource both destroys and creates instances in the same plan (what a renamed `for_each`
-key looks like), `plan` prints a `Warning:` explaining that the new instance gets a new id, and
-`--json` lists it under `result.warnings`. See
+key looks like), `plan` prints a `Warning:` that the created instances are new objects with new ids.
+When a `for_each` resource declares zero instances while state still holds some, it warns that all
+of them will be destroyed. `--json` lists both under `result.warnings`. See
 [managing many assets](how-to/many-assets.md#renaming-or-moving-a-file-replaces-the-asset).
 
 `--generate-config=FILE` writes resource blocks for `import {}` blocks whose target isn't declared.
@@ -153,7 +154,9 @@ $ baseplate import 'roblox_asset.sprites["ui/gem.png"]' 1234567890
 ```
 
 For a `for_each` resource, import one instance at a time using its [address](#addresses). Errors if
-the address isn't declared in the config, is already in state, or can't be found on the platform. For a config-driven alternative that runs during `apply`, use an
+the address isn't declared in the config, is already in state, or can't be found on the platform, or
+if another address in state already manages that id (one remote object is only ever managed at one
+address; otherwise destroying one address would delete the object the other still manages). For a config-driven alternative that runs during `apply`, use an
 [`import {}` block](getting-started.md#6-adopting-existing-resources-import).
 
 ### `show [address]`
