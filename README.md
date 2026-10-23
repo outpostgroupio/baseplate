@@ -50,7 +50,7 @@ $ baseplate destroy   # tear down what's managed
 | `roblox_experience` | A universe's writable config (voice chat, device enablement incl. console/VR). |
 | `roblox_place` | Publishes a place's `.rbxl`/`.rbxlx` and re-publishes on content change. |
 | `roblox_place_config` | A place's name, description and server size (the root place's name/description are the experience's). |
-| `roblox_asset` | User- or group-owned image/decal assets (multipart upload). |
+| `roblox_asset` | User- or group-owned image, decal and audio assets (multipart upload). |
 | `roblox_developer_product` | Developer products (name, price, description, icon, on-sale). |
 | `roblox_game_pass` | Game passes (name, price, description, icon, on-sale). |
 | `roblox_universe_secret` | Open Cloud secrets — full CRUD incl. real delete; values sealed client-side, never stored. |

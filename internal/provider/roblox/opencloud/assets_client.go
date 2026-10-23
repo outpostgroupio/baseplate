@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -53,6 +54,15 @@ type assetRequest struct {
 	CreationContext assetCreationContext `json:"creationContext,omitempty"`
 }
 
+// assetUpdateRequest is the `request` part of an asset PATCH. displayName and
+// description are sent even when empty: the updateMask names them, so an empty
+// value clears the field.
+type assetUpdateRequest struct {
+	AssetID     string `json:"assetId"`
+	DisplayName string `json:"displayName"`
+	Description string `json:"description"`
+}
+
 type assetResponse struct {
 	// AssetID is a string on the wire: Roblox serializes 64-bit ids as JSON
 	// strings (to avoid float precision loss) even though the OpenCloud spec
@@ -90,26 +100,39 @@ func (ac *assetClient) CreateAndAwait(ctx context.Context, req AssetCreate, file
 	if _, err := ac.c.DoMultipart(ctx, http.MethodPost, "/v1/assets", parts, &op); err != nil {
 		return Asset{}, err
 	}
-	var res assetResponse
-	switch {
-	case op.Done:
-		if len(op.Response) > 0 {
-			if err := json.Unmarshal(op.Response, &res); err != nil {
-				return Asset{}, err
-			}
-		}
-	case op.Path != "":
-		if err := ac.c.PollOperation(ctx, assetsPollPath(op.Path), &res); err != nil {
-			return Asset{}, err
-		}
-	default:
-		return Asset{}, fmt.Errorf("asset create: response was neither a completed operation nor a pollable operation path")
+	res, err := ac.await(ctx, "asset create", op)
+	if err != nil {
+		return Asset{}, err
 	}
 	a := res.toAsset("")
 	if a.ID == "" {
 		return Asset{}, fmt.Errorf("asset create: operation completed without an assetId")
 	}
 	return a, nil
+}
+
+// await resolves an asset Operation: a completed one carries its result inline,
+// a pending one is polled until done.
+func (ac *assetClient) await(ctx context.Context, what string, op operation) (assetResponse, error) {
+	var res assetResponse
+	switch {
+	case op.Done:
+		if op.Error != nil {
+			return res, op.Error
+		}
+		if len(op.Response) > 0 {
+			if err := json.Unmarshal(op.Response, &res); err != nil {
+				return res, err
+			}
+		}
+	case op.Path != "":
+		if err := ac.c.PollOperation(ctx, assetsPollPath(op.Path), &res); err != nil {
+			return res, err
+		}
+	default:
+		return res, fmt.Errorf("%s: response was neither a completed operation nor a pollable operation path", what)
+	}
+	return res, nil
 }
 
 func (ac *assetClient) Get(ctx context.Context, assetID string) (Asset, error) {
@@ -120,10 +143,18 @@ func (ac *assetClient) Get(ctx context.Context, assetID string) (Asset, error) {
 	return res.toAsset(assetID), nil
 }
 
+// Update changes an asset's metadata. The endpoint is multipart (a `request`
+// JSON part; content updates via `fileContent` are Model-only, so none is sent),
+// takes an updateMask, and returns an Operation.
 func (ac *assetClient) Update(ctx context.Context, a Asset) (Asset, error) {
-	body := assetResponse{DisplayName: a.DisplayName, Description: a.Description}
-	var res assetResponse
-	if _, err := ac.c.Do(ctx, http.MethodPatch, "/v1/assets/"+a.ID, body, &res); err != nil {
+	body := assetUpdateRequest{AssetID: a.ID, DisplayName: a.DisplayName, Description: a.Description}
+	var op operation
+	path := "/v1/assets/" + url.PathEscape(a.ID) + "?updateMask=displayName,description"
+	if _, err := ac.c.DoMultipart(ctx, http.MethodPatch, path, []Part{{Name: "request", JSON: body}}, &op); err != nil {
+		return Asset{}, err
+	}
+	res, err := ac.await(ctx, "asset update", op)
+	if err != nil {
 		return Asset{}, err
 	}
 	return res.toAsset(a.ID), nil
