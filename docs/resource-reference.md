@@ -18,6 +18,36 @@ Every resource also has an implicit `id` (Baseplate's state id) — you never se
 
 ---
 
+## `roblox_analytics_alert`
+
+Manages an analytics alert on an experience metric (production alerting, e.g. crash rate or concurrent players). EXPERIMENTAL Roblox API. Full create/update/real-delete lifecycle.
+
+| Attribute | Type | Kind | Description |
+|---|---|---|---|
+| `breakdown_dimension` | string | optional, diffable | Evaluate the metric separately per value of this dimension (which must also be a key of `filters`). Set `""` to clear. |
+| `consecutive_occurrences` | number | required, diffable | Consecutive breaching evaluations before the alert fires. `OneMinute` allows 6-30; the other intervals 1-10. |
+| `description` | string | optional, diffable | Free-text description (at most 200 characters; moderated). Set `""` to clear. |
+| `enabled` | bool | optional, diffable | Whether the alert is enabled (default `true`). `false` pauses it without deleting it. |
+| `evaluation_mode` | string | optional, diffable | `Absolute` (default) compares the raw value; `PeriodOverPeriod` compares the percentage change from an earlier period. |
+| `filters` | map of set of string | optional, diffable | Dimension filters: a map of dimension name to the allowed values, e.g. `{ Platform = ["Phone", "Tablet"] }`. Set `{}` to clear. |
+| `interval` | string | required, diffable | Evaluation frequency: `OneMinute`, `HalfHour`, `OneHour` or `OneDay`. Not every metric supports every interval. |
+| `metric` | string | required, diffable | Metric to evaluate, e.g. `ClientCrashRate15m`, `PeakConcurrentPlayers` (case-sensitive). See Roblox's alerts "Supported metrics" guide. |
+| `name` | string | required, diffable | Alert name. Must be unique within the experience; at most 50 characters; subject to Roblox text moderation. |
+| `operator` | string | required, diffable | Comparison operator: `Gt`, `Gte`, `Lt` or `Lte`. |
+| `period_offset_multiplier` | number | optional, diffable | `PeriodOverPeriod` only: how many intervals back the comparison period is (Roblox defaults to 1). Must be omitted for `Absolute`. |
+| `severity` | string | required, diffable | `SEV_0` (critical), `SEV_1` (medium) or `SEV_2` (low). |
+| `threshold` | number | required, diffable | Value the metric is compared against. For `PeriodOverPeriod` it is a percentage change (e.g. `-30` = a 30% drop). |
+| `universe_id` | string | required, create-only | The universe. Often a reference to an experience. |
+| `webhook_configuration_ids` | set of string | optional, diffable | UUIDs of webhooks to notify when the alert fires or resolves. Webhooks can only be created in the Creator Dashboard (Webhooks); Open Cloud has no API for them. Set `[]` to remove all. |
+
+Built on Roblox's EXPERIMENTAL analytics-alerts API (`analytics-alert-control-plane/v1`), which may change without notice. A universe can have at most 20 alerts. New alerts report `config_state = "Syncing"` briefly before `Enabled`. Removing an optional attribute from config stops managing it but leaves the remote value in place; to clear one, set it to its empty value (`""`, `{}`, `[]`). `universe_id` is create-only. Import with id `<universe_id>/<alert_id>`.
+
+Requires the `universe.analytics.alert:read`, `universe.analytics.alert:write` [scopes](how-to/api-key-scopes.md).
+
+Example: [`examples/analytics-alert.bp.hcl`](../examples/analytics-alert.bp.hcl).
+
+---
+
 ## `roblox_asset`
 
 Uploads a user- or group-owned image/decal asset.
