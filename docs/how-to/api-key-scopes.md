@@ -11,21 +11,35 @@ during `apply`/`destroy`, so grant both sides.
 
 | Resource | Scopes |
 |---|---|
-| `roblox_experience` | `universe:write` |
+| `roblox_experience` | `universe:write` (plus `legacy-universe:manage` if you set `public`) |
 | `roblox_place` | `universe-places:write` |
+| `roblox_place_config` | `universe.place:read`, `universe.place:write` |
 | `roblox_asset` | `asset:read`, `asset:write` |
 | `roblox_developer_product` | `developer-product:read`, `developer-product:write` |
 | `roblox_game_pass` | `game-pass:read`, `game-pass:write` |
 | `roblox_badge` | `legacy-universe.badge:manage-and-spend-robux`, `legacy-universe.badge:write`, `legacy-badge:manage` |
 | `roblox_universe_secret` | `universe.secret:read`, `universe.secret:write` |
+| `roblox_experience_event` | `universe.event:read`, `universe.event:write` |
 | `roblox_analytics_alert` | `universe.analytics.alert:read`, `universe.analytics.alert:write` |
 
 A few are easy to miss because they don't match the "obvious" name:
 
 - **`universe-places:write`** for `roblox_place` is distinct from `universe:write` and from
-  `universe.place:write`. Using the wrong one gives `401 … insufficient scope`.
+  `universe.place:write`. Using the wrong one gives `401 … insufficient scope`. Conversely,
+  `roblox_place_config` (name/description/server size) uses `universe.place:write`, not
+  `universe-places:write`.
+- **`legacy-universe:manage`** is needed only for `roblox_experience.public`, which flips
+  visibility through Roblox's EXPERIMENTAL `legacy-develop` activate/deactivate endpoints (the v2
+  universe API can't write visibility). Without it, apply fails with
+  `403 Scope not authorized.` The other `roblox_experience` attributes need only `universe:write`.
+  Even with the scope, Roblox can refuse to make an experience public with
+  `403 You are not authorized to configure this universe.`. That isn't a scope problem, so check
+  in Creator Hub that the experience can be made public.
 - **`universe.secret:read` / `universe.secret:write`** are separate from `universe:write` — a key
   that can edit universe config still can't touch secrets without them.
+- **`universe.event:read` / `universe.event:write`** for `roblox_experience_event` are also separate
+  from `universe:write`. Without them every events call (even a read) fails with
+  `403 Scope not authorized.`
 - **`roblox_badge`** needs three legacy scopes: `legacy-universe.badge:manage-and-spend-robux`
   (create — the "spend-robux" name is a legacy of the old per-badge fee; creation is free in
   practice), `legacy-universe.badge:write` (update name/description/enabled), and
@@ -39,6 +53,17 @@ A few are easy to miss because they don't match the "obvious" name:
   eligible for alerts (the Performance dashboard's 100+ daily-active-user requirement; no opt-in
   is documented). Otherwise every call returns `403 PERMISSION_DENIED … not enrolled in
   PerformanceMonitoringV2`, which Baseplate reports as "not eligible for analytics alerts".
+
+## Scopes for commands
+
+Commands that act on Roblox directly, rather than through a resource, need scopes too:
+
+| Command | Scopes |
+|---|---|
+| `baseplate restart-servers`, `apply --restart-servers` | `universe:write` |
+
+`apply --restart-servers` needs `universe:write` on top of the scopes for the resources you apply
+(e.g. `universe-places:write` for the `roblox_place` that gets published).
 
 ## Scopes are per-universe — and you must save
 
@@ -73,7 +98,7 @@ provider "roblox" {
 }
 ```
 
-Export it in your shell, or keep it in a gitignored `.env.local` and source it. Never commit an API
+Export it in your shell, or keep it in a gitignored `.env` and source it. Never commit an API
 key.
 
 ## See also

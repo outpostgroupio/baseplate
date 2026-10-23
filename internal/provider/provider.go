@@ -78,6 +78,16 @@ type Sensitive interface {
 	Sensitive() []string
 }
 
+// Normalizer is an optional Resource capability. Normalize returns the desired
+// attributes rewritten into the canonical form Read reports (e.g. a timestamp
+// converted to UTC at a fixed precision), so semantically equal values don't
+// produce a perpetual diff. It may also reject an invalid value, which surfaces
+// the error at plan time instead of at apply. Implementations must leave null
+// and unknown values untouched and must not mutate the input map.
+type Normalizer interface {
+	Normalize(desired Attributes) (Attributes, error)
+}
+
 // Documented is an optional Resource capability. Doc returns authored
 // documentation for a resource — its summary, per-attribute descriptions, any
 // caveats, and the API-key scopes it needs. The resource-docs generator merges

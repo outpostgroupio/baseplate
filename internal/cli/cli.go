@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zclconf/go-cty/cty"
 
+	"github.com/outpostgroupio/baseplate/internal/addr"
 	"github.com/outpostgroupio/baseplate/internal/cli/output"
 	"github.com/outpostgroupio/baseplate/internal/config"
 	"github.com/outpostgroupio/baseplate/internal/config/configgen"
@@ -27,7 +28,10 @@ import (
 
 // newProvider selects the real Roblox provider when ROBLOX_API_KEY is set,
 // otherwise the in-memory mock (so tests and demos work without credentials).
-func newProvider() provider.Provider {
+// It is a variable so CLI tests can inject a provider into run().
+var newProvider = defaultProvider
+
+func defaultProvider() provider.Provider {
 	if key := os.Getenv("ROBLOX_API_KEY"); key != "" {
 		if p, err := roblox.New(key); err == nil {
 			return p
@@ -113,8 +117,9 @@ type validateResult struct {
 }
 
 type planResult struct {
-	Changes []plan.JSONChange `json:"changes"`
-	Summary plan.Summary      `json:"summary"`
+	Changes  []plan.JSONChange `json:"changes"`
+	Summary  plan.Summary      `json:"summary"`
+	Warnings []string          `json:"warnings,omitempty"`
 }
 
 type importResult struct {
@@ -125,18 +130,22 @@ type importResult struct {
 type applyResult struct {
 	Applied int               `json:"applied"`
 	Changes []plan.JSONChange `json:"changes"`
+	// Restarts lists the server restarts requested by apply --restart-servers.
+	Restarts []restartResult `json:"restarts,omitempty"`
 }
 
 var errCancelled = errors.New("cancelled at confirmation prompt")
 
 var confirmPrompts = map[string]string{
-	"apply":   "Do you want to perform these actions?",
-	"destroy": "Do you really want to destroy all resources?",
+	"apply":           "Do you want to perform these actions?",
+	"destroy":         "Do you really want to destroy all resources?",
+	"restart-servers": "Do you want to restart these servers?",
 }
 
 var cancelLabel = map[string]string{
-	"apply":   "Apply",
-	"destroy": "Destroy",
+	"apply":           "Apply",
+	"destroy":         "Destroy",
+	"restart-servers": "Restart",
 }
 
 // confirm decides whether an apply/destroy may proceed. It auto-approves when
@@ -193,7 +202,7 @@ func run(args []string, s streams) int {
 	root.Version = version.Version
 	root.PersistentFlags().StringVar(&cfgPath, "config", "baseplate.bp.hcl", "config file")
 	root.PersistentFlags().StringVar(&statePath, "state", "baseplate.bpstate", "state file")
-	root.PersistentFlags().StringVar(&target, "target", "", "limit to a single resource address")
+	root.PersistentFlags().StringVar(&target, "target", "", `limit to one resource (type.name, every instance) or one instance (type.name["key"])`)
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "machine-readable output")
 	root.SetOut(s.out)
 	root.SetErr(s.err)
@@ -202,17 +211,13 @@ func run(args []string, s streams) int {
 	exit := 0
 	p := newProvider()
 
-	load := func() ([]plan.DesiredResource, []plan.ImportBlock, error) {
-		_, res, imports, err := config.Load(cfgPath, p)
-		if err != nil {
-			return nil, nil, err
-		}
-		return res, imports, nil
+	load := func() (*config.Config, error) {
+		return config.LoadConfig(cfgPath, p)
 	}
 
 	root.AddCommand(&cobra.Command{Use: "validate", RunE: func(cmd *cobra.Command, _ []string) error {
 		cmdName = cmd.Name()
-		if _, _, err := load(); err != nil {
+		if _, err := load(); err != nil {
 			return err
 		}
 		return output.Emit(s.out, fmtOf(jsonOut), "validate", "Configuration is valid.\n", validateResult{Valid: true})
@@ -220,10 +225,15 @@ func run(args []string, s streams) int {
 
 	planCmd := &cobra.Command{Use: "plan", RunE: func(cmd *cobra.Command, _ []string) error {
 		cmdName = cmd.Name()
-		desired, imports, err := load()
+		tgt, err := parseTarget("--target", target)
 		if err != nil {
 			return err
 		}
+		cfg, err := load()
+		if err != nil {
+			return err
+		}
+		desired, imports := cfg.Resources, cfg.Imports
 		b, _, err := openBackend(cfgPath, statePath)
 		if err != nil {
 			return err
@@ -244,6 +254,7 @@ func run(args []string, s streams) int {
 		if err != nil {
 			return err
 		}
+		pl.EmptyForEach = cfg.EmptyForEach
 		if err := plan.ResolveImports(context.Background(), p, st, pl, toResolve); err != nil {
 			return err
 		}
@@ -252,10 +263,10 @@ func run(args []string, s streams) int {
 				return err
 			}
 		}
-		filterPlanByTarget(pl, target)
+		filterPlanByTarget(pl, tgt)
 		if err := output.Emit(s.out, fmtOf(jsonOut), "plan",
 			pl.RenderText(true),
-			planResult{Changes: pl.JSONChanges(), Summary: pl.Summary()}); err != nil {
+			planResult{Changes: pl.JSONChanges(), Summary: pl.Summary(), Warnings: pl.Warnings()}); err != nil {
 			return err
 		}
 		if pl.HasChanges() {
@@ -268,15 +279,20 @@ func run(args []string, s streams) int {
 
 	applyCmd := &cobra.Command{Use: "apply", RunE: func(cmd *cobra.Command, _ []string) error {
 		cmdName = cmd.Name()
-		return applyRun(p, cfgPath, statePath, target, false, autoApproved(cmd), fmtOf(jsonOut), s)
+		restart, err := applyRestartFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+		return applyRun(p, cfgPath, statePath, target, false, autoApproved(cmd), fmtOf(jsonOut), s, restart)
 	}}
 	applyCmd.Flags().Bool("auto-approve", false, "skip the interactive approval prompt")
 	applyCmd.Flags().Bool("yes", false, "alias for --auto-approve")
+	addApplyRestartFlags(applyCmd)
 	root.AddCommand(applyCmd)
 
 	destroyCmd := &cobra.Command{Use: "destroy", RunE: func(cmd *cobra.Command, _ []string) error {
 		cmdName = cmd.Name()
-		return applyRun(p, cfgPath, statePath, target, true, autoApproved(cmd), fmtOf(jsonOut), s)
+		return applyRun(p, cfgPath, statePath, target, true, autoApproved(cmd), fmtOf(jsonOut), s, nil)
 	}}
 	destroyCmd.Flags().Bool("auto-approve", false, "skip the interactive approval prompt")
 	destroyCmd.Flags().Bool("yes", false, "alias for --auto-approve")
@@ -288,6 +304,20 @@ func run(args []string, s streams) int {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmdName = cmd.Name()
 			return importRun(p, cfgPath, statePath, args[0], args[1], fmtOf(jsonOut), s)
+		},
+	})
+	root.AddCommand(newRestartServersCmd(p, &cfgPath, &jsonOut, &cmdName, s))
+	root.AddCommand(&cobra.Command{
+		Use:   "show [address]",
+		Short: "Print the resources recorded in state",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cmdName = cmd.Name()
+			address := ""
+			if len(args) == 1 {
+				address = args[0]
+			}
+			return showRun(p, cfgPath, statePath, address, fmtOf(jsonOut), s)
 		},
 	})
 	root.AddCommand(&cobra.Command{
@@ -310,19 +340,31 @@ func run(args []string, s streams) int {
 	return exit
 }
 
-func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, autoApprove bool, format output.Format, s streams) error {
+// restart, when non-nil (apply --restart-servers), restarts the servers of any
+// roblox_place the apply published, only after the apply fully succeeds.
+func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, autoApprove bool, format output.Format, s streams, restart *applyRestart) error {
 	verb := "apply"
 	if destroy {
 		verb = "destroy"
 	}
+	if restart != nil {
+		if err := restart.check(p); err != nil {
+			return err
+		}
+	}
+	tgt, err := parseTarget("--target", target)
+	if err != nil {
+		return err
+	}
 	var desired []plan.DesiredResource
 	var imports []plan.ImportBlock
+	var emptyForEach []string
 	if !destroy {
-		_, res, imps, err := config.Load(cfgPath, p)
+		cfg, err := config.LoadConfig(cfgPath, p)
 		if err != nil {
 			return err
 		}
-		desired, imports = res, imps
+		desired, imports, emptyForEach = cfg.Resources, cfg.Imports, cfg.EmptyForEach
 	}
 	b, localFallback, err := openBackend(cfgPath, statePath)
 	if err != nil {
@@ -354,14 +396,18 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 	if err != nil {
 		return err
 	}
+	pl.EmptyForEach = emptyForEach
 	if err := plan.ResolveImports(context.Background(), p, st, pl, imports); err != nil {
 		return err
 	}
-	filterPlanByTarget(pl, target)
+	filterPlanByTarget(pl, tgt)
 
 	if pl.HasChanges() {
 		if format == output.Text {
 			fmt.Fprint(s.out, pl.RenderText(true))
+			if restart != nil {
+				fmt.Fprint(s.out, restart.describe(pl))
+			}
 		}
 		ok, err := confirm(s, format, autoApprove, verb)
 		if err != nil {
@@ -375,14 +421,29 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 	if err := apply.Apply(context.Background(), p, b, st, pl); err != nil {
 		return err
 	}
-	return output.Emit(s.out, format, verb,
-		fmt.Sprintf("Apply complete. %d change(s).\n", len(pl.Changes)),
-		applyResult{Applied: len(pl.Changes), Changes: pl.JSONChanges()})
+	text := fmt.Sprintf("Apply complete. %d change(s).\n", len(pl.Changes))
+	var restarts []restartResult
+	if restart != nil {
+		if restarts, err = restart.run(context.Background(), p, st, pl); err != nil {
+			if format == output.Text {
+				fmt.Fprint(s.out, text)
+			}
+			return fmt.Errorf("apply succeeded, but restarting servers failed: %w", err)
+		}
+		text += restartText(restarts)
+	}
+	return output.Emit(s.out, format, verb, text,
+		applyResult{Applied: len(pl.Changes), Changes: pl.JSONChanges(), Restarts: restarts})
 }
 
 // importRun adopts an existing resource (declared in config) into state by id,
 // under the state lock. It never mutates the remote.
 func importRun(p provider.Provider, cfgPath, statePath, address, id string, format output.Format, s streams) error {
+	typ, name, key, _, err := addr.Parse(address)
+	if err != nil {
+		return fmt.Errorf("import: %w", err)
+	}
+	address = addr.Format(typ, name, key)
 	_, desired, _, err := config.Load(cfgPath, p)
 	if err != nil {
 		return err
@@ -412,15 +473,46 @@ func importRun(p provider.Provider, cfgPath, statePath, address, id string, form
 		importResult{Address: address, ID: id})
 }
 
-// filterPlanByTarget restricts the plan to a single resource address when
-// --target is set, so targeted operations never touch (or delete) other resources.
-func filterPlanByTarget(pl *plan.Plan, target string) {
-	if target == "" {
+// targetAddr is a parsed --target: a whole resource (every instance, when key is
+// empty and hasKey is false) or one for_each instance.
+type targetAddr struct {
+	typ, name, key string
+	hasKey         bool
+}
+
+// matches reports whether a change (or state resource) at type/name/key is
+// selected by the target.
+func (t *targetAddr) matches(typ, name, key string) bool {
+	if typ != t.typ || name != t.name {
+		return false
+	}
+	return !t.hasKey || key == t.key
+}
+
+// parseTarget parses an address filter (--target, or show's positional
+// address); label prefixes errors. An empty string means no filter (nil). A
+// malformed address is an error rather than silently matching nothing.
+func parseTarget(label, s string) (*targetAddr, error) {
+	if s == "" {
+		return nil, nil
+	}
+	typ, name, key, hasKey, err := addr.Parse(s)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", label, err)
+	}
+	return &targetAddr{typ: typ, name: name, key: key, hasKey: hasKey}, nil
+}
+
+// filterPlanByTarget restricts the plan to the targeted resource (all of its
+// instances) or instance when --target is set, so targeted operations never
+// touch (or delete) other resources.
+func filterPlanByTarget(pl *plan.Plan, t *targetAddr) {
+	if t == nil {
 		return
 	}
 	var out []plan.Change
 	for _, c := range pl.Changes {
-		if c.Address == target {
+		if t.matches(c.Type, c.Name, c.Key) {
 			out = append(out, c)
 		}
 	}
@@ -455,7 +547,13 @@ func generateConfig(ctx context.Context, p provider.Provider, imports []plan.Imp
 			return fmt.Errorf("duplicate import block for %q", imp.Address)
 		}
 		seen[imp.Address] = true
-		typ, name := splitAddress(imp.Address)
+		typ, name, _, hasKey, err := addr.Parse(imp.Address)
+		if err != nil {
+			return err
+		}
+		if hasKey {
+			return fmt.Errorf("generate %s: --generate-config does not support for_each resources; declare the resource block by hand", imp.Address)
+		}
 		r, ok := resources[typ]
 		if !ok {
 			return fmt.Errorf("generate %s: unknown resource type %q", imp.Address, typ)
@@ -481,11 +579,4 @@ func generateConfig(ctx context.Context, p provider.Provider, imports []plan.Imp
 	}
 	fmt.Fprintf(stdout, "Generated configuration for %d resource(s) → %s\n", len(blocks), outPath)
 	return nil
-}
-
-func splitAddress(addr string) (typ, name string) {
-	if i := strings.IndexByte(addr, '.'); i >= 0 {
-		return addr[:i], addr[i+1:]
-	}
-	return addr, ""
 }

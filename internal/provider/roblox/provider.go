@@ -21,6 +21,8 @@ const (
 // Provider is the real Roblox Open Cloud provider.
 type Provider struct {
 	resources map[string]provider.Resource
+	// restarter backs the provider.ServerRestarter capability (restart.go).
+	restarter opencloud.ServerRestartClient
 }
 
 // New builds the Roblox provider from an Open Cloud API key. The key must be
@@ -39,9 +41,11 @@ func New(apiKey string) (*Provider, error) {
 		"roblox_game_pass":         resources.GamePass(opencloud.NewGamePassClient(root)),
 		"roblox_badge":             resources.Badge(opencloud.NewBadgeClient(root, badges)),
 		"roblox_place":             resources.Place(opencloud.NewPlaceClient(root)),
+		"roblox_place_config":      resources.PlaceConfig(opencloud.NewPlaceConfigClient(root)),
 		"roblox_universe_secret":   resources.UniverseSecret(opencloud.NewSecretClient(root)),
+		"roblox_experience_event":  resources.ExperienceEvent(opencloud.NewGameEventClient(root)),
 		"roblox_analytics_alert":   resources.AnalyticsAlert(opencloud.NewAnalyticsAlertClient(root)),
-	}}, nil
+	}, restarter: opencloud.NewServerRestartClient(root)}, nil
 }
 
 // Resources implements provider.Provider.
@@ -56,9 +60,11 @@ func SchemaProvider() *Provider {
 		"roblox_asset":             resources.Asset(nil),
 		"roblox_developer_product": resources.DeveloperProduct(nil),
 		"roblox_place":             resources.Place(nil),
+		"roblox_place_config":      resources.PlaceConfig(nil),
 		"roblox_universe_secret":   resources.UniverseSecret(nil),
 		"roblox_game_pass":         resources.GamePass(nil),
 		"roblox_badge":             resources.Badge(nil),
+		"roblox_experience_event":  resources.ExperienceEvent(nil),
 		"roblox_analytics_alert":   resources.AnalyticsAlert(nil),
 	}}
 }

@@ -33,6 +33,7 @@ func (f *fakeUniverse) Update(_ context.Context, u opencloud.Universe, mask []st
 	f.store[u.ID] = u
 	return u, nil
 }
+func (f *fakeUniverse) SetPublic(context.Context, string, bool) error { return nil }
 
 func TestExperienceCreateAdoptsAndConfigures(t *testing.T) {
 	f := &fakeUniverse{store: map[string]opencloud.Universe{}}
@@ -74,5 +75,29 @@ func TestExperienceReadPassesThroughOtherErrors(t *testing.T) {
 	}
 	if errors.Is(err, provider.ErrNotFound) {
 		t.Fatalf("a 500 must not map to ErrNotFound, got %v", err)
+	}
+}
+
+func TestExperienceConsoleAndVRToggles(t *testing.T) {
+	f := &fakeUniverse{store: map[string]opencloud.Universe{}}
+	e := Experience(f)
+
+	_, attrs, err := e.Create(context.Background(), provider.Attributes{
+		"universe_id":     cty.StringVal("123"),
+		"console_enabled": cty.False,
+		"vr_enabled":      cty.False,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := f.updates[0]
+	if u.ConsoleEnabled == nil || *u.ConsoleEnabled || u.VREnabled == nil || *u.VREnabled {
+		t.Fatalf("update = %+v", u)
+	}
+	if got := f.masks[0]; len(got) != 2 || got[0] != "consoleEnabled" || got[1] != "vrEnabled" {
+		t.Fatalf("mask = %+v", got)
+	}
+	if attrs["console_enabled"].True() || attrs["vr_enabled"].True() {
+		t.Fatalf("attrs = %+v", attrs)
 	}
 }

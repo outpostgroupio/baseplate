@@ -177,25 +177,48 @@ func backoff(attempt int) time.Duration {
 func parseAPIError(resp *http.Response) error {
 	b, _ := io.ReadAll(resp.Body)
 	e := &APIError{Status: resp.StatusCode}
-	_ = json.Unmarshal(b, e) // best-effort; code/message may be absent
-	if e.Message == "" || e.Code == "" {
-		// Other envelopes seen on apis.roblox.com: the analytics-alerts service's
-		// {"errorCode","message"}, and the gateway's {"errors":[{"code":0,"message"}]}
-		// (e.g. 403 "Scope not authorized."). Fill whatever the flat decode missed.
+	_ = json.Unmarshal(b, e)   // best-effort; code/message may be absent
+	e.Status = resp.StatusCode // a body "status" field must not override the real one
+	if e.Message == "" {
+		e.Message = altErrorMessage(b)
+	}
+	if e.Code == "" {
+		// The analytics-alerts service uses {"errorCode","message"}; keep its
+		// code (e.g. PERMISSION_DENIED) so callers can classify the error.
 		var alt struct {
 			ErrorCode string `json:"errorCode"`
-			Errors    []struct {
-				Message string `json:"message"`
-			} `json:"errors"`
 		}
 		if json.Unmarshal(b, &alt) == nil {
-			if e.Code == "" {
-				e.Code = alt.ErrorCode
-			}
-			if e.Message == "" && len(alt.Errors) > 0 {
-				e.Message = alt.Errors[0].Message
-			}
+			e.Code = alt.ErrorCode
 		}
 	}
 	return e
+}
+
+// altErrorMessage extracts a message from the two non-flat error envelopes Open
+// Cloud also uses: the gateway's {"errors":[{"code":0,"message":"..."}]} (e.g.
+// "Scope not authorized.") and RFC 7807 ProblemDetails {"title","detail"} (e.g.
+// virtual-events). Returns "" when neither is present.
+func altErrorMessage(b []byte) string {
+	var alt struct {
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+		Title  string `json:"title"`
+		Detail string `json:"detail"`
+	}
+	if json.Unmarshal(b, &alt) != nil {
+		return ""
+	}
+	if len(alt.Errors) > 0 && alt.Errors[0].Message != "" {
+		return alt.Errors[0].Message
+	}
+	switch {
+	case alt.Detail != "" && alt.Title != "":
+		return alt.Title + ": " + alt.Detail
+	case alt.Detail != "":
+		return alt.Detail
+	default:
+		return alt.Title
+	}
 }

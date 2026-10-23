@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/outpostgroupio/baseplate/internal/addr"
 	"github.com/outpostgroupio/baseplate/internal/provider"
 	"github.com/outpostgroupio/baseplate/internal/state"
 )
@@ -29,6 +30,7 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 		idx[pl.Changes[i].Address] = i
 	}
 	seen := map[string]bool{}
+	claimed := map[[2]string]string{} // {type, id} -> address importing it
 	for _, imp := range imports {
 		if seen[imp.Address] {
 			return fmt.Errorf("duplicate import block for %q", imp.Address)
@@ -36,9 +38,23 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 		seen[imp.Address] = true
 		i, ok := idx[imp.Address]
 		if !ok {
+			_, _, _, hasKey, err := addr.Parse(imp.Address)
+			if err != nil {
+				return fmt.Errorf("import target: %w", err)
+			}
+			if hasKey {
+				return fmt.Errorf("import target %q is not a declared instance (no resource block's for_each produces that key)", imp.Address)
+			}
 			return fmt.Errorf("import target %q is not declared as a resource (add a resource block, or run plan --generate-config=FILE to generate one)", imp.Address)
 		}
 		c := &pl.Changes[i]
+		if prev, dup := claimed[[2]string{c.Type, imp.ID}]; dup {
+			return fmt.Errorf("import id %q is used for both %s and %s; one remote object can only be managed at one address", imp.ID, prev, imp.Address)
+		}
+		claimed[[2]string{c.Type, imp.ID}] = imp.Address
+		if err := ImportCollision(s, c.Type, imp.Address, imp.ID); err != nil {
+			return err
+		}
 		if c.Action != provider.ActionCreate {
 			continue // already in state → import already satisfied
 		}
@@ -50,8 +66,11 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 			}
 			return err
 		}
-		d := DesiredResource{Type: c.Type, Name: nameFromAddress(c.Address), Attributes: c.Desired, Refs: c.Refs}
-		effectiveDesired := mergeRefsFromState(d, s)
+		d := DesiredResource{Type: c.Type, Name: c.Name, Key: c.Key, Attributes: c.Desired, Refs: c.Refs}
+		effectiveDesired, err := normalize(r, c.Address, mergeRefsFromState(d, s))
+		if err != nil {
+			return err
+		}
 		diffs := diffAttrs(actual, effectiveDesired, r.Computed())
 		c.ImportID = imp.ID
 		c.ID = imp.ID
@@ -66,11 +85,13 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 	return nil
 }
 
-func nameFromAddress(address string) string {
-	for i := 0; i < len(address); i++ {
-		if address[i] == '.' {
-			return address[i+1:]
-		}
+// ImportCollision returns an error when a state entry other than address
+// already manages the remote object (typ, id). Two addresses managing one
+// object is never safe: when one of them is later destroyed, the object the
+// other still manages is deleted with it (a hard delete for some types).
+func ImportCollision(s *state.State, typ, address, id string) error {
+	if other, ok := s.FindByID(typ, id); ok && other.Address() != address {
+		return fmt.Errorf("import %s: %s id %q is already managed as %s; one remote object can only be managed at one address", address, typ, id, other.Address())
 	}
-	return address
+	return nil
 }

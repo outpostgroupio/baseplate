@@ -28,7 +28,7 @@ import (
 // the universe.analytics.alert:read/write scopes or the experience isn't
 // eligible for alerts (401/403 on a preflight list).
 //
-//	set -a; . ./.env.local; set +a
+//	set -a; . ./.env; set +a
 //	BASEPLATE_LIVE=1 go test ./internal/provider/roblox/ -run LiveAnalyticsAlert -v
 func TestLiveAnalyticsAlertLifecycle(t *testing.T) {
 	if os.Getenv("BASEPLATE_LIVE") != "1" {

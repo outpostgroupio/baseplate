@@ -13,9 +13,10 @@ import (
 )
 
 type Provider struct {
-	mu    sync.Mutex
-	store map[string]provider.Attributes
-	seq   int
+	mu      sync.Mutex
+	store   map[string]provider.Attributes
+	seq     int
+	creates int
 }
 
 func New() *Provider {
@@ -40,6 +41,14 @@ func (p *Provider) Store() map[string]provider.Attributes {
 	return out
 }
 
+// Creates returns how many Create calls the provider has served, so tests can
+// assert an operation adopted resources rather than creating them.
+func (p *Provider) Creates() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.creates
+}
+
 func (p *Provider) Resources() map[string]provider.Resource {
 	return map[string]provider.Resource{
 		"mock_thing":    &res{p: p, typ: "mock_thing"},
@@ -47,6 +56,7 @@ func (p *Provider) Resources() map[string]provider.Resource {
 		"mock_computed": &res{p: p, typ: "mock_computed"},
 		"mock_ref":      &res{p: p, typ: "mock_ref"},
 		"mock_trigger":  &res{p: p, typ: "mock_trigger"},
+		"mock_secret":   &res{p: p, typ: "mock_secret"},
 	}
 }
 
@@ -72,6 +82,9 @@ func (r *res) DecodeSpec() hcldec.Spec {
 	if r.typ == "mock_trigger" {
 		spec["rev"] = &hcldec.AttrSpec{Name: "rev", Type: cty.String, Required: false}
 	}
+	if r.typ == "mock_secret" {
+		spec["value"] = &hcldec.AttrSpec{Name: "value", Type: cty.String, Required: false}
+	}
 	return spec
 }
 
@@ -89,6 +102,7 @@ func (r *res) Create(_ context.Context, desired provider.Attributes) (string, pr
 	r.p.mu.Lock()
 	defer r.p.mu.Unlock()
 	r.p.seq++
+	r.p.creates++
 	id := fmt.Sprintf("%s/%d", r.typ, r.p.seq)
 	r.p.store[id] = clone(desired)
 	return id, clone(desired), nil
@@ -114,6 +128,14 @@ func (r *res) Computed() []string {
 	}
 	if r.typ == "mock_trigger" {
 		return []string{"rev"}
+	}
+	return nil
+}
+
+// Sensitive marks mock_secret's value as sensitive (redacted from output).
+func (r *res) Sensitive() []string {
+	if r.typ == "mock_secret" {
+		return []string{"value"}
 	}
 	return nil
 }

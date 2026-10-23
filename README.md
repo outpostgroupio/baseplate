@@ -47,11 +47,13 @@ $ baseplate destroy   # tear down what's managed
 
 | Resource | What it manages |
 |---|---|
-| `roblox_experience` | A universe's writable config (voice chat, device enablement, private-server price). |
+| `roblox_experience` | A universe's writable config (voice chat, device enablement incl. console/VR, private-server price, social links, public/private). |
 | `roblox_place` | Publishes a place's `.rbxl`/`.rbxlx` and re-publishes on content change. |
-| `roblox_asset` | User- or group-owned image/decal assets (multipart upload). |
+| `roblox_place_config` | A place's name, description and server size (the root place's name/description are the experience's). |
+| `roblox_asset` | User- or group-owned image, decal and audio assets (multipart upload). |
 | `roblox_developer_product` | Developer products (name, price, description, icon, on-sale). |
 | `roblox_game_pass` | Game passes (name, price, description, icon, on-sale). |
+| `roblox_experience_event` | Experience (virtual) events for live-ops: title, schedule, visibility, venue, thumbnails, featuring. Experimental Roblox API; live-verified. |
 | `roblox_universe_secret` | Open Cloud secrets — full CRUD incl. real delete; values sealed client-side, never stored. |
 | `roblox_analytics_alert` | Analytics alerts on experience metrics (crash rate, CCU, …): threshold/period-over-period conditions, dimension filters, Dashboard-created webhooks. EXPERIMENTAL Roblox API; not yet live-verified. |
 
@@ -65,10 +67,11 @@ candidate resources — see the [roadmap](ROADMAP.md#resource-surface-audit-2026
 Dashboard, so Baseplate can't and won't manage them):
 
 - **Subscription products** — read-only API (per-user subscription lookups only); no create/update.
-- **Experience social links** — a write API exists for *groups* only, not experiences/universes.
-- **Universe display name, description, visibility, age rating** — read-only on the API; set them on
-  the experience's root place in Studio. Baseplate manages the writable universe settings (voice
-  chat, device enablement, private-server price) via `roblox_experience`.
+- **Universe age rating** — read-only on the API. (The experience's display name and description
+  are read-only on the universe too, but they follow the root place's, which `roblox_place_config`
+  manages.) Baseplate manages the writable universe settings (voice chat, device enablement,
+  private servers, social links) via `roblox_experience`, and public/private visibility through
+  Roblox's experimental activate/deactivate API (extra `legacy-universe:manage` scope).
 
 ## Install
 
@@ -124,10 +127,11 @@ baseplate <command> [--config baseplate.bp.hcl] [--state baseplate.bpstate] [--t
   apply      Reconcile resources to the config, writing state.
   destroy    Remove everything the state manages.
   import <address> <id>   Adopt an existing resource into state.
+  show [address]          Print the resources in state (--json for tooling).
 ```
 
 `--config` defaults to `baseplate.bp.hcl`, `--state` to `baseplate.bpstate`. `--target` limits an
-apply/plan to one resource address; `--json` emits machine-readable output for CI.
+apply/plan to one resource, or one `for_each` instance (`'type.name["key"]'`); `--json` emits machine-readable output for CI.
 
 ## Status
 
@@ -139,9 +143,11 @@ against a live universe. Current status, the remaining roadmap, and tracked defe
 
 - [Getting started](docs/getting-started.md) — install → API key → first config → apply → destroy.
 - [CLI reference](docs/cli-reference.md) — commands, flags, exit codes.
+- [Config reference](docs/config-reference.md) — blocks, `for_each`, references, `locals`, functions.
 - [Resource reference](docs/resource-reference.md) — every `roblox_*` resource and its attributes.
 - **How-to guides:**
   - [Import existing resources](docs/how-to/importing-existing-resources.md)
+  - [Manage many assets (`for_each`, `fileset`, `show --json`)](docs/how-to/many-assets.md)
   - [Manage universe secrets](docs/how-to/managing-secrets.md)
   - [References and `env()`](docs/how-to/references-and-env.md)
   - [API key scopes](docs/how-to/api-key-scopes.md)

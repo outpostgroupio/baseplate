@@ -40,7 +40,7 @@ Exit codes: `0` no changes, `2` changes present, `1` error. With `ROBLOX_API_KEY
 uses the real provider; otherwise the in-memory mock.
 
 **Live tests** (real Roblox, opt-in): put `ROBLOX_API_KEY` + `BASEPLATE_TEST_UNIVERSE` in a
-gitignored `.env.local`, then `set -a; . ./.env.local; set +a; BASEPLATE_LIVE=1 go test
+gitignored `.env`, then `set -a; . ./.env; set +a; BASEPLATE_LIVE=1 go test
 ./internal/provider/roblox/ -run Live -v`. See `docs/roblox-live-testing.md`. Test universe is
 `10438196190` (user-owned, `users/5822334358`).
 
@@ -69,8 +69,29 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
 
 ## Roblox spec gotchas (learned; verify against vendored specs before assuming)
 - Universe `displayName`/`description`/`visibility`/`ageRating` are **read-only** on the v2 API
-  (set via the root place). Writable: `voiceChatEnabled`, `desktop/mobile/tabletEnabled`,
-  `privateServerPriceRobux`.
+  (name/description follow the root place → `roblox_place_config`). Writable: `voiceChatEnabled`,
+  `desktop/mobile/tablet/console/vrEnabled`, `privateServerPriceRobux`, the `*SocialLink` objects.
+  **Unset fields are omitted from GET** (no price = private servers off; no link = unset).
+  - **Clearing = masked + omitted from the body** (verified live). An explicit JSON `null` for
+    `privateServerPriceRobux` 400s ("payload is not correctly formatted"); `null` for a link is
+    accepted but omission is the safe form. Price `0` is a real (free) price: valid values are
+    `0` or 10–500, so 0 ≠ disabled.
+  - Social links accept **sub-path masks** (`discordSocialLink.uri`/`.title`) that patch half of
+    an existing link; creating a link via a sub-path 400s ("update mask must contain all social
+    link fields when the link is being created"). Title 1–70 chars; uri validated per platform.
+  - Visibility is written via `POST /legacy-develop/v1/universes/{id}/activate|deactivate`
+    (EXPERIMENTAL, scope `legacy-universe:manage`); legacy errors use the
+    `{"errors":[{code,message}]}` envelope. Without the scope: `403 {"code":0,"message":"Scope
+    not authorized."}`. With it (verified live): `deactivate` → `200 {}` (application/json),
+    idempotent on an already-PRIVATE universe. `activate` → `403 {"code":3,"message":"You are not
+    authorized to configure this universe."}` until the experience's **maturity questionnaire** is
+    completed in Creator Hub (the same opaque 403 as for a universe the key doesn't own); after
+    that, the public flip and restore pass live (2026-10-23). `roblox_experience` polls v2
+    `visibility` (≤10×1s) after a toggle as a guard and only blames the scope when the 403 message
+    mentions "scope".
+- Place config: `GET/PATCH /cloud/v2/universes/{u}/places/{p}?updateMask=` (scope
+  `universe.place:write`, distinct from publish's `universe-places:write`); PATCH 409s while the
+  place is open in Team Create.
 - Assets are **user- or group-owned** (`creationContext.creator.{userId|groupId}`), not
   universe-owned. Create = multipart (`request` JSON part + `fileContent` file) → async
   Operation → poll `/v1/operations/{id}`. Base `https://apis.roblox.com/assets`.
@@ -101,6 +122,37 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
   **Pagination gotcha (verified live):** the list endpoint **always** returns a non-empty
   `nextPageCursor` — even on the empty final page — so paginate until an **empty `secrets` page**,
   not an empty cursor (a cursor-only loop never terminates and burns the 120-req/min limit → 429).
+- Experience events (`virtual-events/v3`, base `https://apis.roblox.com`, **EXPERIMENTAL**; all
+  verified live 2026-10-23): create `POST /virtual-events/v3/universes/{universeId}/game-events`;
+  single read/PATCH/DELETE on `/virtual-events/v3/game-events/{eventId}` (not universe-scoped, so
+  `roblox_experience_event`'s state/import id is the bare event id). JSON bodies; PATCH is partial
+  (omitted = no change) and returns the event; DELETE is a real delete (204) but **eventually
+  consistent** (a GET right after can still return the event briefly, then 404 `GameEventNotFound`).
+  - Wire: event `id` is a JSON **string**; `universeId`/`placeId`/`hostId`/`mediaId` are JSON
+    **numbers**. Times read back as `+00:00` with **millisecond** precision (`.123456Z` → `.123`);
+    Baseplate normalises both sides to UTC whole seconds via `provider.Normalizer`. An unset venue
+    reads back as `placeId: 0` (not the root place, despite the spec). Errors are RFC 7807
+    ProblemDetails with a string `code` (`InvalidStartOrEndTime`, `InvalidThumbnails`, ...).
+  - **The single-event GET always returns `"thumbnails": []`** (even with `?fields=thumbnails`); only
+    the universe LIST returns them, so `GameEventClient.Get` does a GET + a list lookup by id.
+  - Thumbnail `rank` is **0-based and contiguous** (rank 1 alone or 5 → `InvalidThumbnails`); `[]`
+    clears them. Any image asset id works (an Image uploaded by the key's user was accepted).
+  - **Categories are unusable:** every payload (each enum value, rank 0 or 1, even `[]` on PATCH)
+    returns 400 `InvalidCategories`, and a **create carrying categories still creates the event**
+    before returning 400 (orphan). Not exposed in v1. Recurrence is also not exposed (no effect).
+  - Validation: start must be in the future on create, and any *changed* start must be in the
+    future (`InvalidStartOrEndTime`); end must be **>= start + 15 min**; `visibility` is lowercase
+    `public`/`private` (`moderated` → `InvalidEventVisibilityTransition`); a bad `placeId` →
+    "The value of PlaceId is invalid". `description: ""` clears it, but **`tagline: ""` is ignored**
+    (a set tagline can't be cleared).
+  - Started (active) events can be edited, including re-sending the unchanged past start. **Ended**
+    events stay readable, editable (title, even extending the end into the future) and deletable.
+    The default LIST hides ended events (`endsAfter` defaults to now).
+  - Scopes `universe.event:read`/`universe.event:write`; without them the gateway returns
+    `403 {"errors":[{"code":0,"message":"Scope not authorized."}]}` on every call, reads included.
+  - **Reads flap after a write (verified live):** for a few seconds after a PATCH, GETs alternate
+    between the old and new values, so `Create`/`Update` wait for 3 consecutive matching reads
+    (bounded, ~10s) before returning; otherwise a plan straight after apply shows phantom drift.
 - Analytics alerts (`/analytics-alert-control-plane/v1/resource/Universe/id/{universeId}/alerts`,
   base `https://apis.roblox.com`, **EXPERIMENTAL**). JSON CRUD: POST create (201 + full alert),
   `GET` list (a **bare JSON array**, no pagination per spec; max 20 alerts per universe; `?ids=`
