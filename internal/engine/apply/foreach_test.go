@@ -279,4 +279,3 @@ resource "mock_child" "c" {
 		t.Fatalf("converged apply bumped the serial %d -> %d", before, e.s.Serial)
 	}
 }
-

@@ -348,4 +348,3 @@ func TestShowLooksUpSensitiveAttrsOncePerType(t *testing.T) {
 		t.Fatalf("Resources() called %d times for 2 types and 5 resources, want 2", cp.calls)
 	}
 }
-

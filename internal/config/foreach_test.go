@@ -520,4 +520,3 @@ resource "mock_ref" "r" {
 }
 `, `attribute "target" references another resource in an unsupported way`)
 }
-

@@ -178,4 +178,3 @@ func TestResolveImportsUndeclaredTargetMessages(t *testing.T) {
 		}
 	}
 }
-
