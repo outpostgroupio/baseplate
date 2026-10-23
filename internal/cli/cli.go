@@ -218,7 +218,7 @@ func run(args []string, s streams) int {
 
 	planCmd := &cobra.Command{Use: "plan", RunE: func(cmd *cobra.Command, _ []string) error {
 		cmdName = cmd.Name()
-		tgt, err := parseTarget(target)
+		tgt, err := parseTarget("--target", target)
 		if err != nil {
 			return err
 		}
@@ -332,7 +332,7 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 	if destroy {
 		verb = "destroy"
 	}
-	tgt, err := parseTarget(target)
+	tgt, err := parseTarget("--target", target)
 	if err != nil {
 		return err
 	}
@@ -456,15 +456,16 @@ func (t *targetAddr) matches(typ, name, key string) bool {
 	return !t.hasKey || key == t.key
 }
 
-// parseTarget parses --target. An empty flag means no target (nil). A
+// parseTarget parses an address filter (--target, or show's positional
+// address); label prefixes errors. An empty string means no filter (nil). A
 // malformed address is an error rather than silently matching nothing.
-func parseTarget(s string) (*targetAddr, error) {
+func parseTarget(label, s string) (*targetAddr, error) {
 	if s == "" {
 		return nil, nil
 	}
 	typ, name, key, hasKey, err := addr.Parse(s)
 	if err != nil {
-		return nil, fmt.Errorf("--target: %w", err)
+		return nil, fmt.Errorf("%s: %w", label, err)
 	}
 	return &targetAddr{typ: typ, name: name, key: key, hasKey: hasKey}, nil
 }

@@ -84,7 +84,7 @@ func TestFilterPlanByTargetDropsUntargetedDeletes(t *testing.T) {
 		{Address: "mock_thing.other", Type: "mock_thing", Name: "other", Action: provider.ActionDelete},
 		{Address: "mock_thing.target", Type: "mock_thing", Name: "target", Action: provider.ActionCreate},
 	}}
-	tgt, err := parseTarget("mock_thing.target")
+	tgt, err := parseTarget("--target", "mock_thing.target")
 	if err != nil {
 		t.Fatal(err)
 	}

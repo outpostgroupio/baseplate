@@ -54,7 +54,7 @@ func TestTargetInstanceVsResourceWide(t *testing.T) {
 		`mock_thing.set["z"]`: nil,
 	}
 	for target, want := range cases {
-		tgt, err := parseTarget(target)
+		tgt, err := parseTarget("--target", target)
 		if err != nil {
 			t.Fatalf("%s: %v", target, err)
 		}
@@ -305,3 +305,47 @@ resource "mock_thing" "set" {
 		t.Fatalf("plan --json warnings = %q", env.Result.Warnings)
 	}
 }
+
+func TestShowMalformedAddress(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	code := runOut([]string{"show", "mock_thing.set[a]", "--config", filepath.Join(dir, "none.bp.hcl"),
+		"--state", filepath.Join(dir, "s.bpstate")}, &out)
+	if code != 1 || !strings.Contains(out.String(), `show: invalid address "mock_thing.set[a]": key must be a quoted string`) {
+		t.Fatalf("exit %d, output %q", code, out.String())
+	}
+}
+
+// countingProvider counts Resources() calls, to check show resolves each
+// resource type's sensitive attributes once rather than once per instance.
+type countingProvider struct {
+	provider.Provider
+	calls int
+}
+
+func (c *countingProvider) Resources() map[string]provider.Resource {
+	c.calls++
+	return c.Provider.Resources()
+}
+
+func TestShowLooksUpSensitiveAttrsOncePerType(t *testing.T) {
+	dir := t.TempDir()
+	st := filepath.Join(dir, "s.bpstate")
+	s := state.New()
+	for _, k := range []string{"a", "b", "c", "d"} {
+		s.Upsert(state.Resource{Type: "mock_thing", Name: "set", Key: k, ID: "mock_thing/" + k})
+	}
+	s.Upsert(state.Resource{Type: "mock_secret", Name: "api", ID: "mock_secret/1"})
+	if err := backend.NewLocal(st).Put(s); err != nil {
+		t.Fatal(err)
+	}
+	cp := &countingProvider{Provider: mock.New()}
+	var out bytes.Buffer
+	if err := showRun(cp, filepath.Join(dir, "none.bp.hcl"), st, "", output.JSON, applyStreams("", false, &out)); err != nil {
+		t.Fatal(err)
+	}
+	if cp.calls != 2 {
+		t.Fatalf("Resources() called %d times for 2 types and 5 resources, want 2", cp.calls)
+	}
+}
+

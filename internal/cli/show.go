@@ -9,7 +9,6 @@ import (
 	"github.com/zclconf/go-cty/cty"
 	ctyjson "github.com/zclconf/go-cty/cty/json"
 
-	"github.com/outpostgroupio/baseplate/internal/addr"
 	"github.com/outpostgroupio/baseplate/internal/cli/output"
 	"github.com/outpostgroupio/baseplate/internal/provider"
 	"github.com/outpostgroupio/baseplate/internal/provider/roblox"
@@ -37,13 +36,9 @@ type showResult struct {
 // backend without taking the lock, makes no provider calls and needs no API
 // key; the config is only consulted for its backend block.
 func showRun(p provider.Provider, cfgPath, statePath, address string, format output.Format, s streams) error {
-	var tgt *targetAddr
-	if address != "" {
-		typ, name, key, hasKey, err := addr.Parse(address)
-		if err != nil {
-			return fmt.Errorf("show: %w", err)
-		}
-		tgt = &targetAddr{typ: typ, name: name, key: key, hasKey: hasKey}
+	tgt, err := parseTarget("show", address)
+	if err != nil {
+		return err
 	}
 	b, _, err := openBackend(cfgPath, statePath)
 	if err != nil {
@@ -54,11 +49,17 @@ func showRun(p provider.Provider, cfgPath, statePath, address string, format out
 		return err
 	}
 	res := showResult{Serial: st.Serial, Lineage: st.Lineage, Resources: []showResource{}}
+	sensitive := map[string]map[string]bool{} // per resource type
 	for _, r := range st.Resources {
 		if tgt != nil && !tgt.matches(r.Type, r.Name, r.Key) {
 			continue
 		}
-		res.Resources = append(res.Resources, toShowResource(r, sensitiveFor(p, r.Type)))
+		sens, ok := sensitive[r.Type]
+		if !ok {
+			sens = sensitiveFor(p, r.Type)
+			sensitive[r.Type] = sens
+		}
+		res.Resources = append(res.Resources, toShowResource(r, sens))
 	}
 	sort.Slice(res.Resources, func(i, j int) bool { return res.Resources[i].Address < res.Resources[j].Address })
 	if tgt != nil && len(res.Resources) == 0 {
