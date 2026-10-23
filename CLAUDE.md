@@ -101,6 +101,19 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
   **Pagination gotcha (verified live):** the list endpoint **always** returns a non-empty
   `nextPageCursor` — even on the empty final page — so paginate until an **empty `secrets` page**,
   not an empty cursor (a cursor-only loop never terminates and burns the 120-req/min limit → 429).
+- Analytics alerts (`/analytics-alert-control-plane/v1/resource/Universe/id/{universeId}/alerts`,
+  base `https://apis.roblox.com`, **EXPERIMENTAL**). JSON CRUD: POST create (201 + full alert),
+  `GET` list (a **bare JSON array**, no pagination per spec; max 20 alerts per universe; `?ids=`
+  repeated-param filter), `PATCH .../{alertId}` (partial: omitted fields are kept; within
+  `condition` sub-fields can be omitted; `filter`/`breakdown` replace wholesale; to remove webhooks
+  send `webhookReceiverConfig: {receivers: []}`, because `null` means "unchanged"), and a real
+  `DELETE` (204). No single-GET. `alertId` is documented as a string-encoded int64. The create body
+  has **no `configState`**, so disable is a follow-up PATCH. `breakdown` allows at most one entry
+  with one dimension, and that dimension must also be in `filter`. Service errors are
+  `{"errorCode","message"}`. Scopes are **`universe.analytics.alert:read`/`:write`**; without them
+  the gateway returns `403 {"errors":[{"code":0,"message":"Scope not authorized."}]}`. That
+  403 is the only part verified live (2026-10-23): the test key lacked the scopes, so the shapes
+  above come from the spec and the creator-docs guide, not from live calls.
 
 ## Workflow used here
 Superpowers: brainstorm → spec → bite-sized TDD plan → build (subagent-per-task, or inline for

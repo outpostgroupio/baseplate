@@ -53,6 +53,7 @@ $ baseplate destroy   # tear down what's managed
 | `roblox_developer_product` | Developer products (name, price, description, icon, on-sale). |
 | `roblox_game_pass` | Game passes (name, price, description, icon, on-sale). |
 | `roblox_universe_secret` | Open Cloud secrets — full CRUD incl. real delete; values sealed client-side, never stored. |
+| `roblox_analytics_alert` | Analytics alerts on experience metrics (crash rate, CCU, …): threshold/period-over-period conditions, dimension filters, Dashboard-created webhooks. EXPERIMENTAL Roblox API; not yet live-verified. |
 
 Plus declarative `import { to = <address>  id = "<id>" }` blocks to adopt existing resources during a
 normal `apply`.

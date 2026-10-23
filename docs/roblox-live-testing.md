@@ -49,6 +49,14 @@ which reuses the same `BASEPLATE_TEST_UNIVERSE` and creates/rotates/destroys a
 throwaway `bp_test_<unixtime>` secret — a real hard delete, verified by listing
 secrets after destroy. Run it in isolation with `-run LiveSecret`.
 
+`TestLiveAnalyticsAlertLifecycle` (`roblox_analytics_alert`, run alone with
+`-run LiveAnalyticsAlert`) needs the **`universe.analytics.alert:read`** +
+**`universe.analytics.alert:write`** scopes. It creates a never-firing
+`Baseplate live test <unixtime>` alert, converges, updates and disables it, converges,
+destroys it and verifies it's gone (a `t.Cleanup` deletes it if a step fails). If a
+preflight list returns 401/403 (missing scopes, or an experience that isn't
+alert-eligible) the test **skips** rather than fails.
+
 ## Using the CLI directly
 With `ROBLOX_API_KEY` exported, the `baseplate` CLI uses the real provider
 automatically (otherwise it uses the in-memory mock). See
