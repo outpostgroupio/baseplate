@@ -34,10 +34,12 @@ func (t refTarget) addresses(decl *declaredResource) []string {
 	return out
 }
 
-// errDynamicKey marks an index expression whose key can't be evaluated in the
-// current context (e.g. a for-expression variable). Dependency collection falls
-// back to "every instance" for it; anywhere else it is a real error.
-var errDynamicKey = errors.New("dynamic key")
+// dynamicKeyError marks an index expression whose key can't be evaluated in
+// the current context (e.g. a for-expression variable). Dependency collection
+// falls back to "every instance" for it; anywhere else it is a real error.
+type dynamicKeyError struct{ msg string }
+
+func (e *dynamicKeyError) Error() string { return e.msg }
 
 // bodyRefs inspects a resource body in one instance's eval context and returns:
 //   - refAttrs: attr name -> Ref, for attributes whose whole value is a single
@@ -113,7 +115,8 @@ func (l *loader) collectDeps(syn *hclsyntax.Body, ctx *hcl.EvalContext, inst str
 				}
 				handled[st] = true
 				t, ok, err = l.resolveRef(e, ctx)
-				if errors.Is(err, errDynamicKey) {
+				var dk *dynamicKeyError
+				if errors.As(err, &dk) {
 					t, ok, err = refTarget{typ: st.Traversal.RootName(), name: st.Traversal[1].(hcl.TraverseAttr).Name, all: true}, true, nil
 				}
 			case *hclsyntax.ScopeTraversalExpr:
@@ -244,11 +247,11 @@ func (l *loader) indexed(t refTarget, decl *declaredResource, key string, rest h
 }
 
 // evalKey evaluates a dynamic index expression; the result must be a known,
-// non-empty string. A key that can't be evaluated here wraps errDynamicKey.
+// non-empty string. A key that can't be evaluated here is a *dynamicKeyError.
 func (l *loader) evalKey(expr hcl.Expression, ctx *hcl.EvalContext, what string) (string, error) {
 	v, d := expr.Value(ctx)
 	if d.HasErrors() {
-		return "", fmt.Errorf("%s: evaluating instance key: %s: %w", what, d.Error(), errDynamicKey)
+		return "", &dynamicKeyError{msg: fmt.Sprintf("%s: evaluating instance key: %s", what, d.Error())}
 	}
 	if v.IsNull() || !v.IsKnown() || v.Type() != cty.String {
 		return "", fmt.Errorf("%s: instance key must be a known string", what)
