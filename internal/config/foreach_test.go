@@ -434,3 +434,90 @@ resource "mock_thing" "solo" { name = "x" }
 		t.Fatalf("resources = %v", addrs(cfg.Resources))
 	}
 }
+
+// A dynamic index on a 3+-part traversal (an attribute of a resource, indexed)
+// must still record the dependency on that resource. The conditional keeps the
+// attribute known, so nothing else would catch a dropped edge.
+func TestDepRecordedForIndexedAttributeOfResource(t *testing.T) {
+	res, _ := mustLoad(t, `
+locals { i = "k" }
+resource "mock_thing" "a" { name = "root" }
+resource "mock_thing" "set" {
+  for_each = toset(["s"])
+  name     = each.key
+}
+resource "mock_thing" "b" {
+  name = true ? "x" : format("%s", mock_thing.a.tags[local.i])
+}
+resource "mock_thing" "c" {
+  name = true ? "x" : format("%s", mock_thing.set["s"].tags[local.i])
+}
+`)
+	m := byAddr(res)
+	if got := m["mock_thing.b"].DependsOn; !reflect.DeepEqual(got, []string{"mock_thing.a"}) {
+		t.Fatalf("mock_thing.b deps = %v, want [mock_thing.a]", got)
+	}
+	if got := m["mock_thing.c"].DependsOn; !reflect.DeepEqual(got, []string{`mock_thing.set["s"]`}) {
+		t.Fatalf(`mock_thing.c deps = %v, want [mock_thing.set["s"]]`, got)
+	}
+	if got := m["mock_thing.b"].Attributes["name"].AsString(); got != "x" {
+		t.Fatalf("name = %q", got)
+	}
+}
+
+func TestIndexedAttributeOfKeyedResourceWithoutInstanceIsError(t *testing.T) {
+	wantErr(t, `
+locals { i = "k" }
+resource "mock_thing" "set" {
+  for_each = toset(["s"])
+  name     = each.key
+}
+resource "mock_thing" "b" {
+  name = true ? "x" : format("%s", mock_thing.set.tags[local.i])
+}
+`, "mock_thing.set has for_each; reference a specific instance")
+}
+
+// A reference followed by more than one attribute step (an index after the
+// instance, an index or attribute after the attribute) is not a plain
+// type.name[...].attr reference. It must be rejected, not silently treated as
+// dependency-only (which dropped the attribute) or truncated to its first attr.
+func TestPartialReferencesAreUnsupported(t *testing.T) {
+	head := `
+resource "mock_thing" "a" { name = "root" }
+resource "mock_thing" "set" {
+  for_each = toset(["k"])
+  name     = each.key
+}
+`
+	for _, target := range []string{
+		`mock_thing.set["k"]["sub"]`,
+		`mock_thing.set["k"][0]`,
+		`mock_thing.set["k"].id.x`,
+		`mock_thing.set["k"].id[0]`,
+		`mock_thing.a.id[0]`,
+		`mock_thing.a.id.x`,
+	} {
+		wantErr(t, head+`
+resource "mock_ref" "r" {
+  name   = "r"
+  target = `+target+`
+}
+`, `attribute "target" references another resource in an unsupported way`)
+	}
+	wantErr(t, head+`
+resource "mock_ref" "r" {
+  for_each = toset(["k"])
+  name     = "r"
+  target   = mock_thing.set[each.key][0]
+}
+`, `attribute "target" references another resource in an unsupported way`)
+	wantErr(t, head+`
+resource "mock_ref" "r" {
+  for_each = toset(["k"])
+  name     = "r"
+  target   = mock_thing.set[each.key].id.x
+}
+`, `attribute "target" references another resource in an unsupported way`)
+}
+

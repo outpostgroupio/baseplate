@@ -20,6 +20,12 @@ type refTarget struct {
 	key       string // instance key; "" for a singular resource or when all is set
 	all       bool   // bare reference to a for_each resource: every instance
 	attr      string // referenced attribute; "" for a dependency-only reference
+	// partial is set when the expression goes on past type.name[...].attr (or
+	// past the instance with a non-attribute step), e.g. x["k"]["sub"] or
+	// x.a.tags[0]. It still depends on the resource, but isn't a whole-value
+	// reference: the attribute stays literal (an unknown), so Load rejects it
+	// as an unsupported reference form instead of silently mangling it.
+	partial bool
 }
 
 // addresses returns the instance address(es) the reference depends on.
@@ -69,7 +75,7 @@ func (l *loader) bodyRefs(body hcl.Body, ctx *hcl.EvalContext, inst string) (map
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("%s: %s: attribute %q: %w", l.path, inst, name, err)
 		}
-		if !ok {
+		if !ok || t.partial {
 			continue
 		}
 		refNames[name] = true
@@ -109,8 +115,11 @@ func (l *loader) collectDeps(syn *hclsyntax.Body, ctx *hcl.EvalContext, inst str
 			var err error
 			switch e := n.(type) {
 			case *hclsyntax.IndexExpr:
+				// Only an index applied directly to type.name selects an
+				// instance. Anything longer (x.a.tags[i]) is left to the
+				// ScopeTraversalExpr case below, which records the dependency.
 				st, isTr := e.Collection.(*hclsyntax.ScopeTraversalExpr)
-				if !isTr || l.declared(st.Traversal) == nil {
+				if !isTr || len(st.Traversal) != 2 || l.declared(st.Traversal) == nil {
 					return nil
 				}
 				handled[st] = true
@@ -193,8 +202,7 @@ func (l *loader) resolveRef(expr hclsyntax.Expression, ctx *hcl.EvalContext) (re
 			}
 			return refTarget{}, false, fmt.Errorf(`%s.%s has for_each; reference a specific instance, e.g. %s.%s["<key>"].%s`, t.typ, t.name, t.typ, t.name, attr)
 		}
-		t.attr = attr
-		return t, true, nil
+		return withAttr(t, rest), true, nil
 	case *hclsyntax.IndexExpr:
 		st, ok := e.Collection.(*hclsyntax.ScopeTraversalExpr)
 		if !ok || len(st.Traversal) != 2 {
@@ -219,10 +227,7 @@ func (l *loader) resolveRef(expr hclsyntax.Expression, ctx *hcl.EvalContext) (re
 		if err != nil || !ok {
 			return t, ok, err
 		}
-		if a, isAttr := e.Traversal[0].(hcl.TraverseAttr); isAttr {
-			t.attr = a.Name
-		}
-		return t, true, nil
+		return withAttr(t, e.Traversal), true, nil
 	}
 	return refTarget{}, false, nil
 }
@@ -238,12 +243,21 @@ func (l *loader) indexed(t refTarget, decl *declaredResource, key string, rest h
 		return refTarget{}, false, fmt.Errorf("no instance %s of %s (declared: %s)", addr.Quote(key), base, keyPreview(decl.keys))
 	}
 	t.key = key
-	if len(rest) > 0 {
-		if a, ok := rest[0].(hcl.TraverseAttr); ok {
-			t.attr = a.Name
-		}
+	return withAttr(t, rest), true, nil
+}
+
+// withAttr completes t from the traversal steps after the resource (or
+// instance) address: none is dependency-only, a single attribute step is a
+// plain reference, and anything else is a partial reference.
+func withAttr(t refTarget, rest hcl.Traversal) refTarget {
+	if len(rest) == 0 {
+		return t
 	}
-	return t, true, nil
+	if a, ok := rest[0].(hcl.TraverseAttr); ok {
+		t.attr = a.Name
+	}
+	t.partial = len(rest) > 1 || t.attr == ""
+	return t
 }
 
 // evalKey evaluates a dynamic index expression; the result must be a known,
