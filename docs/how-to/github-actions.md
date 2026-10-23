@@ -47,6 +47,40 @@ The API key needs the `universe:write` scope for the restart, in addition to the
 restart by hand with `baseplate restart-servers`. You can also restart on demand from a
 `workflow_dispatch` job with `command: restart-servers` and `args: --universe <id> --bleed-off 10m --yes`.
 
+## Protecting production
+
+`apply --auto-approve` on merge deletes whatever the merged config no longer declares. A bad merge
+can delete production that way, and so can a `destroy` run in the wrong directory or a `for_each`
+key removed by mistake. Mark the resources you can't afford to lose with
+[`prevent_destroy`](../config-reference.md#lifecycle):
+
+```hcl
+resource "roblox_universe_secret" "prod_webhook" {
+  universe_id = "1234567890"
+  name        = "webhook"
+  value       = env("PROD_WEBHOOK")
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+Any plan that would delete it then fails with `Instance cannot be destroyed: ...`, both in the plan
+comment on the PR and in the apply job, and nothing is changed. To retire the resource on purpose,
+first merge a change that removes the `lifecycle` block (or sets `prevent_destroy = false`), then
+merge the change that removes the resource.
+
+Things to know:
+
+- The protection is read from the config only, as in Terraform. Deleting the whole `resource` block
+  in one change removes the protection with it, so that change **does** delete the resource. Review
+  PRs that delete protected blocks, and read the plan comment.
+- It guards Baseplate's plans only. Nothing stops someone deleting the resource in Creator Hub.
+- Some resources are never really deleted anyway (`roblox_asset`, `roblox_place` and others are only
+  unmanaged; see [`destroy`](../cli-reference.md#destroy)). `prevent_destroy` still blocks their
+  removal from state.
+
 ## State in CI (important)
 
 The default local state file does not persist between CI runs. For real team CI, configure a remote
