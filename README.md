@@ -143,7 +143,7 @@ against a live universe. Current status, the remaining roadmap, and tracked defe
 
 - [Getting started](docs/getting-started.md) — install → API key → first config → apply → destroy.
 - [CLI reference](docs/cli-reference.md) — commands, flags, exit codes.
-- [Config reference](docs/config-reference.md) — blocks, `for_each`, references, `locals`, functions.
+- [Config reference](docs/config-reference.md) — blocks, `for_each`, `lifecycle`, references, `locals`, functions.
 - [Resource reference](docs/resource-reference.md) — every `roblox_*` resource and its attributes.
 - **How-to guides:**
   - [Import existing resources](docs/how-to/importing-existing-resources.md)

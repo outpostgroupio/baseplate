@@ -155,6 +155,13 @@ Apply complete. 1 change(s).
 On a terminal it prompts before mutating; pass `--auto-approve` (or `--yes`) to skip the prompt in
 scripts. CI (no TTY) skips it automatically.
 
+`destroy` reads the config file (when it exists) for
+[`lifecycle { prevent_destroy = true }`](config-reference.md#lifecycle). If any resource in the plan
+has it set, `destroy` fails with `Instance cannot be destroyed: ...` before deleting anything. Use
+`--target` to destroy other resources, or remove the setting first. Because the setting is read from
+config, an invalid config file fails `destroy`, and a missing config file means nothing is
+protected.
+
 ### `import <address> <id>`
 
 Adopt an existing resource into state without recreating it, so a subsequent `plan`/`apply`

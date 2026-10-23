@@ -89,9 +89,13 @@ var rootSchema = &hcl.BodySchema{
 	},
 }
 
-// forEachSchema pulls the for_each meta-argument out of a resource body before
-// hcldec decoding, so no resource has to declare it in its DecodeSpec.
-var forEachSchema = &hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "for_each"}}}
+// metaSchema pulls the resource meta-arguments (the for_each attribute and the
+// lifecycle block) out of a resource body before hcldec decoding, so no
+// resource has to declare them in its DecodeSpec.
+var metaSchema = &hcl.BodySchema{
+	Attributes: []hcl.AttributeSchema{{Name: "for_each"}},
+	Blocks:     []hcl.BlockHeaderSchema{{Type: "lifecycle"}},
+}
 
 // declaredResource records what Load knows about one resource block before
 // decoding any bodies: whether it has for_each and, if so, its instance keys.
@@ -101,7 +105,9 @@ type declaredResource struct {
 	keys   []string // sorted
 	keySet map[string]bool
 	values map[string]cty.Value // each.value per key
-	body   hcl.Body             // the body with for_each stripped
+	body   hcl.Body             // the body with for_each and lifecycle stripped
+	// preventDestroy is lifecycle.prevent_destroy; it applies to every instance.
+	preventDestroy bool
 }
 
 // loader carries the per-Load state shared by the block handlers.
@@ -118,6 +124,10 @@ type Config struct {
 	// EmptyForEach lists the for_each resources (type.name) that declare zero
 	// instances, so plan can warn that every instance in state is destroyed.
 	EmptyForEach []string
+	// PreventDestroy lists the resource blocks (type.name) that set
+	// lifecycle.prevent_destroy = true, sorted. It includes for_each blocks
+	// with zero instances, which still protect the instances left in state.
+	PreventDestroy []string
 }
 
 // Load is LoadConfig for callers that only need the provider config, the
@@ -175,7 +185,7 @@ func LoadConfig(path string, p provider.Provider) (*Config, error) {
 	vars["path"] = pathObject(path)
 	ctx := &hcl.EvalContext{Variables: vars, Functions: functions()}
 
-	var empty []string
+	var empty, protected []string
 	// Expand for_each on every resource block. Keys must be known now, before
 	// any body is decoded, because references are validated against them.
 	for _, b := range content.Blocks {
@@ -183,12 +193,20 @@ func LoadConfig(path string, p provider.Provider) (*Config, error) {
 			continue
 		}
 		typ, name := b.Labels[0], b.Labels[1]
-		fe, remain, d := b.Body.PartialContent(forEachSchema)
+		fe, remain, d := b.Body.PartialContent(metaSchema)
 		if d.HasErrors() {
 			return nil, d
 		}
 		decl := l.resources[typ][name]
 		decl.body = remain
+		lc, err := l.decodeLifecycle(fe.Blocks, typ+"."+name)
+		if err != nil {
+			return nil, err
+		}
+		decl.preventDestroy = lc.preventDestroy
+		if lc.preventDestroy {
+			protected = append(protected, typ+"."+name)
+		}
 		if a, ok := fe.Attributes["for_each"]; ok {
 			keys, values, err := l.evalForEach(a, ctx, typ+"."+name)
 			if err != nil {
@@ -249,6 +267,7 @@ func LoadConfig(path string, p provider.Provider) (*Config, error) {
 				if err != nil {
 					return nil, err
 				}
+				dr.PreventDestroy = decl.preventDestroy
 				out = append(out, dr)
 			}
 		case "import":
@@ -266,12 +285,14 @@ func LoadConfig(path string, p provider.Provider) (*Config, error) {
 		}
 	}
 	sort.Strings(empty)
-	return &Config{Provider: pc, Resources: out, Imports: imports, EmptyForEach: empty}, nil
+	sort.Strings(protected)
+	return &Config{Provider: pc, Resources: out, Imports: imports, EmptyForEach: empty, PreventDestroy: protected}, nil
 }
 
 // decodeInstance decodes one resource instance (the whole resource, for a
 // block without for_each) in its eval context. body is the original block
-// body (for reference analysis); remain has for_each stripped (for decoding).
+// body (for reference analysis); remain has the for_each and lifecycle
+// meta-arguments stripped (for decoding).
 func (l *loader) decodeInstance(body, remain hcl.Body, r provider.Resource, typ, name, key string, ctx *hcl.EvalContext) (plan.DesiredResource, error) {
 	inst := addr.Format(typ, name, key)
 	// Attributes whose value is a reference to another resource carry an

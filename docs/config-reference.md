@@ -1,7 +1,7 @@
 # Config reference
 
 A Baseplate config is an HCL file (default `baseplate.bp.hcl`). This page covers the language:
-blocks, `for_each`, references, `locals` and functions. The attributes of each `roblox_*` resource
+blocks, `for_each`, `lifecycle`, references, `locals` and functions. The attributes of each `roblox_*` resource
 are in the [resource reference](resource-reference.md).
 
 ## Blocks
@@ -68,6 +68,47 @@ Every expanded `to` must be a declared instance. Two imports can't target the sa
 the same id, and an id that another address in state already manages is refused.
 `id` may be a string or a number. `plan --generate-config` doesn't support `for_each` resources;
 declare those resource blocks by hand.
+
+## `lifecycle`
+
+A `lifecycle` block inside a `resource` block changes how Baseplate plans that resource. It works
+like Terraform's, but only `prevent_destroy` is supported so far:
+
+```hcl
+resource "roblox_experience" "prod" {
+  universe_id = "1234567890"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+With `prevent_destroy = true`, any plan that would delete the resource fails instead:
+
+```text
+Error: Instance cannot be destroyed: roblox_experience.prod has lifecycle.prevent_destroy set, but the plan calls for this resource to be destroyed. To avoid this error and continue with the plan, either disable lifecycle.prevent_destroy or reduce the scope of the plan using the --target flag.
+```
+
+- It covers every path that deletes: `baseplate destroy`, and `plan`/`apply` when a `for_each` key
+  is removed (or `for_each` becomes empty) while the block itself is still in the config.
+  `plan`, `apply` and `destroy` all fail before anything changes, with exit code `1`.
+- With `for_each`, the setting applies to every instance.
+- The value must be a literal `true` or `false`. References, `local.*`, `each.*` and function calls
+  are rejected, because the setting has to be known when the config loads.
+- `--target` narrows the check like it narrows the plan: if the protected resource isn't targeted,
+  nothing blocks.
+- **The protection lives only in the config.** It isn't written to state. Removing the
+  `lifecycle` block, setting `prevent_destroy = false`, or deleting the whole `resource` block
+  removes the protection, and the next plan deletes the resource as usual. This matches Terraform.
+  A `destroy` run without a config file has nothing to read the setting from, so nothing is
+  protected.
+- It only guards Baseplate's own plans. It doesn't stop anyone deleting the resource on Roblox.
+- Terraform's other lifecycle arguments (`ignore_changes`, `create_before_destroy`,
+  `replace_triggered_by`) and the `precondition`/`postcondition` blocks aren't supported yet and
+  are rejected at load time, as is a second `lifecycle` block.
+
+See [protecting production](how-to/github-actions.md#protecting-production).
 
 ## References
 
