@@ -86,13 +86,15 @@ Manages a universe's writable configuration. Adopts an existing universe (create
 
 | Attribute | Type | Kind | Description |
 |---|---|---|---|
+| `console_enabled` | bool | optional, diffable | Playable on console. |
 | `desktop_enabled` | bool | optional, diffable | Playable on desktop. |
 | `mobile_enabled` | bool | optional, diffable | Playable on mobile. |
 | `tablet_enabled` | bool | optional, diffable | Playable on tablet. |
 | `universe_id` | string | required, diffable | The universe to manage. Its `id` output equals this. |
 | `voice_chat_enabled` | bool | optional, diffable | Enable voice chat. |
+| `vr_enabled` | bool | optional, diffable | Playable in VR. |
 
-`displayName`/`description`/`visibility`/`ageRating` are read-only on the Open Cloud v2 API (they're set via the root place), so they are not manageable here. `destroy` unmanages the universe (it is never deleted).
+`displayName`/`description`/`visibility`/`ageRating` are read-only on the Open Cloud v2 API. The display name and description follow the root place's, so manage them with `roblox_place_config` on the root place. `destroy` unmanages the universe (it is never deleted).
 
 Requires the `universe:write` [scope](how-to/api-key-scopes.md).
 
@@ -135,6 +137,26 @@ Publishes a place file (`.rbxl`/`.rbxlx`) to an existing place and re-publishes 
 Place content isn't remotely readable, so change detection is by file content hash. `destroy` is a no-op (a place can't be unpublished).
 
 Requires the `universe-places:write` [scope](how-to/api-key-scopes.md).
+
+---
+
+## `roblox_place_config`
+
+Manages an existing place's configuration (name, description, server size). Adopts the place; it does not create places.
+
+| Attribute | Type | Kind | Description |
+|---|---|---|---|
+| `description` | string | optional, diffable | The place's description. On the root place this is also the experience's description. |
+| `display_name` | string | optional, diffable | The place's name. On the root place this is also the experience's name. |
+| `place_id` | string | required, create-only | The place to configure. |
+| `server_size` | number | optional, diffable | The maximum number of players in a single server. |
+| `universe_id` | string | required, create-only | The universe the place belongs to. |
+
+Only declared attributes are managed; omitted ones are left as they are in Roblox. The experience's display name and description are read-only on the universe API, so set them here on the root place. `destroy` unmanages the place (nothing is reverted or deleted). Roblox rejects changes (409) while the place is open in Team Create. Independent of `roblox_place`, which publishes the place file.
+
+Requires the `universe.place:read`, `universe.place:write` [scopes](how-to/api-key-scopes.md).
+
+Example: [`examples/baseplate.bp.hcl`](../examples/baseplate.bp.hcl).
 
 ---
 

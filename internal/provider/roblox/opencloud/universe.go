@@ -14,6 +14,8 @@ type Universe struct {
 	DesktopEnabled   *bool
 	MobileEnabled    *bool
 	TabletEnabled    *bool
+	ConsoleEnabled   *bool
+	VREnabled        *bool
 }
 
 type UniverseClient interface {
@@ -31,6 +33,8 @@ type universeWire struct {
 	DesktopEnabled   *bool  `json:"desktopEnabled,omitempty"`
 	MobileEnabled    *bool  `json:"mobileEnabled,omitempty"`
 	TabletEnabled    *bool  `json:"tabletEnabled,omitempty"`
+	ConsoleEnabled   *bool  `json:"consoleEnabled,omitempty"`
+	VREnabled        *bool  `json:"vrEnabled,omitempty"`
 }
 
 func (w universeWire) toUniverse(fallbackID string) Universe {
@@ -44,6 +48,8 @@ func (w universeWire) toUniverse(fallbackID string) Universe {
 		DesktopEnabled:   w.DesktopEnabled,
 		MobileEnabled:    w.MobileEnabled,
 		TabletEnabled:    w.TabletEnabled,
+		ConsoleEnabled:   w.ConsoleEnabled,
+		VREnabled:        w.VREnabled,
 	}
 }
 
@@ -61,6 +67,8 @@ func (uc *universeClient) Update(ctx context.Context, u Universe, mask []string)
 		DesktopEnabled:   u.DesktopEnabled,
 		MobileEnabled:    u.MobileEnabled,
 		TabletEnabled:    u.TabletEnabled,
+		ConsoleEnabled:   u.ConsoleEnabled,
+		VREnabled:        u.VREnabled,
 	}
 	path := "/cloud/v2/universes/" + u.ID + "?updateMask=" + strings.Join(mask, ",")
 	var w universeWire
