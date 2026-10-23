@@ -2,7 +2,7 @@ name: "Baseplate"
 description: "Run Baseplate (plan/apply/destroy/validate) for Roblox infrastructure-as-code."
 inputs:
   command:
-    description: "Baseplate subcommand: plan, apply, destroy, or validate."
+    description: "Baseplate subcommand: plan, apply, destroy, validate, or restart-servers."
     required: false
     default: "plan"
   args:

@@ -26,6 +26,27 @@ visible to anyone who can see the PR.
 Copy `examples/github-actions/apply-on-merge.yml`. On push to `main` it runs
 `baseplate apply --auto-approve` (non-interactive). A `concurrency` group serializes applies.
 
+### Restarting servers after a publish
+
+If the config manages `roblox_place` files, add `--restart-servers` so a merge that publishes a new
+place version also moves players onto it. The restart only happens when the apply **succeeds** and
+publishes at least one `roblox_place`; other merges leave servers alone. `--restart-bleed-off` gives
+players time to finish before old servers shut down (whole minutes, up to `60m`):
+
+```yaml
+      - uses: outpostgroupio/baseplate@v0.1.0 # pin to a released tag or commit SHA
+        with:
+          command: apply
+          args: --config baseplate.bp.hcl --auto-approve --restart-servers --restart-bleed-off 10m
+          api-key: ${{ secrets.ROBLOX_API_KEY }}
+```
+
+The API key needs the `universe:write` scope for the restart, in addition to the place's
+`universe-places:write`. If the apply succeeds but the restart request fails, the job fails with
+`apply succeeded, but restarting servers failed: …`. The new version is already live, so re-run the
+restart by hand with `baseplate restart-servers`. You can also restart on demand from a
+`workflow_dispatch` job with `command: restart-servers` and `args: --universe <id> --bleed-off 10m --yes`.
+
 ## State in CI (important)
 
 The default local state file does not persist between CI runs. For real team CI, configure a remote
