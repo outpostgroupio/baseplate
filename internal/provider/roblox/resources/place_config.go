@@ -2,7 +2,9 @@ package resources
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 
 	"github.com/hashicorp/hcl/v2/hcldec"
@@ -39,7 +41,7 @@ func (p *placeConfig) Doc() provider.ResourceDoc {
 			"description":  "The place's description. On the root place this is also the experience's description.",
 			"server_size":  "The maximum number of players in a single server.",
 		},
-		Notes:       "Only declared attributes are managed; omitted ones are left as they are in Roblox. The experience's display name and description are read-only on the universe API, so set them here on the root place. `destroy` unmanages the place (nothing is reverted or deleted). Independent of `roblox_place`, which publishes the place file.",
+		Notes:       "Only declared attributes are managed; omitted ones are left as they are in Roblox. The experience's display name and description are read-only on the universe API, so set them here on the root place. `destroy` unmanages the place (nothing is reverted or deleted). Roblox rejects changes (409) while the place is open in Team Create. Independent of `roblox_place`, which publishes the place file.",
 		Scopes:      []string{"universe.place:read", "universe.place:write"},
 		ExampleFile: "examples/baseplate.bp.hcl",
 	}
@@ -103,6 +105,10 @@ func (p *placeConfig) apply(ctx context.Context, uid, pid string, desired provid
 	cfg, mask := placeConfigFromDesired(desired)
 	if len(mask) > 0 {
 		if _, err := p.pc.Update(ctx, uid, pid, cfg, mask); err != nil {
+			var apiErr *opencloud.APIError
+			if errors.As(err, &apiErr) && apiErr.Status == http.StatusConflict {
+				return nil, fmt.Errorf("roblox_place_config: place %s is open in an active Team Create session; close it and re-run apply: %w", pid, err)
+			}
 			return nil, err
 		}
 	}

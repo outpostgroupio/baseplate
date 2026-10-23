@@ -3,6 +3,7 @@ package resources
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/zclconf/go-cty/cty"
@@ -12,9 +13,10 @@ import (
 )
 
 type fakePlaceConfig struct {
-	store  map[string]opencloud.PlaceConfig
-	masks  [][]string
-	getErr error
+	store     map[string]opencloud.PlaceConfig
+	masks     [][]string
+	getErr    error
+	updateErr error
 }
 
 func (f *fakePlaceConfig) Get(_ context.Context, uid, pid string) (opencloud.PlaceConfig, error) {
@@ -26,6 +28,9 @@ func (f *fakePlaceConfig) Get(_ context.Context, uid, pid string) (opencloud.Pla
 
 func (f *fakePlaceConfig) Update(_ context.Context, uid, pid string, p opencloud.PlaceConfig, mask []string) (opencloud.PlaceConfig, error) {
 	f.masks = append(f.masks, mask)
+	if f.updateErr != nil {
+		return opencloud.PlaceConfig{}, f.updateErr
+	}
 	cur := f.store[uid+"/"+pid]
 	if p.DisplayName != nil {
 		cur.DisplayName = p.DisplayName
@@ -107,5 +112,13 @@ func TestPlaceConfigReadMapsNotFound(t *testing.T) {
 	r := PlaceConfig(&fakePlaceConfig{getErr: &opencloud.APIError{Status: 404}})
 	if _, err := r.Read(context.Background(), "1/2"); !errors.Is(err, provider.ErrNotFound) {
 		t.Fatalf("want provider.ErrNotFound, got %v", err)
+	}
+}
+
+func TestPlaceConfigTeamCreateConflictIsActionable(t *testing.T) {
+	f := &fakePlaceConfig{store: map[string]opencloud.PlaceConfig{}, updateErr: &opencloud.APIError{Status: 409}}
+	_, err := PlaceConfig(f).Update(context.Background(), "1/2", provider.Attributes{"server_size": cty.NumberIntVal(10)})
+	if err == nil || !strings.Contains(err.Error(), "Team Create") {
+		t.Fatalf("want a Team Create hint, got %v", err)
 	}
 }

@@ -152,7 +152,7 @@ Manages an existing place's configuration (name, description, server size). Adop
 | `server_size` | number | optional, diffable | The maximum number of players in a single server. |
 | `universe_id` | string | required, create-only | The universe the place belongs to. |
 
-Only declared attributes are managed; omitted ones are left as they are in Roblox. The experience's display name and description are read-only on the universe API, so set them here on the root place. `destroy` unmanages the place (nothing is reverted or deleted). Independent of `roblox_place`, which publishes the place file.
+Only declared attributes are managed; omitted ones are left as they are in Roblox. The experience's display name and description are read-only on the universe API, so set them here on the root place. `destroy` unmanages the place (nothing is reverted or deleted). Roblox rejects changes (409) while the place is open in Team Create. Independent of `roblox_place`, which publishes the place file.
 
 Requires the `universe.place:read`, `universe.place:write` [scopes](how-to/api-key-scopes.md).
 
