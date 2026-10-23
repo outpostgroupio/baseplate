@@ -3,9 +3,12 @@ package opencloud
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
+	"strings"
 )
 
 // Alert is the domain view of an analytics alert configuration
@@ -270,6 +273,7 @@ func (ac *alertClient) List(ctx context.Context, universeID string, ids ...strin
 	}
 	var ws []alertResponseWire
 	if _, err := ac.c.Do(ctx, http.MethodGet, path, nil, &ws); err != nil {
+		err = translateAlertErr(universeID, err)
 		return nil, err
 	}
 	out := make([]Alert, 0, len(ws))
@@ -282,6 +286,7 @@ func (ac *alertClient) List(ctx context.Context, universeID string, ids ...strin
 func (ac *alertClient) Create(ctx context.Context, universeID string, w AlertWrite) (Alert, error) {
 	var got alertResponseWire
 	if _, err := ac.c.Do(ctx, http.MethodPost, alertsBase(universeID), w.toWire(false), &got); err != nil {
+		err = translateAlertErr(universeID, err)
 		return Alert{}, err
 	}
 	return got.toDomain(), nil
@@ -291,6 +296,7 @@ func (ac *alertClient) Update(ctx context.Context, universeID, alertID string, w
 	var got alertResponseWire
 	path := alertsBase(universeID) + "/" + url.PathEscape(alertID)
 	if _, err := ac.c.Do(ctx, http.MethodPatch, path, w.toWire(true), &got); err != nil {
+		err = translateAlertErr(universeID, err)
 		return Alert{}, err
 	}
 	return got.toDomain(), nil
@@ -298,5 +304,49 @@ func (ac *alertClient) Update(ctx context.Context, universeID, alertID string, w
 
 func (ac *alertClient) Delete(ctx context.Context, universeID, alertID string) error {
 	_, err := ac.c.Do(ctx, http.MethodDelete, alertsBase(universeID)+"/"+url.PathEscape(alertID), nil, nil)
+	return translateAlertErr(universeID, err)
+}
+
+// AlertsNotEligibleError reports that a universe can't use analytics alerts yet.
+// Roblox answers every alerts call for such a universe with
+// 403 {"errorCode":"PERMISSION_DENIED","message":"Universe N is not enrolled in
+// PerformanceMonitoringV2."} (live-observed 2026-10-23). "PerformanceMonitoringV2"
+// isn't documented anywhere; the documented rule is that alerts are available to
+// any experience meeting the Performance dashboard's eligibility requirement of
+// 100+ daily active users, with no opt-in setting. Unwrap returns the APIError.
+type AlertsNotEligibleError struct {
+	UniverseID string
+	Err        *APIError
+}
+
+func (e *AlertsNotEligibleError) Error() string {
+	return fmt.Sprintf("universe %s is not eligible for analytics alerts yet (Roblox: %q). "+
+		"Roblox makes alerts available to experiences that meet the Performance dashboard "+
+		"eligibility requirement of 100+ daily active users; there is no documented opt-in "+
+		"setting. Once the experience qualifies, re-run. "+
+		"See https://create.roblox.com/docs/production/analytics/alerts",
+		e.UniverseID, e.Err.Message)
+}
+
+func (e *AlertsNotEligibleError) Unwrap() error { return e.Err }
+
+// IsAlertsNotEligible reports whether err is, or wraps, an AlertsNotEligibleError.
+func IsAlertsNotEligible(err error) bool {
+	var e *AlertsNotEligibleError
+	return errors.As(err, &e)
+}
+
+// translateAlertErr turns the "not enrolled" 403 into an AlertsNotEligibleError
+// and passes every other error (including other 403s, such as missing scopes or
+// missing per-user permissions) through unchanged.
+func translateAlertErr(universeID string, err error) error {
+	var ae *APIError
+	if !errors.As(err, &ae) || ae.Status != http.StatusForbidden || ae.Code != "PERMISSION_DENIED" {
+		return err
+	}
+	msg := strings.ToLower(ae.Message)
+	if strings.Contains(msg, "enrolled") || strings.Contains(msg, "performancemonitoring") {
+		return &AlertsNotEligibleError{UniverseID: universeID, Err: ae}
+	}
 	return err
 }

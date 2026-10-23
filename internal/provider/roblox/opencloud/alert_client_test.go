@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -198,6 +199,52 @@ func TestAlertClientDelete(t *testing.T) {
 	}
 	if got.method != http.MethodDelete || got.path != alertsPath+"/7" {
 		t.Fatalf("request = %s %s", got.method, got.path)
+	}
+}
+
+// Live-observed (2026-10-23) once the key had the alert scopes: every endpoint
+// returns this 403 for a universe below the alerts eligibility bar.
+const notEnrolledBody = `{"errorCode":"PERMISSION_DENIED","message":"Universe 100 is not enrolled in PerformanceMonitoringV2."}`
+
+func TestAlertClientTranslatesNotEnrolledOnEveryCall(t *testing.T) {
+	srv, _ := newAlertTestServer(t, 403, notEnrolledBody)
+	ac := alertTestClient(srv.URL)
+	ctx := context.Background()
+	calls := map[string]func() error{
+		"list":   func() error { _, err := ac.List(ctx, "100"); return err },
+		"create": func() error { _, err := ac.Create(ctx, "100", AlertWrite{}); return err },
+		"update": func() error { _, err := ac.Update(ctx, "100", "1", AlertWrite{}); return err },
+		"delete": func() error { return ac.Delete(ctx, "100", "1") },
+	}
+	for name, call := range calls {
+		err := call()
+		if !IsAlertsNotEligible(err) {
+			t.Fatalf("%s: want a not-eligible error, got %v", name, err)
+		}
+		msg := err.Error()
+		for _, want := range []string{"universe 100", "not eligible for analytics alerts", "100+ daily active users", "PerformanceMonitoringV2"} {
+			if !strings.Contains(msg, want) {
+				t.Fatalf("%s: message missing %q:\n%s", name, want, msg)
+			}
+		}
+		// The underlying API error stays reachable.
+		var ae *APIError
+		if !errors.As(err, &ae) || ae.Status != 403 || ae.Code != "PERMISSION_DENIED" {
+			t.Fatalf("%s: wrapped APIError = %+v", name, ae)
+		}
+	}
+}
+
+func TestAlertClientOtherForbiddenIsNotTranslated(t *testing.T) {
+	for _, body := range []string{
+		`{"errors":[{"code":0,"message":"Scope not authorized."}]}`,
+		`{"errorCode":"PERMISSION_DENIED","message":"Caller lacks Create and configure alerts."}`,
+	} {
+		srv, _ := newAlertTestServer(t, 403, body)
+		_, err := alertTestClient(srv.URL).List(context.Background(), "100")
+		if err == nil || IsAlertsNotEligible(err) {
+			t.Fatalf("body %s: err = %v, must stay a plain APIError", body, err)
+		}
 	}
 }
 

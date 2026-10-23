@@ -57,7 +57,8 @@ func (a *analyticsAlert) Doc() provider.ResourceDoc {
 			"enabled":                   "Whether the alert is enabled (default `true`). `false` pauses it without deleting it.",
 		},
 		Notes: "Built on Roblox's EXPERIMENTAL analytics-alerts API (`analytics-alert-control-plane/v1`), which may change without notice. " +
-			"A universe can have at most 20 alerts. New alerts report `config_state = \"Syncing\"` briefly before `Enabled`. " +
+			"Alerts are only available to experiences that meet the Performance dashboard eligibility requirement (100+ daily active users). Roblox documents no opt-in setting. Other experiences get `403 … not enrolled in PerformanceMonitoringV2` on every call, which Baseplate reports as \"not eligible for analytics alerts\". " +
+			"A universe can have at most 20 alerts.New alerts report `config_state = \"Syncing\"` briefly before `Enabled`. " +
 			"Removing an optional attribute from config stops managing it but leaves the remote value in place; to clear one, set it to its empty value (`\"\"`, `{}`, `[]`). " +
 			"`universe_id` is create-only. Import with id `<universe_id>/<alert_id>`.",
 		Scopes:      []string{"universe.analytics.alert:read", "universe.analytics.alert:write"},

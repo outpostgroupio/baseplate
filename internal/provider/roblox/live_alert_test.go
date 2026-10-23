@@ -44,6 +44,9 @@ func TestLiveAnalyticsAlertLifecycle(t *testing.T) {
 
 	// Preflight: skip cleanly when the key can't use the alerts API at all.
 	if _, err := ac.List(ctx, universe); err != nil {
+		if opencloud.IsAlertsNotEligible(err) {
+			t.Skipf("universe not eligible for analytics alerts: %v", err)
+		}
 		var ae *opencloud.APIError
 		if errors.As(err, &ae) && (ae.Status == http.StatusUnauthorized || ae.Status == http.StatusForbidden) {
 			t.Skipf("API key lacks universe.analytics.alert:read/write for universe %s (or the experience isn't alert-eligible): %v", universe, err)

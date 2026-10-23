@@ -340,6 +340,23 @@ func TestAnalyticsAlertReadNotFoundAndDeleteIdempotent(t *testing.T) {
 	}
 }
 
+type notEligibleAlerts struct{ *fakeAlerts }
+
+func (notEligibleAlerts) List(context.Context, string, ...string) ([]opencloud.Alert, error) {
+	return nil, &opencloud.AlertsNotEligibleError{UniverseID: "100", Err: &opencloud.APIError{
+		Status: 403, Code: "PERMISSION_DENIED", Message: "Universe 100 is not enrolled in PerformanceMonitoringV2."}}
+}
+
+// An ineligible universe must surface the actionable error from Read, never be
+// mistaken for an out-of-band delete (ErrNotFound → silent drift-recreate).
+func TestAnalyticsAlertReadSurfacesNotEligible(t *testing.T) {
+	r := resources.AnalyticsAlert(notEligibleAlerts{newFakeAlerts()})
+	_, err := r.Read(context.Background(), "100/1")
+	if errors.Is(err, provider.ErrNotFound) || !opencloud.IsAlertsNotEligible(err) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestAnalyticsAlertRejectsFractionalOccurrences(t *testing.T) {
 	r := resources.AnalyticsAlert(newFakeAlerts())
 	_, _, err := r.Create(context.Background(), provider.Attributes{
