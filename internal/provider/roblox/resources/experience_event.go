@@ -24,6 +24,17 @@ const eventTimeLayout = "2006-01-02T15:04:05Z"
 // be at least 15 minutes after the start time").
 const eventMinDuration = 15 * time.Minute
 
+// eventSettleTries/eventSettleWait/eventSettleStreak bound the read-after-write
+// wait in Create and Update. Live, reads straight after a PATCH flap between the
+// old and new values for a few seconds (a matching read can be followed by a
+// stale one), so a plan run right after apply showed phantom drift. Waiting for
+// several consecutive matching reads rides that out. Tests shorten the wait.
+var (
+	eventSettleTries  = 20
+	eventSettleStreak = 3
+	eventSettleWait   = 500 * time.Millisecond
+)
+
 type experienceEvent struct {
 	ec opencloud.GameEventClient
 }
@@ -147,6 +158,7 @@ func (e *experienceEvent) Create(ctx context.Context, desired provider.Attribute
 	if err != nil {
 		return "", nil, err
 	}
+	e.awaitSettled(ctx, got.ID, n)
 	return got.ID, evStateAttrs(n), nil
 }
 
@@ -215,7 +227,48 @@ func (e *experienceEvent) Update(ctx context.Context, id string, desired provide
 	if _, err := e.ec.Update(ctx, id, w); err != nil {
 		return nil, err
 	}
+	e.awaitSettled(ctx, id, n)
 	return evStateAttrs(n), nil
+}
+
+// awaitSettled re-reads the event until every declared, diffable attribute
+// matches what was written on eventSettleStreak consecutive reads, up to
+// eventSettleTries reads. It never fails the
+// apply: if Roblox is still lagging when the budget runs out, the next plan
+// simply shows the difference.
+func (e *experienceEvent) awaitSettled(ctx context.Context, id string, want provider.Attributes) {
+	skip := map[string]bool{}
+	for _, c := range e.Computed() {
+		skip[c] = true
+	}
+	streak := 0
+	for i := 0; i < eventSettleTries; i++ {
+		got, err := e.Read(ctx, id)
+		if err == nil {
+			settled := true
+			for k, v := range want {
+				if skip[k] {
+					continue
+				}
+				if g, ok := got[k]; !ok || !g.RawEquals(v) {
+					settled = false
+					break
+				}
+			}
+			if !settled {
+				streak = 0
+			} else if streak++; streak >= eventSettleStreak {
+				return
+			}
+		}
+		if i < eventSettleTries-1 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(eventSettleWait):
+			}
+		}
+	}
 }
 
 // Delete permanently deletes the event. An already-deleted event is success.

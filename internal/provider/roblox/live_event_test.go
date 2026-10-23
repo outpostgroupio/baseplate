@@ -3,8 +3,10 @@ package roblox
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,7 +25,7 @@ import (
 // nobody sees it. Skipped unless BASEPLATE_LIVE=1, and skipped (not failed) when
 // the key lacks the universe.event:read/write scopes.
 //
-//	set -a; . ./.env.local; set +a
+//	set -a; . ./.env; set +a
 //	BASEPLATE_LIVE=1 go test ./internal/provider/roblox/ -run LiveExperienceEvent -v
 func TestLiveExperienceEventLifecycle(t *testing.T) {
 	if os.Getenv("BASEPLATE_LIVE") != "1" {
@@ -96,7 +98,13 @@ func TestLiveExperienceEventLifecycle(t *testing.T) {
 			t.Fatalf("%s plan: %v", name, err)
 		}
 		if pl.HasChanges() != wantChanges {
-			t.Fatalf("%s: HasChanges=%v, want %v:\n%s", name, pl.HasChanges(), wantChanges, pl.RenderText(false))
+			var diffs []string
+			for _, c := range pl.Changes {
+				for _, d := range c.AttrDiffs {
+					diffs = append(diffs, fmt.Sprintf("%s.%s: %#v -> %#v", c.Address, d.Name, d.Old, d.New))
+				}
+			}
+			t.Fatalf("%s: HasChanges=%v, want %v:\n%s\ndiffs:\n%s", name, pl.HasChanges(), wantChanges, pl.RenderText(false), strings.Join(diffs, "\n"))
 		}
 		if wantChanges {
 			if err := apply.Apply(ctx, p, b, s, pl); err != nil {

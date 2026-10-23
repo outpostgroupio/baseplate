@@ -17,6 +17,10 @@ import (
 // fakeEvents mimics the live API: it stores what was written and reports times
 // the way Roblox does ("+00:00" with milliseconds), to prove Normalize/Read
 // converge. placeId defaults to "" (live: 0 = no venue).
+// The resource's read-after-write settle loop sleeps between reads; the fakes
+// are consistent (or lag on purpose), so tests don't need to wait.
+func init() { eventSettleWait = 0 }
+
 type fakeEvents struct {
 	store       map[string]opencloud.GameEvent
 	lastCreate  opencloud.GameEventWrite
@@ -26,6 +30,12 @@ type fakeEvents struct {
 	deleteErr   error
 	deleted     []string
 	updateCalls int
+	// lagAfterUpdate makes the next N Gets after an Update return the
+	// pre-update event, mimicking Roblox's read-after-write lag.
+	lagAfterUpdate int
+	lag            int
+	stale          opencloud.GameEvent
+	getCalls       int
 }
 
 func deref(p *string) string {
@@ -76,6 +86,11 @@ func (f *fakeEvents) Create(_ context.Context, universeID string, w opencloud.Ga
 	return ev, nil
 }
 func (f *fakeEvents) Get(_ context.Context, id string) (opencloud.GameEvent, error) {
+	f.getCalls++
+	if f.lag > 0 {
+		f.lag--
+		return f.stale, nil
+	}
 	if f.getErr != nil {
 		return opencloud.GameEvent{}, f.getErr
 	}
@@ -89,6 +104,7 @@ func (f *fakeEvents) Update(_ context.Context, id string, w opencloud.GameEventW
 	f.lastUpdate = w
 	f.updateCalls++
 	ev := f.store[id]
+	f.stale, f.lag = ev, f.lagAfterUpdate
 	f.apply(&ev, w)
 	f.store[id] = ev
 	return ev, nil
@@ -333,5 +349,42 @@ func TestExperienceEventDelete(t *testing.T) {
 	f.deleteErr = &opencloud.APIError{Status: 403, Message: "Scope not authorized."}
 	if err := r.Delete(context.Background(), "5"); err == nil {
 		t.Fatal("non-404 delete errors must propagate")
+	}
+}
+
+func TestExperienceEventUpdateWaitsOutReadLag(t *testing.T) {
+	f := &fakeEvents{}
+	r := ExperienceEvent(f)
+	id, _, err := r.Create(context.Background(), eventDesired())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := eventDesired()
+	d["title"] = cty.StringVal("Triple XP")
+	f.lagAfterUpdate, f.getCalls = 2, 0
+	if _, err := r.Update(context.Background(), id, d); err != nil {
+		t.Fatal(err)
+	}
+	// 1 pre-PATCH read + 2 stale reads + eventSettleStreak matching reads.
+	if want := 1 + 2 + eventSettleStreak; f.getCalls != want {
+		t.Fatalf("Update made %d reads; want it to keep reading until the change is stably visible (%d)", f.getCalls, want)
+	}
+}
+
+func TestExperienceEventSettleIsBounded(t *testing.T) {
+	f := &fakeEvents{}
+	r := ExperienceEvent(f)
+	id, _, err := r.Create(context.Background(), eventDesired())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := eventDesired()
+	d["title"] = cty.StringVal("Triple XP")
+	f.lagAfterUpdate, f.getCalls = 1000, 0
+	if _, err := r.Update(context.Background(), id, d); err != nil {
+		t.Fatalf("a lagging read must not fail the apply: %v", err)
+	}
+	if f.getCalls != 1+eventSettleTries {
+		t.Fatalf("reads = %d, want %d", f.getCalls, 1+eventSettleTries)
 	}
 }

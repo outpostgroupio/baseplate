@@ -139,3 +139,7 @@ subtle engine bits) → per-task spec+quality review → whole-branch review bef
 transient SDD ledger lives at `.superpowers/sdd/progress.md` (gitignored scratch — the durable
 knowledge is consolidated into this file, `ROADMAP.md`, and the committed specs/plans). End commit messages with
 `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>` only when the user asks to commit.
+
+  **Reads flap after a write (verified live):** for a few seconds after a PATCH, GETs alternate
+  between the old and new values, so `Create`/`Update` wait for 3 consecutive matching reads
+  (bounded, ~10s) before returning; otherwise a plan straight after apply shows phantom drift.
