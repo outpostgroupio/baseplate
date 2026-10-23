@@ -12,19 +12,25 @@ import (
 	"time"
 )
 
-// eventBody mirrors GameEventResponse: the event id is a JSON STRING (it exceeds
-// 2^53), the other ids are JSON numbers, and categories/thumbnails come back
-// out of rank order to prove the client sorts them.
+// eventBody mirrors a LIVE GameEventResponse (2026-10-23): the event id is a JSON
+// string, the other ids JSON numbers, times "+00:00" with milliseconds, and the
+// single-event GET always reports thumbnails as [].
 const eventBody = `{"id":"9007199254740993123","title":"Double XP","subtitle":"Weekend",` +
-	`"description":"d","tagline":"t","startTime":"2026-12-01T18:00:00Z","endTime":"2026-12-01T20:00:00Z",` +
+	`"description":"d","tagline":"t","startTime":"2026-12-01T18:00:00.123+00:00","endTime":"2026-12-01T20:00:00+00:00",` +
 	`"universeId":10438196190,"placeId":123456789012,"visibility":"private","featuringStatus":"disabled",` +
-	`"host":{"hostType":"user","hostId":5822334358},` +
-	`"categories":[{"category":"festival","rank":2},{"category":"newContent","rank":1}],` +
-	`"thumbnails":[{"mediaId":222,"rank":2},{"mediaId":111,"rank":1}]}`
+	`"host":{"hostType":"user","hostId":5822334358,"hostName":"x","hasVerifiedBadge":false},` +
+	`"categories":[],"thumbnails":[]}`
+
+// listBody is the list endpoint, which (unlike the single GET) does return the
+// thumbnails — out of rank order here to prove the client sorts them.
+const listBody = `{"gameEvents":[{"id":"1","thumbnails":[]},` +
+	`{"id":"9007199254740993123","thumbnails":[{"mediaId":222,"rank":1},{"mediaId":111,"rank":0}]}],"nextPageToken":null}`
 
 func TestGameEventCreateGetUpdateDelete(t *testing.T) {
 	const evPath = "/virtual-events/v3/game-events/9007199254740993123"
+	const colPath = "/virtual-events/v3/universes/10438196190/game-events"
 	var createBody, patchBody map[string]any
+	var listQuery string
 	var deleted bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("x-api-key") != "k" {
@@ -32,7 +38,7 @@ func TestGameEventCreateGetUpdateDelete(t *testing.T) {
 			return
 		}
 		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/virtual-events/v3/universes/10438196190/game-events":
+		case r.Method == http.MethodPost && r.URL.Path == colPath:
 			if ct := r.Header.Get("Content-Type"); ct != "application/json" {
 				http.Error(w, "content-type "+ct, 400)
 				return
@@ -40,6 +46,9 @@ func TestGameEventCreateGetUpdateDelete(t *testing.T) {
 			b, _ := io.ReadAll(r.Body)
 			_ = json.Unmarshal(b, &createBody)
 			w.Write([]byte(eventBody))
+		case r.Method == http.MethodGet && r.URL.Path == colPath:
+			listQuery = r.URL.RawQuery
+			w.Write([]byte(listBody))
 		case r.Method == http.MethodGet && r.URL.Path == evPath:
 			w.Write([]byte(eventBody))
 		case r.Method == http.MethodPatch && r.URL.Path == evPath:
@@ -63,42 +72,48 @@ func TestGameEventCreateGetUpdateDelete(t *testing.T) {
 		Title: s("Double XP"), Subtitle: s("Weekend"),
 		StartTime: s("2026-12-01T18:00:00Z"), EndTime: s("2026-12-01T20:00:00Z"),
 		Visibility: s("private"), PlaceID: s("123456789012"), GroupID: s("77"),
-		Categories:        []string{"newContent", "festival"},
 		ThumbnailMediaIDs: []string{"111", "222"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Request shape: ids as JSON numbers, rank = position+1, nil fields omitted.
+	// Request shape: ids as JSON numbers, 0-based contiguous ranks, nil fields omitted.
 	if createBody["placeId"] != float64(123456789012) || createBody["groupId"] != float64(77) {
 		t.Fatalf("ids must be sent as numbers, got %#v", createBody)
 	}
 	if _, ok := createBody["description"]; ok {
 		t.Fatalf("nil description must be omitted, got %#v", createBody)
 	}
-	cats := createBody["categories"].([]any)
-	if c0 := cats[0].(map[string]any); c0["category"] != "newContent" || c0["rank"] != float64(1) {
-		t.Fatalf("categories = %#v", cats)
+	if _, ok := createBody["categories"]; ok {
+		t.Fatal("categories must never be sent (the live API rejects them)")
 	}
 	th := createBody["thumbnails"].([]any)
-	if t1 := th[1].(map[string]any); t1["mediaId"] != float64(222) || t1["rank"] != float64(2) {
+	if t0 := th[0].(map[string]any); t0["mediaId"] != float64(111) || t0["rank"] != float64(0) {
 		t.Fatalf("thumbnails = %#v", th)
 	}
-	// Response decoding: string event id preserved exactly; numeric ids as strings.
+	if t1 := th[1].(map[string]any); t1["mediaId"] != float64(222) || t1["rank"] != float64(1) {
+		t.Fatalf("thumbnails = %#v", th)
+	}
 	if got.ID != "9007199254740993123" || got.UniverseID != "10438196190" || got.PlaceID != "123456789012" ||
 		got.HostID != "5822334358" || got.HostType != "user" {
 		t.Fatalf("create got %+v", got)
 	}
-	if strings.Join(got.Categories, ",") != "newContent,festival" || strings.Join(got.ThumbnailMediaIDs, ",") != "111,222" {
-		t.Fatalf("lists must be rank-ordered, got %v / %v", got.Categories, got.ThumbnailMediaIDs)
-	}
 
+	// Get: single GET + list lookup for thumbnails, bracketed on the start time.
 	g2, err := gc.Get(ctx, "9007199254740993123")
-	if err != nil || g2.Title != "Double XP" || g2.Visibility != "private" || g2.StartTime != "2026-12-01T18:00:00Z" {
+	if err != nil || g2.Title != "Double XP" || g2.Visibility != "private" || g2.StartTime != "2026-12-01T18:00:00.123+00:00" {
 		t.Fatalf("get = %+v, %v", g2, err)
 	}
+	if strings.Join(g2.ThumbnailMediaIDs, ",") != "111,222" {
+		t.Fatalf("thumbnails must come from the list, rank-ordered; got %v", g2.ThumbnailMediaIDs)
+	}
+	for _, want := range []string{"startsAfter=2026-12-01T17%3A59%3A59Z", "startsBefore=2026-12-01T18%3A00%3A01Z", "endsAfter=2026-12-01T19%3A59%3A59Z"} {
+		if !strings.Contains(listQuery, want) {
+			t.Fatalf("list query %q missing %q", listQuery, want)
+		}
+	}
 
-	if _, err := gc.Update(ctx, "9007199254740993123", GameEventWrite{Title: s("Triple XP"), GroupID: s("77"), Categories: []string{}}); err != nil {
+	if _, err := gc.Update(ctx, "9007199254740993123", GameEventWrite{Title: s("Triple XP"), GroupID: s("77"), ThumbnailMediaIDs: []string{}}); err != nil {
 		t.Fatal(err)
 	}
 	if patchBody["title"] != "Triple XP" {
@@ -110,12 +125,19 @@ func TestGameEventCreateGetUpdateDelete(t *testing.T) {
 	if _, ok := patchBody["subtitle"]; ok {
 		t.Fatal("unset fields must be omitted from PATCH (null = no change)")
 	}
-	if c, ok := patchBody["categories"].([]any); !ok || len(c) != 0 {
-		t.Fatalf("an empty (non-nil) categories list must be sent as [], got %#v", patchBody["categories"])
+	if c, ok := patchBody["thumbnails"].([]any); !ok || len(c) != 0 {
+		t.Fatalf("an empty (non-nil) thumbnails list must be sent as [], got %#v", patchBody["thumbnails"])
 	}
 
 	if err := gc.Delete(ctx, "9007199254740993123"); err != nil || !deleted {
 		t.Fatalf("delete: err=%v hit=%v", err, deleted)
+	}
+}
+
+func TestGameEventPlaceIDZeroIsUnset(t *testing.T) {
+	ev := geWire{ID: "1", PlaceID: "0"}.toDomain()
+	if ev.PlaceID != "" {
+		t.Fatalf("placeId 0 (live: no venue set) must map to empty, got %q", ev.PlaceID)
 	}
 }
 
@@ -124,11 +146,11 @@ func TestGameEventGetNotFoundAndProblemDetails(t *testing.T) {
 		w.Header().Set("Content-Type", "application/problem+json")
 		if strings.HasSuffix(r.URL.Path, "/404") {
 			w.WriteHeader(404)
-			w.Write([]byte(`{"type":"x","title":"Not Found","status":404,"detail":"Event does not exist."}`))
+			w.Write([]byte(`{"title":"Game event not found.","status":404,"detail":"The requested event does not exist.","code":"GameEventNotFound"}`))
 			return
 		}
 		w.WriteHeader(400)
-		w.Write([]byte(`{"title":"Bad Request","status":400,"detail":"End time must be after start time."}`))
+		w.Write([]byte(`{"title":"Invalid request.","status":400,"detail":"Event end time must be at least 15 minutes after the start time","code":"InvalidStartOrEndTime"}`))
 	}))
 	defer srv.Close()
 	gc := NewGameEventClient(New("k", srv.URL, WithSleeper(func(time.Duration) {})))
@@ -139,8 +161,9 @@ func TestGameEventGetNotFoundAndProblemDetails(t *testing.T) {
 	}
 	_, err = gc.Update(context.Background(), "1", GameEventWrite{})
 	var apiErr *APIError
-	if !errors.As(err, &apiErr) || apiErr.Status != 400 || !strings.Contains(apiErr.Message, "End time must be after start time.") {
-		t.Fatalf("ProblemDetails detail must surface, got %v", err)
+	if !errors.As(err, &apiErr) || apiErr.Status != 400 || apiErr.Code != "InvalidStartOrEndTime" ||
+		!strings.Contains(apiErr.Message, "at least 15 minutes") {
+		t.Fatalf("ProblemDetails code/detail must surface, got %#v", err)
 	}
 }
 

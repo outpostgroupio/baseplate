@@ -54,22 +54,30 @@ func TestLiveExperienceEventLifecycle(t *testing.T) {
 	s := state.New()
 
 	start := time.Now().UTC().Add(30 * 24 * time.Hour).Truncate(time.Hour)
-	desired := func(title string, startOffset time.Duration) []plan.DesiredResource {
+	// Optional: an image asset id to exercise thumbnails (the single-event GET
+	// never returns them, so Read recovers them from the list endpoint).
+	thumb := os.Getenv("BASEPLATE_TEST_EVENT_THUMBNAIL")
+	desired := func(title string, startOffset time.Duration, withThumb bool) []plan.DesiredResource {
 		st := start.Add(startOffset)
-		return []plan.DesiredResource{{
-			Type: "roblox_experience_event", Name: "live",
-			Attributes: provider.Attributes{
-				"universe_id": cty.StringVal(universe),
-				"title":       cty.StringVal(title),
-				"subtitle":    cty.StringVal("Baseplate live test"),
-				"description": cty.StringVal("Created by Baseplate's live integration test; safe to delete."),
-				// A non-UTC offset proves normalisation converges against Roblox's read-back.
-				"start_time": cty.StringVal(st.In(time.FixedZone("PST", -8*3600)).Format(time.RFC3339)),
-				"end_time":   cty.StringVal(st.Add(2 * time.Hour).Format(time.RFC3339)),
-				"visibility": cty.StringVal("private"),
-				"categories": cty.ListVal([]cty.Value{cty.StringVal("activity")}),
-			},
-		}}
+		attrs := provider.Attributes{
+			"universe_id": cty.StringVal(universe),
+			"title":       cty.StringVal(title),
+			"subtitle":    cty.StringVal("Baseplate live test"),
+			"description": cty.StringVal("Created by Baseplate's live integration test; safe to delete."),
+			// A non-UTC offset with sub-second precision proves normalisation
+			// converges against Roblox's "+00:00"-with-milliseconds read-back.
+			"start_time":        cty.StringVal(st.Add(250 * time.Millisecond).In(time.FixedZone("PST", -8*3600)).Format(time.RFC3339Nano)),
+			"end_time":          cty.StringVal(st.Add(2 * time.Hour).Format(time.RFC3339)),
+			"visibility":        cty.StringVal("private"),
+			"featuring_enabled": cty.False,
+		}
+		if thumb != "" {
+			attrs["thumbnail_media_ids"] = cty.ListValEmpty(cty.String)
+			if withThumb {
+				attrs["thumbnail_media_ids"] = cty.ListVal([]cty.Value{cty.StringVal(thumb)})
+			}
+		}
+		return []plan.DesiredResource{{Type: "roblox_experience_event", Name: "live", Attributes: attrs}}
 	}
 
 	// Safety net: delete the event directly if the test fails before destroy.
@@ -97,16 +105,26 @@ func TestLiveExperienceEventLifecycle(t *testing.T) {
 		}
 	}
 
-	step("create", desired("Baseplate Live Event", 0), true)
-	step("converge", desired("Baseplate Live Event", 0), false)
-	step("update", desired("Baseplate Live Event v2", time.Hour), true)
-	step("converge after update", desired("Baseplate Live Event v2", time.Hour), false)
+	step("create", desired("Baseplate Live Event", 0, true), true)
+	step("converge", desired("Baseplate Live Event", 0, true), false)
+	// Update title + start time (+ clear the thumbnail when one is configured).
+	step("update", desired("Baseplate Live Event v2", time.Hour, false), true)
+	step("converge after update", desired("Baseplate Live Event v2", time.Hour, false), false)
 
 	r, _ := s.Find("roblox_experience_event.live")
 	eventID := r.ID
 	step("destroy", nil, true)
-	if _, err := ec.Get(ctx, eventID); !opencloud.IsNotFound(err) {
-		t.Fatalf("event %s should be gone after destroy, Get err = %v", eventID, err)
+	// DELETE is eventually consistent (verified live): a GET straight after the
+	// 204 can still return the event for a moment, so poll briefly for the 404.
+	var getErr error
+	for i := 0; i < 15; i++ {
+		if _, getErr = ec.Get(ctx, eventID); opencloud.IsNotFound(getErr) {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	if !opencloud.IsNotFound(getErr) {
+		t.Fatalf("event %s should be gone after destroy, Get err = %v", eventID, getErr)
 	}
 	t.Log("live experience-event lifecycle OK: create→converge→update→converge→destroy→gone")
 }

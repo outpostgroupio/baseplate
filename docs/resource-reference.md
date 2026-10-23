@@ -106,21 +106,20 @@ Manages an experience event (virtual event) for live-ops: a scheduled, titled ev
 
 | Attribute | Type | Kind | Description |
 |---|---|---|---|
-| `categories` | list of string | optional, diffable | Ordered list of categories (rank = position), from: contentUpdate, locationUpdate, systemUpdate, activity, newContent, itemDrop, newSeason, newLocation, newMap, moreLevels, newFeature, earlyAccess, expansion, challenge, quest, festival. |
-| `description` | string | optional, diffable | Event description. |
-| `end_time` | string | required, diffable | End time, RFC 3339. Must be after `start_time`. |
+| `description` | string | optional, diffable | Event description. Set `""` to clear it. |
+| `end_time` | string | required, diffable | End time, RFC 3339. Must be at least 15 minutes after `start_time`. |
 | `featuring_enabled` | bool | optional, diffable | Opt the event into featuring review (`featuringStatus`). Defaults to Roblox's "not featured". |
 | `group_id` | string | optional, create-only | Host group id. When unset, the API key's owner hosts the event. Create-only. |
-| `place_id` | string | optional, diffable | Venue place id. Defaults to the universe's root place when unset. |
-| `start_time` | string | required, diffable | Start time, RFC 3339 (e.g. `2026-12-01T18:00:00Z`). Any offset is accepted; it is compared and stored in UTC at whole-second precision. |
+| `place_id` | string | optional, diffable | Venue place id (a place in the universe). When unset, Roblox records no venue (`placeId` 0). |
+| `start_time` | string | required, diffable | Start time, RFC 3339 (e.g. `2026-12-01T18:00:00Z`). Any offset is accepted; it is compared and stored in UTC at whole-second precision. Must be in the future when the event is created or the start is changed. |
 | `subtitle` | string | required, diffable | Event subtitle (required by Roblox). |
-| `tagline` | string | optional, diffable | Tagline shown to curators when featuring is enabled. |
-| `thumbnail_media_ids` | list of string | optional, diffable | Ordered list of thumbnail image media (asset) ids (rank = position). |
+| `tagline` | string | optional, diffable | Tagline shown to curators when featuring is enabled. Can't be cleared once set (Roblox ignores an empty tagline), so it must not be `""`. |
+| `thumbnail_media_ids` | list of string | optional, diffable | Ordered list of thumbnail image asset ids (the first is the primary). `[]` clears them. |
 | `title` | string | required, diffable | Event title. |
 | `universe_id` | string | required, create-only | The universe that owns the event. Often a reference to an experience. Create-only. |
 | `visibility` | string | required, diffable | `public` or `private` (case-insensitive). Roblox may set `moderated` server-side, which then shows as drift. |
 
-`destroy` permanently deletes the event. Import by event id (`baseplate import roblox_experience_event.x <eventId>`). Changing `universe_id` or `group_id` does not move the event (both are create-only). Recurrence is not supported. The API is EXPERIMENTAL and this resource has NOT been verified live; Roblox may reject edits to events that have already started or ended.
+`destroy` permanently deletes the event. Import by event id (`baseplate import roblox_experience_event.x <eventId>`). Changing `universe_id` or `group_id` does not move the event (both are create-only). An update sends only the fields that differ from the live event. An event that has already started can still be edited, but Roblox rejects any *new* `start_time` in the past. Categories and recurrence are not supported: the API currently rejects every categories payload, and recurrence has no effect.
 
 Requires the `universe.event:read`, `universe.event:write` [scopes](how-to/api-key-scopes.md).
 

@@ -15,17 +15,14 @@ import (
 
 // eventTimeLayout is the canonical form of start_time/end_time in state and in
 // Read output: RFC 3339, UTC, whole seconds. Config may use any RFC 3339 offset
-// or precision; Normalize converts it to this form so equivalent instants never
-// diff, and the same canonical string is what gets sent to Roblox (sub-second
-// precision is truncated on both sides).
+// or precision. Roblox reads back "+00:00" with milliseconds (verified live), so
+// Normalize and Read both convert to this form and equivalent instants never
+// diff. The canonical string is also what gets sent.
 const eventTimeLayout = "2006-01-02T15:04:05Z"
 
-// eventCategories is the EventCategory enum from the virtual-events/v3 spec.
-var eventCategories = []string{
-	"contentUpdate", "locationUpdate", "systemUpdate", "activity", "newContent",
-	"itemDrop", "newSeason", "newLocation", "newMap", "moreLevels", "newFeature",
-	"earlyAccess", "expansion", "challenge", "quest", "festival",
-}
+// eventMinDuration is the API's minimum event length (live: "Event end time must
+// be at least 15 minutes after the start time").
+const eventMinDuration = 15 * time.Minute
 
 type experienceEvent struct {
 	ec opencloud.GameEventClient
@@ -49,21 +46,21 @@ func (e *experienceEvent) Doc() provider.ResourceDoc {
 			"universe_id":         "The universe that owns the event. Often a reference to an experience. Create-only.",
 			"title":               "Event title.",
 			"subtitle":            "Event subtitle (required by Roblox).",
-			"description":         "Event description.",
-			"tagline":             "Tagline shown to curators when featuring is enabled.",
-			"start_time":          "Start time, RFC 3339 (e.g. `2026-12-01T18:00:00Z`). Any offset is accepted; it is compared and stored in UTC at whole-second precision.",
-			"end_time":            "End time, RFC 3339. Must be after `start_time`.",
+			"description":         "Event description. Set `\"\"` to clear it.",
+			"tagline":             "Tagline shown to curators when featuring is enabled. Can't be cleared once set (Roblox ignores an empty tagline), so it must not be `\"\"`.",
+			"start_time":          "Start time, RFC 3339 (e.g. `2026-12-01T18:00:00Z`). Any offset is accepted; it is compared and stored in UTC at whole-second precision. Must be in the future when the event is created or the start is changed.",
+			"end_time":            "End time, RFC 3339. Must be at least 15 minutes after `start_time`.",
 			"visibility":          "`public` or `private` (case-insensitive). Roblox may set `moderated` server-side, which then shows as drift.",
-			"place_id":            "Venue place id. Defaults to the universe's root place when unset.",
+			"place_id":            "Venue place id (a place in the universe). When unset, Roblox records no venue (`placeId` 0).",
 			"group_id":            "Host group id. When unset, the API key's owner hosts the event. Create-only.",
-			"categories":          "Ordered list of categories (rank = position), from: " + strings.Join(eventCategories, ", ") + ".",
-			"thumbnail_media_ids": "Ordered list of thumbnail image media (asset) ids (rank = position).",
+			"thumbnail_media_ids": "Ordered list of thumbnail image asset ids (the first is the primary). `[]` clears them.",
 			"featuring_enabled":   "Opt the event into featuring review (`featuringStatus`). Defaults to Roblox's \"not featured\".",
 		},
 		Notes: "`destroy` permanently deletes the event. Import by event id (`baseplate import roblox_experience_event.x <eventId>`). " +
 			"Changing `universe_id` or `group_id` does not move the event (both are create-only). " +
-			"Recurrence is not supported. The API is EXPERIMENTAL and this resource has NOT been verified live; " +
-			"Roblox may reject edits to events that have already started or ended.",
+			"An update sends only the fields that differ from the live event. An event that has already started can still be edited, " +
+			"but Roblox rejects any *new* `start_time` in the past. Categories and recurrence are not supported: " +
+			"the API currently rejects every categories payload, and recurrence has no effect.",
 		Scopes:      []string{"universe.event:read", "universe.event:write"},
 		ExampleFile: "examples/experience-event.bp.hcl",
 	}
@@ -81,7 +78,6 @@ func (e *experienceEvent) DecodeSpec() hcldec.Spec {
 		"visibility":          &hcldec.AttrSpec{Name: "visibility", Type: cty.String, Required: true},
 		"place_id":            &hcldec.AttrSpec{Name: "place_id", Type: cty.String},
 		"group_id":            &hcldec.AttrSpec{Name: "group_id", Type: cty.String},
-		"categories":          &hcldec.AttrSpec{Name: "categories", Type: cty.List(cty.String)},
 		"thumbnail_media_ids": &hcldec.AttrSpec{Name: "thumbnail_media_ids", Type: cty.List(cty.String)},
 		"featuring_enabled":   &hcldec.AttrSpec{Name: "featuring_enabled", Type: cty.Bool},
 	}
@@ -96,9 +92,10 @@ func (e *experienceEvent) Computed() []string {
 
 func (e *experienceEvent) Dependencies(provider.Attributes) []provider.Ref { return nil }
 
-// Normalize canonicalises start_time/end_time (UTC, whole seconds), lowercases
-// visibility, and maps categories to the API's camelCase spelling — rejecting
-// invalid values at plan time. Null/unknown values pass through untouched.
+// Normalize canonicalises start_time/end_time (UTC, whole seconds) and
+// lowercases visibility, rejecting values the API would reject (bad timestamps,
+// an event shorter than 15 minutes, other visibilities, an empty tagline) at
+// plan time. Null/unknown values pass through untouched.
 func (e *experienceEvent) Normalize(desired provider.Attributes) (provider.Attributes, error) {
 	out := make(provider.Attributes, len(desired))
 	for k, v := range desired {
@@ -122,8 +119,8 @@ func (e *experienceEvent) Normalize(desired provider.Attributes) (provider.Attri
 			end = t
 		}
 	}
-	if !start.IsZero() && !end.IsZero() && !end.After(start) {
-		return nil, fmt.Errorf("end_time (%s) must be after start_time (%s)", end.Format(eventTimeLayout), start.Format(eventTimeLayout))
+	if !start.IsZero() && !end.IsZero() && end.Sub(start) < eventMinDuration {
+		return nil, fmt.Errorf("end_time (%s) must be at least 15 minutes after start_time (%s)", end.Format(eventTimeLayout), start.Format(eventTimeLayout))
 	}
 	if v, ok := evKnown(desired, "visibility"); ok {
 		vis := strings.ToLower(v.AsString())
@@ -132,20 +129,8 @@ func (e *experienceEvent) Normalize(desired provider.Attributes) (provider.Attri
 		}
 		out["visibility"] = cty.StringVal(vis)
 	}
-	if v, ok := evKnown(desired, "categories"); ok && v.IsWhollyKnown() {
-		var cats []cty.Value
-		for it := v.ElementIterator(); it.Next(); {
-			_, c := it.Element()
-			if c.IsNull() {
-				return nil, fmt.Errorf("categories must not contain null")
-			}
-			canon, ok := evCanonicalCategory(c.AsString())
-			if !ok {
-				return nil, fmt.Errorf("unknown category %q (valid: %s)", c.AsString(), strings.Join(eventCategories, ", "))
-			}
-			cats = append(cats, cty.StringVal(canon))
-		}
-		out["categories"] = evStringList(cats)
+	if v, ok := evKnown(desired, "tagline"); ok && v.AsString() == "" {
+		return nil, fmt.Errorf("tagline must not be empty (Roblox ignores an empty tagline, so it can't be cleared); remove the attribute instead")
 	}
 	return out, nil
 }
@@ -178,12 +163,13 @@ func (e *experienceEvent) Read(ctx context.Context, id string) (provider.Attribu
 		"title":               cty.StringVal(got.Title),
 		"subtitle":            cty.StringVal(got.Subtitle),
 		"description":         cty.StringVal(got.Description),
-		"tagline":             cty.StringVal(got.Tagline),
 		"start_time":          cty.StringVal(evCanonicalTime(got.StartTime)),
 		"end_time":            cty.StringVal(evCanonicalTime(got.EndTime)),
 		"visibility":          cty.StringVal(strings.ToLower(got.Visibility)),
-		"categories":          evStringList(evStringVals(got.Categories)),
 		"thumbnail_media_ids": evStringList(evStringVals(got.ThumbnailMediaIDs)),
+	}
+	if got.Tagline != "" {
+		out["tagline"] = cty.StringVal(got.Tagline)
 	}
 	if got.PlaceID != "" {
 		out["place_id"] = cty.StringVal(got.PlaceID)
@@ -194,12 +180,39 @@ func (e *experienceEvent) Read(ctx context.Context, id string) (provider.Attribu
 	return out, nil
 }
 
+// Update PATCHes only the fields that differ from the live event (one extra
+// GET). Live, Roblox accepts re-sending an already-started event's unchanged
+// start time but rejects any *changed* start in the past ("New event start
+// time must be after the current time"); sending only real changes keeps the
+// request minimal and ties any such rejection to an actual start_time edit.
 func (e *experienceEvent) Update(ctx context.Context, id string, desired provider.Attributes) (provider.Attributes, error) {
 	n, err := e.Normalize(desired)
 	if err != nil {
 		return nil, fmt.Errorf("roblox_experience_event: %w", err)
 	}
-	if _, err := e.ec.Update(ctx, id, evWrite(n)); err != nil {
+	cur, err := e.ec.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	w := evWrite(n)
+	same := func(p **string, actual string) {
+		if *p != nil && **p == actual {
+			*p = nil
+		}
+	}
+	same(&w.Title, cur.Title)
+	same(&w.Subtitle, cur.Subtitle)
+	same(&w.Description, cur.Description)
+	same(&w.Tagline, cur.Tagline)
+	same(&w.StartTime, evCanonicalTime(cur.StartTime))
+	same(&w.EndTime, evCanonicalTime(cur.EndTime))
+	same(&w.Visibility, strings.ToLower(cur.Visibility))
+	same(&w.FeaturingStatus, strings.ToLower(cur.FeaturingStatus))
+	same(&w.PlaceID, cur.PlaceID)
+	if w.ThumbnailMediaIDs != nil && strings.Join(w.ThumbnailMediaIDs, ",") == strings.Join(cur.ThumbnailMediaIDs, ",") {
+		w.ThumbnailMediaIDs = nil
+	}
+	if _, err := e.ec.Update(ctx, id, w); err != nil {
 		return nil, err
 	}
 	return evStateAttrs(n), nil
@@ -214,7 +227,7 @@ func (e *experienceEvent) Delete(ctx context.Context, id string) error {
 }
 
 // evWrite maps (normalized) config to the client input. Only declared
-// attributes are sent; PATCH treats omitted fields as "no change".
+// attributes are set; PATCH treats omitted fields as "no change".
 func evWrite(n provider.Attributes) opencloud.GameEventWrite {
 	w := opencloud.GameEventWrite{
 		Title:       evStrPtr(n, "title"),
@@ -233,7 +246,6 @@ func evWrite(n provider.Attributes) opencloud.GameEventWrite {
 		}
 		w.FeaturingStatus = &s
 	}
-	w.Categories = evStrSlice(n, "categories")
 	w.ThumbnailMediaIDs = evStrSlice(n, "thumbnail_media_ids")
 	return w
 }
@@ -294,15 +306,6 @@ func evStringList(vs []cty.Value) cty.Value {
 		return cty.ListValEmpty(cty.String)
 	}
 	return cty.ListVal(vs)
-}
-
-func evCanonicalCategory(s string) (string, bool) {
-	for _, c := range eventCategories {
-		if strings.EqualFold(c, s) {
-			return c, true
-		}
-	}
-	return "", false
 }
 
 // evCanonicalTime converts an API timestamp to eventTimeLayout. An unparseable

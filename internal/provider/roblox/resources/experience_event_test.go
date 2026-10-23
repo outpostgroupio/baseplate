@@ -14,9 +14,9 @@ import (
 	"github.com/outpostgroupio/baseplate/internal/state"
 )
 
-// fakeEvents mimics the API: it stores what was written and, on read, reports
-// times in a DIFFERENT but equivalent representation (fractional seconds) to
-// prove Normalize/Read converge.
+// fakeEvents mimics the live API: it stores what was written and reports times
+// the way Roblox does ("+00:00" with milliseconds), to prove Normalize/Read
+// converge. placeId defaults to "" (live: 0 = no venue).
 type fakeEvents struct {
 	store       map[string]opencloud.GameEvent
 	lastCreate  opencloud.GameEventWrite
@@ -35,6 +35,10 @@ func deref(p *string) string {
 	return *p
 }
 
+func liveTime(canonical string) string {
+	return strings.TrimSuffix(canonical, "Z") + ".000+00:00"
+}
+
 func (f *fakeEvents) apply(ev *opencloud.GameEvent, w opencloud.GameEventWrite) {
 	set := func(dst *string, v *string) {
 		if v != nil {
@@ -44,18 +48,17 @@ func (f *fakeEvents) apply(ev *opencloud.GameEvent, w opencloud.GameEventWrite) 
 	set(&ev.Title, w.Title)
 	set(&ev.Subtitle, w.Subtitle)
 	set(&ev.Description, w.Description)
-	set(&ev.Tagline, w.Tagline)
+	if w.Tagline != nil && *w.Tagline != "" { // live: "" is ignored
+		ev.Tagline = *w.Tagline
+	}
 	set(&ev.Visibility, w.Visibility)
 	set(&ev.FeaturingStatus, w.FeaturingStatus)
 	set(&ev.PlaceID, w.PlaceID)
 	if w.StartTime != nil {
-		ev.StartTime = strings.TrimSuffix(*w.StartTime, "Z") + ".000Z"
+		ev.StartTime = liveTime(*w.StartTime)
 	}
 	if w.EndTime != nil {
-		ev.EndTime = strings.TrimSuffix(*w.EndTime, "Z") + ".000Z"
-	}
-	if w.Categories != nil {
-		ev.Categories = w.Categories
+		ev.EndTime = liveTime(*w.EndTime)
 	}
 	if w.ThumbnailMediaIDs != nil {
 		ev.ThumbnailMediaIDs = w.ThumbnailMediaIDs
@@ -64,7 +67,7 @@ func (f *fakeEvents) apply(ev *opencloud.GameEvent, w opencloud.GameEventWrite) 
 
 func (f *fakeEvents) Create(_ context.Context, universeID string, w opencloud.GameEventWrite) (opencloud.GameEvent, error) {
 	f.lastCreate, f.createdIn = w, universeID
-	ev := opencloud.GameEvent{ID: "9007199254740993123", UniverseID: universeID, PlaceID: "999", FeaturingStatus: "disabled"}
+	ev := opencloud.GameEvent{ID: "5795663543898604301", UniverseID: universeID, FeaturingStatus: "disabled"}
 	f.apply(&ev, w)
 	if f.store == nil {
 		f.store = map[string]opencloud.GameEvent{}
@@ -109,7 +112,6 @@ func eventDesired() provider.Attributes {
 		"start_time":          cty.StringVal("2026-12-01T10:00:00.250-08:00"),
 		"end_time":            cty.StringVal("2026-12-03T18:00:00Z"),
 		"visibility":          cty.StringVal("Private"),
-		"categories":          cty.ListVal([]cty.Value{cty.StringVal("newcontent"), cty.StringVal("festival")}),
 		"thumbnail_media_ids": cty.ListVal([]cty.Value{cty.StringVal("111"), cty.StringVal("222")}),
 		"featuring_enabled":   cty.False,
 	}
@@ -122,7 +124,7 @@ func TestExperienceEventCreateSendsCanonicalValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if id != "9007199254740993123" || f.createdIn != "42" {
+	if id != "5795663543898604301" || f.createdIn != "42" {
 		t.Fatalf("id=%q universe=%q", id, f.createdIn)
 	}
 	w := f.lastCreate
@@ -132,8 +134,8 @@ func TestExperienceEventCreateSendsCanonicalValues(t *testing.T) {
 	if deref(w.Visibility) != "private" || deref(w.FeaturingStatus) != "disabled" {
 		t.Fatalf("visibility/featuring sent = %q / %q", deref(w.Visibility), deref(w.FeaturingStatus))
 	}
-	if strings.Join(w.Categories, ",") != "newContent,festival" {
-		t.Fatalf("categories sent = %v", w.Categories)
+	if strings.Join(w.ThumbnailMediaIDs, ",") != "111,222" {
+		t.Fatalf("thumbnails sent = %v", w.ThumbnailMediaIDs)
 	}
 	if w.Tagline != nil || w.PlaceID != nil || w.GroupID != nil {
 		t.Fatal("undeclared attributes must not be sent")
@@ -155,6 +157,7 @@ func TestExperienceEventGroupIDCreateOnly(t *testing.T) {
 	if deref(f.lastCreate.GroupID) != "77" {
 		t.Fatalf("group id not sent on create: %+v", f.lastCreate)
 	}
+	d["title"] = cty.StringVal("changed")
 	if _, err := r.Update(context.Background(), id, d); err != nil {
 		t.Fatal(err)
 	}
@@ -163,9 +166,43 @@ func TestExperienceEventGroupIDCreateOnly(t *testing.T) {
 	}
 }
 
+// TestExperienceEventUpdateSendsOnlyChangedFields: Update PATCHes only real
+// changes, so an unchanged start (in any equivalent representation) is left
+// out and a past-start rejection can only come from an actual start_time edit.
+func TestExperienceEventUpdateSendsOnlyChangedFields(t *testing.T) {
+	f := &fakeEvents{}
+	r := ExperienceEvent(f)
+	id, _, err := r.Create(context.Background(), eventDesired())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := eventDesired()
+	d["title"] = cty.StringVal("Triple XP")
+	if _, err := r.Update(context.Background(), id, d); err != nil {
+		t.Fatal(err)
+	}
+	w := f.lastUpdate
+	if deref(w.Title) != "Triple XP" {
+		t.Fatalf("changed title not sent: %+v", w)
+	}
+	if w.StartTime != nil || w.EndTime != nil || w.Subtitle != nil || w.Visibility != nil ||
+		w.FeaturingStatus != nil || w.ThumbnailMediaIDs != nil || w.Description != nil {
+		t.Fatalf("unchanged fields must be omitted from PATCH, got %+v", w)
+	}
+
+	// Clearing thumbnails sends an explicit empty list.
+	d["thumbnail_media_ids"] = cty.ListValEmpty(cty.String)
+	if _, err := r.Update(context.Background(), id, d); err != nil {
+		t.Fatal(err)
+	}
+	if f.lastUpdate.ThumbnailMediaIDs == nil || len(f.lastUpdate.ThumbnailMediaIDs) != 0 {
+		t.Fatalf("cleared thumbnails must be sent as [], got %#v", f.lastUpdate.ThumbnailMediaIDs)
+	}
+}
+
 // TestExperienceEventConvergesThroughEngine drives plan.Build: after a create,
 // a re-plan of the same config (with an offset-form start_time the API reports
-// back as UTC with milliseconds) must be a no-op; then a title change is an
+// back as "+00:00" with milliseconds) must be a no-op; then a title change is an
 // update that converges too.
 func TestExperienceEventConvergesThroughEngine(t *testing.T) {
 	f := &fakeEvents{}
@@ -218,10 +255,12 @@ func (s singleProvider) Resources() map[string]provider.Resource { return s }
 func TestExperienceEventNormalizeRejectsBadValues(t *testing.T) {
 	r := ExperienceEvent(nil).(provider.Normalizer)
 	cases := map[string]func(provider.Attributes){
-		"RFC 3339":         func(d provider.Attributes) { d["start_time"] = cty.StringVal("2026-12-01 18:00") },
-		"must be after":    func(d provider.Attributes) { d["end_time"] = cty.StringVal("2026-12-01T18:00:00Z") },
-		"visibility":       func(d provider.Attributes) { d["visibility"] = cty.StringVal("moderated") },
-		"unknown category": func(d provider.Attributes) { d["categories"] = cty.ListVal([]cty.Value{cty.StringVal("party")}) },
+		"RFC 3339": func(d provider.Attributes) { d["start_time"] = cty.StringVal("2026-12-01 18:00") },
+		"at least 15 minutes": func(d provider.Attributes) {
+			d["end_time"] = cty.StringVal("2026-12-01T18:14:59Z")
+		},
+		"visibility": func(d provider.Attributes) { d["visibility"] = cty.StringVal("moderated") },
+		"tagline":    func(d provider.Attributes) { d["tagline"] = cty.StringVal("") },
 	}
 	for want, mutate := range cases {
 		d := eventDesired()
@@ -229,6 +268,12 @@ func TestExperienceEventNormalizeRejectsBadValues(t *testing.T) {
 		if _, err := r.Normalize(d); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: got %v", want, err)
 		}
+	}
+	// Exactly 15 minutes is allowed.
+	d := eventDesired()
+	d["end_time"] = cty.StringVal("2026-12-01T18:15:00Z")
+	if _, err := r.Normalize(d); err != nil {
+		t.Fatalf("15-minute event must be valid: %v", err)
 	}
 }
 
@@ -251,7 +296,7 @@ func TestExperienceEventNormalizeLeavesUnknownAndInputAlone(t *testing.T) {
 func TestExperienceEventReadAndNotFound(t *testing.T) {
 	f := &fakeEvents{store: map[string]opencloud.GameEvent{"5": {
 		ID: "5", UniverseID: "42", PlaceID: "999", Title: "T", Subtitle: "S",
-		StartTime: "2026-12-01T18:00:00.123+00:00", EndTime: "2026-12-01T19:00:00Z",
+		StartTime: "2026-12-01T18:00:00.123+00:00", EndTime: "2026-12-01T19:00:00+00:00",
 		Visibility: "public", FeaturingStatus: "enabled",
 	}}}
 	r := ExperienceEvent(f)
@@ -263,8 +308,11 @@ func TestExperienceEventReadAndNotFound(t *testing.T) {
 		!got["featuring_enabled"].True() || got["universe_id"].AsString() != "42" {
 		t.Fatalf("read = %#v", got)
 	}
-	if !got["categories"].RawEquals(cty.ListValEmpty(cty.String)) {
-		t.Fatalf("empty categories must read as an empty list, got %#v", got["categories"])
+	if !got["thumbnail_media_ids"].RawEquals(cty.ListValEmpty(cty.String)) {
+		t.Fatalf("no thumbnails must read as an empty list, got %#v", got["thumbnail_media_ids"])
+	}
+	if _, ok := got["tagline"]; ok {
+		t.Fatal("an unset (empty) tagline must not be reported")
 	}
 	if _, err := r.Read(context.Background(), "nope"); !errors.Is(err, provider.ErrNotFound) {
 		t.Fatalf("want ErrNotFound, got %v", err)
