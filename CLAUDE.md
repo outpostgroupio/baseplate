@@ -69,8 +69,11 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
 
 ## Roblox spec gotchas (learned; verify against vendored specs before assuming)
 - Universe `displayName`/`description`/`visibility`/`ageRating` are **read-only** on the v2 API
-  (set via the root place). Writable: `voiceChatEnabled`, `desktop/mobile/tabletEnabled`,
-  `privateServerPriceRobux`.
+  (name/description follow the root place → `roblox_place_config`). Writable: `voiceChatEnabled`,
+  `desktop/mobile/tablet/console/vrEnabled`, `privateServerPriceRobux`, the `*SocialLink` objects.
+- Place config: `GET/PATCH /cloud/v2/universes/{u}/places/{p}?updateMask=` (scope
+  `universe.place:write`, distinct from publish's `universe-places:write`); PATCH 409s while the
+  place is open in Team Create.
 - Assets are **user- or group-owned** (`creationContext.creator.{userId|groupId}`), not
   universe-owned. Create = multipart (`request` JSON part + `fileContent` file) → async
   Operation → poll `/v1/operations/{id}`. Base `https://apis.roblox.com/assets`.
