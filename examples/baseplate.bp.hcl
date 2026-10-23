@@ -15,6 +15,14 @@ resource "roblox_experience" "main" {
   desktop_enabled    = true
   console_enabled    = false
   vr_enabled         = false
+
+  # Private servers: a price enables them (0 = free, else 10-500 Robux);
+  # private_servers_enabled = false disables them.
+  private_server_price = 50
+
+  # Social links: set both uri and title to create one; uri = "" removes it.
+  discord_link_uri   = "https://discord.gg/your-invite"
+  discord_link_title = "Join our Discord"
 }
 
 # Configures an existing place. On the root place, display_name/description are

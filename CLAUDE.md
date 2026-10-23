@@ -71,6 +71,18 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
 - Universe `displayName`/`description`/`visibility`/`ageRating` are **read-only** on the v2 API
   (name/description follow the root place → `roblox_place_config`). Writable: `voiceChatEnabled`,
   `desktop/mobile/tablet/console/vrEnabled`, `privateServerPriceRobux`, the `*SocialLink` objects.
+  **Unset fields are omitted from GET** (no price = private servers off; no link = unset).
+  - **Clearing = masked + omitted from the body** (verified live). An explicit JSON `null` for
+    `privateServerPriceRobux` 400s ("payload is not correctly formatted"); `null` for a link is
+    accepted but omission is the safe form. Price `0` is a real (free) price: valid values are
+    `0` or 10–500, so 0 ≠ disabled.
+  - Social links accept **sub-path masks** (`discordSocialLink.uri`/`.title`) that patch half of
+    an existing link; creating a link via a sub-path 400s ("update mask must contain all social
+    link fields when the link is being created"). Title 1–70 chars; uri validated per platform.
+  - Visibility is written via `POST /legacy-develop/v1/universes/{id}/activate|deactivate`
+    (EXPERIMENTAL, scope `legacy-universe:manage`); legacy errors use the
+    `{"errors":[{code,message}]}` envelope. Without the scope: `403 Scope not authorized.` (the
+    test key lacks it, so activate/deactivate are **not yet live-verified**).
 - Place config: `GET/PATCH /cloud/v2/universes/{u}/places/{p}?updateMask=` (scope
   `universe.place:write`, distinct from publish's `universe-places:write`); PATCH 409s while the
   place is open in Team Create.

@@ -11,7 +11,7 @@ during `apply`/`destroy`, so grant both sides.
 
 | Resource | Scopes |
 |---|---|
-| `roblox_experience` | `universe:write` |
+| `roblox_experience` | `universe:write` (plus `legacy-universe:manage` if you set `public`) |
 | `roblox_place` | `universe-places:write` |
 | `roblox_place_config` | `universe.place:read`, `universe.place:write` |
 | `roblox_asset` | `asset:read`, `asset:write` |
@@ -27,6 +27,10 @@ A few are easy to miss because they don't match the "obvious" name:
   `universe.place:write`. Using the wrong one gives `401 … insufficient scope`. Conversely,
   `roblox_place_config` (name/description/server size) uses `universe.place:write`, not
   `universe-places:write`.
+- **`legacy-universe:manage`** is needed only for `roblox_experience.public`, which flips
+  visibility through Roblox's EXPERIMENTAL `legacy-develop` activate/deactivate endpoints (the v2
+  universe API can't write visibility). Without it, apply fails with
+  `403 Scope not authorized.` The other `roblox_experience` attributes need only `universe:write`.
 - **`universe.secret:read` / `universe.secret:write`** are separate from `universe:write` — a key
   that can edit universe config still can't touch secrets without them.
 - **`universe.event:read` / `universe.event:write`** for `roblox_experience_event` are also separate
