@@ -4,18 +4,22 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+
+	"github.com/outpostgroupio/baseplate/internal/addr"
 )
 
 type Resource struct {
-	Type         string                     `json:"type"`
-	Name         string                     `json:"name"`
+	Type string `json:"type"`
+	Name string `json:"name"`
+	// Key is the for_each instance key; empty for a resource without for_each.
+	Key          string                     `json:"index_key,omitempty"`
 	ID           string                     `json:"id"`
 	Attributes   map[string]json.RawMessage `json:"attributes"`
 	Triggers     map[string]json.RawMessage `json:"triggers,omitempty"`
 	Dependencies []string                   `json:"dependencies,omitempty"`
 }
 
-func (r Resource) Address() string { return r.Type + "." + r.Name }
+func (r Resource) Address() string { return addr.Format(r.Type, r.Name, r.Key) }
 
 type State struct {
 	Version   int        `json:"version"`
@@ -27,7 +31,11 @@ type State struct {
 // CurrentVersion is the state-file format version this build writes and reads.
 // A file with a higher version is rejected (forward-incompatible); lower
 // versions are migrated up via the migrations table.
-const CurrentVersion = 1
+//
+// Version 2 added Resource.Key (`index_key`) for for_each instances. The bump
+// exists so an older binary refuses a state file that may hold keyed resources
+// (it would otherwise collapse every instance onto one `type.name` address).
+const CurrentVersion = 2
 
 func New() *State {
 	return &State{Version: CurrentVersion, Lineage: newLineage()}
@@ -37,9 +45,12 @@ func New() *State {
 // so it may add/rename/reshape fields. applyMigrations stamps the version.
 type migrator func(map[string]json.RawMessage) (map[string]json.RawMessage, error)
 
-// migrations[v] upgrades v -> v+1. Empty today (CurrentVersion == 1); the first
-// future format change adds migrations[1] and bumps CurrentVersion to 2.
-var migrations = map[int]migrator{}
+// migrations[v] upgrades v -> v+1.
+var migrations = map[int]migrator{
+	// v1 -> v2: index_key is new and optional; a v1 resource is singular, which
+	// is exactly an absent index_key. Nothing to rewrite.
+	1: func(doc map[string]json.RawMessage) (map[string]json.RawMessage, error) { return doc, nil },
+}
 
 // applyMigrations upgrades doc from version `from` to `to`, applying
 // table[from], table[from+1], … and stamping doc["version"] after each step.
@@ -71,6 +82,13 @@ func (s *State) Marshal() ([]byte, error) {
 }
 
 func Unmarshal(b []byte) (*State, error) {
+	return unmarshal(b, CurrentVersion, migrations)
+}
+
+// unmarshal is Unmarshal with the supported version and migration table
+// injected, so the forward-incompatibility gate can be tested as if this were
+// an older binary.
+func unmarshal(b []byte, current int, table map[int]migrator) (*State, error) {
 	var peek struct {
 		Version int `json:"version"`
 	}
@@ -80,14 +98,14 @@ func Unmarshal(b []byte) (*State, error) {
 	switch {
 	case peek.Version <= 0:
 		return nil, fmt.Errorf("state file is missing a version (corrupt or not a baseplate state file)")
-	case peek.Version > CurrentVersion:
-		return nil, fmt.Errorf("state file was written by a newer version of baseplate (state version %d, this build supports %d); upgrade baseplate", peek.Version, CurrentVersion)
-	case peek.Version < CurrentVersion:
+	case peek.Version > current:
+		return nil, fmt.Errorf("state file was written by a newer version of baseplate (state version %d, this build supports %d); upgrade baseplate", peek.Version, current)
+	case peek.Version < current:
 		var doc map[string]json.RawMessage
 		if err := json.Unmarshal(b, &doc); err != nil {
 			return nil, err
 		}
-		doc, err := applyMigrations(doc, peek.Version, CurrentVersion, migrations)
+		doc, err := applyMigrations(doc, peek.Version, current, table)
 		if err != nil {
 			return nil, err
 		}
