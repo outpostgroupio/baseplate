@@ -258,12 +258,16 @@ func run(args []string, s streams) int {
 		if err := plan.ResolveImports(context.Background(), p, st, pl, toResolve); err != nil {
 			return err
 		}
+		filterPlanByTarget(pl, tgt)
+		pl.PreventDestroy = append(pl.PreventDestroy, cfg.PreventDestroy...)
+		if err := pl.CheckPreventDestroy(); err != nil {
+			return err
+		}
 		if generateConfigOut != "" {
 			if err := generateConfig(context.Background(), p, imports, declared, generateConfigOut, s.out); err != nil {
 				return err
 			}
 		}
-		filterPlanByTarget(pl, tgt)
 		if err := output.Emit(s.out, fmtOf(jsonOut), "plan",
 			pl.RenderText(true),
 			planResult{Changes: pl.JSONChanges(), Summary: pl.Summary(), Warnings: pl.Warnings()}); err != nil {
@@ -358,13 +362,22 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 	}
 	var desired []plan.DesiredResource
 	var imports []plan.ImportBlock
-	var emptyForEach []string
+	var emptyForEach, protected []string
 	if !destroy {
 		cfg, err := config.LoadConfig(cfgPath, p)
 		if err != nil {
 			return err
 		}
-		desired, imports, emptyForEach = cfg.Resources, cfg.Imports, cfg.EmptyForEach
+		desired, imports, emptyForEach, protected = cfg.Resources, cfg.Imports, cfg.EmptyForEach, cfg.PreventDestroy
+	} else if _, statErr := os.Stat(cfgPath); statErr == nil {
+		// destroy plans against no desired resources, but still reads the
+		// config (when there is one) for lifecycle.prevent_destroy. As in
+		// Terraform, the protection lives only in config.
+		cfg, err := config.LoadConfig(cfgPath, p)
+		if err != nil {
+			return err
+		}
+		protected = cfg.PreventDestroy
 	}
 	b, localFallback, err := openBackend(cfgPath, statePath)
 	if err != nil {
@@ -401,6 +414,10 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 		return err
 	}
 	filterPlanByTarget(pl, tgt)
+	pl.PreventDestroy = append(pl.PreventDestroy, protected...)
+	if err := pl.CheckPreventDestroy(); err != nil {
+		return err
+	}
 
 	if pl.HasChanges() {
 		if format == output.Text {
