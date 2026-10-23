@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/outpostgroupio/baseplate/internal/provider"
 	"github.com/outpostgroupio/baseplate/internal/state"
@@ -35,6 +36,9 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 		}
 		seen[imp.Address] = true
 		i, ok := idx[imp.Address]
+		if !ok && strings.HasSuffix(imp.Address, "]") {
+			return fmt.Errorf("import target %q is not a declared instance (no resource block's for_each produces that key)", imp.Address)
+		}
 		if !ok {
 			return fmt.Errorf("import target %q is not declared as a resource (add a resource block, or run plan --generate-config=FILE to generate one)", imp.Address)
 		}
@@ -50,7 +54,7 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 			}
 			return err
 		}
-		d := DesiredResource{Type: c.Type, Name: nameFromAddress(c.Address), Attributes: c.Desired, Refs: c.Refs}
+		d := DesiredResource{Type: c.Type, Name: c.Name, Key: c.Key, Attributes: c.Desired, Refs: c.Refs}
 		effectiveDesired := mergeRefsFromState(d, s)
 		diffs := diffAttrs(actual, effectiveDesired, r.Computed())
 		c.ImportID = imp.ID
@@ -64,13 +68,4 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 		}
 	}
 	return nil
-}
-
-func nameFromAddress(address string) string {
-	for i := 0; i < len(address); i++ {
-		if address[i] == '.' {
-			return address[i+1:]
-		}
-	}
-	return address
 }

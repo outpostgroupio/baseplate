@@ -8,6 +8,7 @@ import (
 
 	"github.com/zclconf/go-cty/cty"
 
+	"github.com/outpostgroupio/baseplate/internal/addr"
 	"github.com/outpostgroupio/baseplate/internal/provider"
 )
 
@@ -25,6 +26,7 @@ type JSONAttr struct {
 }
 type JSONChange struct {
 	Address  string     `json:"address"`
+	Key      string     `json:"key,omitempty"`
 	Action   string     `json:"action"`
 	ImportID string     `json:"import_id,omitempty"`
 	Attrs    []JSONAttr `json:"attributes,omitempty"`
@@ -41,7 +43,7 @@ type Summary struct {
 func (p *Plan) JSONChanges() []JSONChange {
 	out := make([]JSONChange, 0, len(p.Changes))
 	for _, c := range p.Changes {
-		jc := JSONChange{Address: c.Address, Action: c.Action.String(), ImportID: c.ImportID}
+		jc := JSONChange{Address: c.Address, Key: c.Key, Action: c.Action.String(), ImportID: c.ImportID}
 		sensitive := map[string]bool{}
 		for _, k := range c.Sensitive {
 			sensitive[k] = true
@@ -56,6 +58,67 @@ func (p *Plan) JSONChanges() []JSONChange {
 		out = append(out, jc)
 	}
 	return out
+}
+
+// Warnings flags plan shapes that are legal but probably unintended. Today that
+// is one: a resource (type.name) that both destroys and creates instances in the
+// same plan, which is what renaming a for_each key looks like. The new instance
+// is a new remote object with a new id (for roblox_asset, a fresh upload), so it
+// is worth a second look before applying. The result is nil when there is
+// nothing to warn about; order is by resource address.
+func (p *Plan) Warnings() []string {
+	type counts struct {
+		del, add int
+		oldAddr  string
+		newAddr  string
+		oldID    string
+	}
+	byRes := map[string]*counts{}
+	for _, c := range p.Changes {
+		if c.ImportID != "" || (c.Action != provider.ActionDelete && c.Action != provider.ActionCreate) {
+			continue
+		}
+		base := addr.Format(c.Type, c.Name, "")
+		n := byRes[base]
+		if n == nil {
+			n = &counts{}
+			byRes[base] = n
+		}
+		if c.Action == provider.ActionDelete {
+			n.del++
+			if n.oldAddr == "" {
+				n.oldAddr, n.oldID = c.Address, c.ID
+			}
+		} else {
+			n.add++
+			if n.newAddr == "" {
+				n.newAddr = c.Address
+			}
+		}
+	}
+	var bases []string
+	for b, n := range byRes {
+		if n.del > 0 && n.add > 0 {
+			bases = append(bases, b)
+		}
+	}
+	sort.Strings(bases)
+	var out []string
+	for _, b := range bases {
+		n := byRes[b]
+		out = append(out, fmt.Sprintf(
+			"%s: %d instance(s) will be destroyed and %d created in the same plan. If a for_each key was renamed, "+
+				"the new instance is a new remote object with a new id. To keep the existing object, drop the old "+
+				"instance from state and adopt it under the new key instead, e.g. baseplate import %s %s "+
+				"(moved blocks are planned to automate this).",
+			b, n.del, n.add, shellQuote(n.newAddr), n.oldID))
+	}
+	return out
+}
+
+// shellQuote wraps s in single quotes for copy-pasting into a POSIX shell.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // Summary counts changes by action, matching the RenderText footer.
@@ -144,6 +207,9 @@ func (p *Plan) RenderText(color bool) string {
 				fmt.Fprintf(&b, "    %s = (known after apply)\n", k)
 			}
 		}
+	}
+	for _, w := range p.Warnings() {
+		fmt.Fprintf(&b, "\nWarning: %s\n", w)
 	}
 	fmt.Fprintf(&b, "\nPlan: %d to import, %d to add, %d to change, %d to destroy.\n", imp, add, chg, del)
 	return b.String()

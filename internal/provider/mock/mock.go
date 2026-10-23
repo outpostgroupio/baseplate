@@ -13,9 +13,10 @@ import (
 )
 
 type Provider struct {
-	mu    sync.Mutex
-	store map[string]provider.Attributes
-	seq   int
+	mu      sync.Mutex
+	store   map[string]provider.Attributes
+	seq     int
+	creates int
 }
 
 func New() *Provider {
@@ -38,6 +39,14 @@ func (p *Provider) Store() map[string]provider.Attributes {
 		out[id] = clone(a)
 	}
 	return out
+}
+
+// Creates returns how many Create calls the provider has served, so tests can
+// assert an operation adopted resources rather than creating them.
+func (p *Provider) Creates() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.creates
 }
 
 func (p *Provider) Resources() map[string]provider.Resource {
@@ -89,6 +98,7 @@ func (r *res) Create(_ context.Context, desired provider.Attributes) (string, pr
 	r.p.mu.Lock()
 	defer r.p.mu.Unlock()
 	r.p.seq++
+	r.p.creates++
 	id := fmt.Sprintf("%s/%d", r.typ, r.p.seq)
 	r.p.store[id] = clone(desired)
 	return id, clone(desired), nil

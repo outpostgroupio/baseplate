@@ -39,7 +39,7 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 				return err
 			}
 			if err := commit(b, s, state.Resource{
-				Type: c.Type, Name: name(c.Address), ID: c.ImportID,
+				Type: c.Type, Name: c.Name, Key: c.Key, ID: c.ImportID,
 				Attributes: encodeValues(actual), Triggers: trigs, Dependencies: c.DependsOn,
 			}); err != nil {
 				return err
@@ -187,18 +187,9 @@ func encodeValues(attrs provider.Attributes) map[string]json.RawMessage {
 
 func stateResource(c plan.Change, id string, attrs provider.Attributes, triggers map[string]json.RawMessage) state.Resource {
 	return state.Resource{
-		Type: c.Type, Name: name(c.Address), ID: id,
+		Type: c.Type, Name: c.Name, Key: c.Key, ID: id,
 		Attributes: encodeValues(attrs), Triggers: triggers, Dependencies: c.DependsOn,
 	}
-}
-
-func name(address string) string {
-	for i := 0; i < len(address); i++ {
-		if address[i] == '.' {
-			return address[i+1:]
-		}
-	}
-	return address
 }
 
 // Import adopts an existing remote resource into state: it reads the resource by
@@ -237,7 +228,8 @@ func Import(ctx context.Context, p provider.Provider, b backend.Backend, s *stat
 	}
 	return commit(b, s, state.Resource{
 		Type:         d.Type,
-		Name:         name(address),
+		Name:         d.Name,
+		Key:          d.Key,
 		ID:           id,
 		Attributes:   encodeValues(actual),
 		Triggers:     trigs,
