@@ -59,6 +59,17 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 			if c.ID != "" {
 				outputs[c.Address] = withID(c.Actual, c.ID)
 			}
+			// Nothing changed remotely, but the dependency edges may have (e.g. a
+			// for_each dependency lost an instance). Refresh them so state never
+			// keeps an edge to something that's gone; write only on a real
+			// change so a converged apply doesn't churn the serial.
+			if st, ok := s.Find(c.Address); ok && !sameSet(st.Dependencies, c.DependsOn) {
+				st.Dependencies = c.DependsOn
+				s.Serial++
+				if err := b.Put(s); err != nil {
+					return err
+				}
+			}
 			continue
 		case provider.ActionCreate:
 			desired, err := resolveRefs(c, outputs)
@@ -247,4 +258,22 @@ func Import(ctx context.Context, p provider.Provider, b backend.Backend, s *stat
 		Triggers:     trigs,
 		Dependencies: d.DependsOn,
 	})
+}
+
+// sameSet reports whether a and b hold the same strings, ignoring order.
+func sameSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]int, len(a))
+	for _, x := range a {
+		seen[x]++
+	}
+	for _, x := range b {
+		if seen[x] == 0 {
+			return false
+		}
+		seen[x]--
+	}
+	return true
 }

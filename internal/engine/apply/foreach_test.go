@@ -232,3 +232,51 @@ resource "mock_child" "c" {
 	}
 	e.apply(pl)
 }
+
+// A no-op change whose dependencies changed (a dependency instance was
+// removed) rewrites its recorded Dependencies, so no stale edge stays in state.
+func TestNoopRefreshesRecordedDependencies(t *testing.T) {
+	e := newForEachEnv(t)
+	child := `
+resource "mock_child" "c" {
+  name   = "child"
+  parent = mock_thing.set
+}
+`
+	e.apply(e.plan(threeThings + child))
+	e.apply(e.plan(strings.Replace(threeThings, `"a", "b", "c"`, `"a", "c"`, 1) + child))
+	r, ok := e.s.Find("mock_child.c")
+	if !ok {
+		t.Fatal("mock_child.c missing from state")
+	}
+	want := []string{`mock_thing.set["a"]`, `mock_thing.set["c"]`}
+	if strings.Join(r.Dependencies, ",") != strings.Join(want, ",") {
+		t.Fatalf("recorded deps = %v, want %v", r.Dependencies, want)
+	}
+	persisted, err := e.b.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr, _ := persisted.Find("mock_child.c"); strings.Join(pr.Dependencies, ",") != strings.Join(want, ",") {
+		t.Fatalf("persisted deps = %v, want %v", pr.Dependencies, want)
+	}
+}
+
+// A converged apply (every change a no-op with unchanged dependencies) must
+// not write state or bump the serial.
+func TestNoopWithUnchangedDependenciesDoesNotBumpSerial(t *testing.T) {
+	e := newForEachEnv(t)
+	src := threeThings + `
+resource "mock_child" "c" {
+  name   = "child"
+  parent = mock_thing.set
+}
+`
+	e.apply(e.plan(src))
+	before := e.s.Serial
+	e.apply(e.plan(src))
+	if e.s.Serial != before {
+		t.Fatalf("converged apply bumped the serial %d -> %d", before, e.s.Serial)
+	}
+}
+
