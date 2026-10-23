@@ -119,7 +119,7 @@ Manages an experience event (virtual event) for live-ops: a scheduled, titled ev
 | `universe_id` | string | required, create-only | The universe that owns the event. Often a reference to an experience. Create-only. |
 | `visibility` | string | required, diffable | `public` or `private` (case-insensitive). Roblox may set `moderated` server-side, which then shows as drift. |
 
-`destroy` permanently deletes the event. Import by event id (`baseplate import roblox_experience_event.x <eventId>`). Changing `universe_id` or `group_id` does not move the event (both are create-only). An update sends only the fields that differ from the live event. An event that has already started can still be edited, but Roblox rejects any *new* `start_time` in the past. Categories and recurrence are not supported: the API currently rejects every categories payload, and recurrence has no effect.
+`destroy` permanently deletes the event. Import by event id (`baseplate import roblox_experience_event.x <eventId>`). Changing `universe_id` or `group_id` does not move the event (both are create-only). An update sends only the fields that differ from the live event. Events that have started or ended can still be edited and deleted, but Roblox rejects any *new* `start_time` in the past. Categories and recurrence are not supported: the API currently rejects every categories payload, and recurrence has no effect.
 
 Requires the `universe.event:read`, `universe.event:write` [scopes](how-to/api-key-scopes.md).
 

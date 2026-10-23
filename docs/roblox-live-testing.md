@@ -53,7 +53,9 @@ secrets after destroy. Run it in isolation with `-run LiveSecret`.
 event 30 days out, converges, updates the title and start time, converges, destroys
 it and checks the event is gone (a real delete). It needs the
 `universe.event:read`/`universe.event:write` scopes and **skips** (rather than
-fails) when the key lacks them. Run it alone with `-run LiveExperienceEvent`.
+fails) when the key lacks them. Set `BASEPLATE_TEST_EVENT_THUMBNAIL` to an image
+asset id the key's owner can use to also exercise thumbnails (set on create,
+cleared on update). Run it alone with `-run LiveExperienceEvent`.
 
 ## Using the CLI directly
 With `ROBLOX_API_KEY` exported, the `baseplate` CLI uses the real provider

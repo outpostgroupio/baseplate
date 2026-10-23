@@ -86,18 +86,22 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   stateless w.r.t. prior triggers, so a name-only edit still re-uploads/re-moderates the icon (see
   the slice-8 deferral note in the Roadmap section below — a general engine fix, not badge-specific).
   See `docs/superpowers/specs/2026-07-13-baseplate-phase2-badge-design.md`.
-- **`roblox_experience_event` (experience / virtual events) — SHIPPED, NOT live-verified:** live-ops
+- **`roblox_experience_event` (experience / virtual events) — SHIPPED, proven live:** live-ops
   events on the EXPERIMENTAL `virtual-events/v3` API (create on the universe collection; read/PATCH/
   real DELETE on `/game-events/{eventId}`). State/import id is the bare event id; `universe_id` and
-  `group_id` are create-only (`Computed`). `categories`/`thumbnail_media_ids` are ordered lists
-  (rank = position+1). New reusable engine capability **`provider.Normalizer`**: plan canonicalises
-  desired attrs before diffing (and validates them at plan time, for creates too), so
-  `start_time`/`end_time` in any RFC 3339 offset/precision converge against Roblox's UTC read-back
-  (both sides → UTC, whole seconds). `parseAPIError` now also reads the gateway `{"errors":[…]}` and
-  RFC 7807 ProblemDetails envelopes; plan rendering shows lists HCL-style. **Live probe (2026-10-23):**
-  the test key lacks `universe.event:read/write`, so every call (list, create, single GET) returned
-  `403 Scope not authorized.`; the gated live test (`TestLiveExperienceEventLifecycle`) skips on that.
-  Recurrence was deliberately left out (accepted by the API but has no effect and isn't read back).
+  `group_id` are create-only (`Computed`). `thumbnail_media_ids` is an ordered list (0-based rank).
+  New reusable engine capability **`provider.Normalizer`**: plan canonicalises desired attrs before
+  diffing (and validates them at plan time, for creates too), so `start_time`/`end_time` in any
+  RFC 3339 offset/precision converge against Roblox's `+00:00`-with-milliseconds read-back (both
+  sides → UTC, whole seconds). `parseAPIError` now also reads the gateway `{"errors":[…]}` and
+  RFC 7807 ProblemDetails envelopes; plan rendering shows lists HCL-style. Live lifecycle verified
+  (`TestLiveExperienceEventLifecycle`: create→converge→update title+start+thumbnails→converge→
+  destroy→gone). Live-discovered + fixed: the single-event GET never returns thumbnails (read them
+  via the list endpoint); thumbnail ranks are 0-based; an unset venue is `placeId: 0`; events must
+  last ≥ 15 min; an empty tagline is ignored; DELETE is eventually consistent. **Categories were cut
+  from v1:** the API rejects every categories payload with `InvalidCategories`, and a create that
+  carries them still creates the event (orphan). Recurrence is also out (no effect). Update PATCHes
+  only fields that differ from the live event. See the CLAUDE.md spec gotchas for the full list.
 - **Release automation COMPLETE:** goreleaser pipeline (`.goreleaser.yaml` + `.github/workflows/release.yml`)
   — a `v*` tag push cross-compiles 6 static `CGO_ENABLED=0` binaries (linux/darwin/windows ×
   amd64/arm64) and publishes a GitHub Release (archives, `checksums.txt`, grouped changelog,
@@ -180,13 +184,12 @@ Phase 1 design + rationale, and `docs/superpowers/plans/` for the executed task-
     so the upload fires only when its trigger actually changed. Deliberately NOT folded into the
     badge slice — it's a general engine capability. (`roblox_place` doesn't hit this because it is
     all-computed: the trigger is its *only* change signal.)
-  - **`roblox_experience_event` open items (needs a key with `universe.event:*`):** run
-    `BASEPLATE_LIVE=1 … -run LiveExperienceEvent` to confirm the wire shapes (id string vs number,
-    time precision/format of the read-back, whether `rank` is 0- or 1-based or renumbered), what
-    moderation/validation reject, and how the API treats edits/deletes of events whose start time
-    has passed or that are in progress (unprobed — the spec is silent; the resource surfaces the
-    API's error as-is). Also unverified: whether PATCHing `categories: []` clears them. Until then
-    the resource is documented as experimental.
+  - **`roblox_experience_event` follow-ups:** re-add `categories` if Roblox fixes
+    `InvalidCategories` (re-probe: every value/rank/`[]` was rejected on 2026-10-23, and a create
+    with categories still created the event, so never send them on create until that's fixed);
+    `group_id` hosting is untested live (the test key is user-owned); moderation of title/description
+    text wasn't triggered by the probes, so its error shape is unknown. Thumbnail reads cost one
+    extra list call per refresh because the single GET drops them.
   - **From slice 8 (`roblox_badge`) review, minor deferrals:** `Delete` PATCHes
     `{name:"",description:"",enabled:false}` (zero-valued name/description, no updateMask) — may
     blank the abandoned badge's name on Roblox's side; untested. A read-then-patch or
