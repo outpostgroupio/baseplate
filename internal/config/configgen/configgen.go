@@ -77,11 +77,25 @@ func sortedKeys(spec hcldec.ObjectSpec) []string {
 }
 
 func zeroValue(t cty.Type) cty.Value {
-	switch t {
-	case cty.Number:
+	// The placeholder must have the attribute's type so the generated HCL still
+	// decodes (a "" placeholder for a list/map attribute would be a type error).
+	switch {
+	case t == cty.Number:
 		return cty.NumberIntVal(0)
-	case cty.Bool:
+	case t == cty.Bool:
 		return cty.False
+	case t.IsListType():
+		return cty.ListValEmpty(t.ElementType())
+	case t.IsSetType():
+		return cty.SetValEmpty(t.ElementType())
+	case t.IsMapType():
+		return cty.MapValEmpty(t.ElementType())
+	case t.IsObjectType():
+		attrs := map[string]cty.Value{}
+		for k, at := range t.AttributeTypes() {
+			attrs[k] = zeroValue(at)
+		}
+		return cty.ObjectVal(attrs)
 	default:
 		return cty.StringVal("")
 	}

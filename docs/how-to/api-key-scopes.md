@@ -20,6 +20,7 @@ during `apply`/`destroy`, so grant both sides.
 | `roblox_badge` | `legacy-universe.badge:manage-and-spend-robux`, `legacy-universe.badge:write`, `legacy-badge:manage` |
 | `roblox_universe_secret` | `universe.secret:read`, `universe.secret:write` |
 | `roblox_experience_event` | `universe.event:read`, `universe.event:write` |
+| `roblox_analytics_alert` | `universe.analytics.alert:read`, `universe.analytics.alert:write` |
 
 A few are easy to miss because they don't match the "obvious" name:
 
@@ -46,6 +47,12 @@ A few are easy to miss because they don't match the "obvious" name:
   two `legacy-universe.badge:*` scopes alone sufficient for the full lifecycle, including icon
   upload. Grant all three to match the spec. Reads are public. The badge itself is never
   hard-deleted; `destroy` disables it.
+- **`universe.analytics.alert:read` / `universe.analytics.alert:write`** for
+  `roblox_analytics_alert` are their own scopes, separate from `universe:write`. Without them the
+  gateway answers `403 Scope not authorized.` Even with the scopes, the experience itself must be
+  eligible for alerts (the Performance dashboard's 100+ daily-active-user requirement; no opt-in
+  is documented). Otherwise every call returns `403 PERMISSION_DENIED … not enrolled in
+  PerformanceMonitoringV2`, which Baseplate reports as "not eligible for analytics alerts".
 
 ## Scopes for commands
 

@@ -102,6 +102,28 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   from v1:** the API rejects every categories payload with `InvalidCategories`, and a create that
   carries them still creates the event (orphan). Recurrence is also out (no effect). Update PATCHes
   only fields that differ from the live event. See the CLAUDE.md spec gotchas for the full list.
+- **`roblox_analytics_alert` IMPLEMENTED (not yet proven live):** production alerting on
+  experience metrics through Roblox's **EXPERIMENTAL** `analytics-alert-control-plane/v1` API. Full
+  CRUD with a real hard delete. `Read` lists and finds by id (`?ids=` filter; there is no single
+  GET), and import ids are `<universe>/<alertId>`. New `opencloud.AnalyticsAlertClient`. To make
+  read-back converge, the nested wire shape is flattened into top-level attrs: `operator`/`threshold`/
+  `evaluation_mode`/`period_offset_multiplier` (from `condition`), `breakdown_dimension` (the API
+  allows one), `filters` as `map(set(string))`, `webhook_configuration_ids` as `set(string)` and
+  `enabled` (from `configState`). Sets are used so wire order can't cause drift. Read always
+  returns the empty value for unset optionals, so `""`/`{}`/`[]` in config converge and clear the
+  remote value. General fixes made along the way: plan rendering prints collection values as
+  compact JSON instead of a cty Go dump, `configgen.zeroValue` now gives typed empty collections
+  (closing the slice-6 deferral), and `opencloud.parseAPIError` also decodes the
+  `{"errorCode"}` and gateway `{"errors":[…]}` envelopes. **Live status:** the key first lacked
+  `universe.analytics.alert:*` (`403 Scope not authorized.`). Once the scopes were granted, every
+  endpoint returned `403 PERMISSION_DENIED "Universe … is not enrolled in
+  PerformanceMonitoringV2."`. The docs gate alerts on the Performance dashboard's **100+ DAU**
+  eligibility and document no opt-in, and the test universe is below that bar. The client now
+  translates that 403 into an actionable `AlertsNotEligibleError`, and the gated
+  `TestLiveAnalyticsAlertLifecycle` skips on it (and on any other 401/403). **Before calling this
+  proven,** run the live test against a universe with 100+ DAU and check: that `alertId` is really a string, that the list is
+  really unpaginated, that an empty `description`/`filter`/`breakdown` PATCH clears the value, how
+  `configState` behaves while `Syncing`, and how a moderated name is reported.
 - **Release automation COMPLETE:** goreleaser pipeline (`.goreleaser.yaml` + `.github/workflows/release.yml`)
   — a `v*` tag push cross-compiles 6 static `CGO_ENABLED=0` binaries (linux/darwin/windows ×
   amd64/arm64) and publishes a GitHub Release (archives, `checksums.txt`, grouped changelog,
@@ -181,9 +203,9 @@ Phase 1 design + rationale, and `docs/superpowers/plans/` for the executed task-
     `create_time`/`update_time` that `stateAttrs` never populates (harmless dead entries); the
     sensitive-set map is rebuilt at three render sites in `render.go` (factor into a helper); no
     client-level `SecretClient.Update` unit test (the re-seal path is covered by the live rotate).
-  - **From slice 6 (config generation, all defer):** `configgen.zeroValue` defaults a non-primitive
-    required attr (list/map/object) to `""` → type-mismatched placeholder HCL (inert — no resource
-    uses non-primitive attrs today); `configgen.Generate`'s doc comment says "sensitive is always a
+  - **From slice 6 (config generation, all defer):** ~~`configgen.zeroValue` defaults a non-primitive
+    required attr (list/map/object) to `""`~~ (FIXED with `roblox_analytics_alert`: typed empty
+    collections); `configgen.Generate`'s doc comment says "sensitive is always a
     placeholder" but optional+sensitive is actually omitted (value still never leaks; only sensitive
     attr today, `secret.value`, is Required); `roblox_asset` "one-of" `creator_user_id`/
     `creator_group_id` is omitted from generated config (a `# TODO`-worthy gap the generic emitter
