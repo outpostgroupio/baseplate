@@ -208,7 +208,7 @@ func publicError(id string, public bool, err error) error {
 	if public {
 		verb = "public"
 	}
-	return fmt.Errorf("roblox_experience: Roblox refused to make universe %s %s; check in Creator Hub that the key's owner can configure it and that the experience meets Roblox's requirements for going public: %w", id, verb, err)
+	return fmt.Errorf("roblox_experience: Roblox refused to make universe %s %s; check in Creator Hub that the key's owner can configure it and, when making it public, that the experience's maturity questionnaire is complete: %w", id, verb, err)
 }
 
 // Delete is a no-op: Baseplate adopts an existing universe's config but does

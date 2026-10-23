@@ -317,13 +317,11 @@ calls was removed, renamed or newly deprecated since the June spec. Corrections 
   - `public` via `POST /legacy-develop/v1/universes/{id}/activate`/`deactivate`, read back from v2
     `visibility`, called only when it differs, then a bounded poll (≤10×1s) until `visibility`
     matches. Live (key with `legacy-universe:manage`): `deactivate` → `200 {}`, idempotent on a
-    PRIVATE universe. **`activate` is refused** on the test universe with `403
-    {"code":3,"message":"You are not authorized to configure this universe.","field":"universeId"}`
-    (identical to the response for a universe the key doesn't own, so the cause isn't
-    identifiable from the API). So the **public flip, its convergence and any visibility lag are
-    still NOT live-verified**; the live `public` subtest skips on that refusal. Follow-up: find
-    out in Creator Hub why the test experience can't go public (e.g. an eligibility or account
-    requirement), then re-run `TestLiveExperienceExtras/public`. Without the scope the error is
+    PRIVATE universe. `activate` returned an opaque `403 {"code":3,"message":"You are not authorized
+    to configure this universe."}` until the experience's maturity questionnaire was completed in
+    Creator Hub; after that the **public flip, convergence and restore passed live** (2026-10-23,
+    `TestLiveExperienceExtras/public`). Docs should point users at the questionnaire when they hit
+    that 403. Without the scope the error is
     `403 {"code":0,"message":"Scope not authorized."}`; only that case is reported as a scope
     problem.
 - **New resource candidate: experience events** — `virtual-events/v3` full CRUD incl. real DELETE

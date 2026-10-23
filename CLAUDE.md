@@ -83,11 +83,10 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
     (EXPERIMENTAL, scope `legacy-universe:manage`); legacy errors use the
     `{"errors":[{code,message}]}` envelope. Without the scope: `403 {"code":0,"message":"Scope
     not authorized."}`. With it (verified live): `deactivate` → `200 {}` (application/json),
-    idempotent on an already-PRIVATE universe. `activate` on the test universe →
-    `403 {"code":3,"message":"You are not authorized to configure this universe.","field":"universeId"}`,
-    the same response as for a universe the key doesn't own, so it's a generic refusal (cause not
-    determined; the universe is user-owned, has a root place, and deactivate works). Hence the
-    public flip and any read-back lag are **not live-verified**; `roblox_experience` polls v2
+    idempotent on an already-PRIVATE universe. `activate` → `403 {"code":3,"message":"You are not
+    authorized to configure this universe."}` until the experience's **maturity questionnaire** is
+    completed in Creator Hub (the same opaque 403 as for a universe the key doesn't own); after
+    that, the public flip and restore pass live (2026-10-23). `roblox_experience` polls v2
     `visibility` (≤10×1s) after a toggle as a guard and only blames the scope when the 403 message
     mentions "scope".
 - Place config: `GET/PATCH /cloud/v2/universes/{u}/places/{p}?updateMask=` (scope
