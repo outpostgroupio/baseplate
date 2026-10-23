@@ -1,6 +1,6 @@
 # Example Baseplate config for a Roblox experience.
 #
-# Set ROBLOX_API_KEY in your environment (e.g. via a gitignored .env.local) and
+# Set ROBLOX_API_KEY in your environment (e.g. via a gitignored .env) and
 # run `baseplate plan` / `baseplate apply`. Replace the placeholder IDs below.
 
 provider "roblox" {
