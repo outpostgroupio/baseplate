@@ -48,7 +48,7 @@ func writeColorPNG(t *testing.T, path string, c color.RGBA) {
 // count against Roblox limits, so it stays at two Image assets (never Audio).
 // SKIPPED unless BASEPLATE_LIVE=1 and ROBLOX_API_KEY are set.
 //
-//	set -a; . ./.env.local; set +a
+//	set -a; . ./.env; set +a
 //	BASEPLATE_LIVE=1 go test ./internal/provider/roblox/ -run LiveForEach -v
 func TestLiveForEachAssets(t *testing.T) {
 	if os.Getenv("BASEPLATE_LIVE") != "1" {
