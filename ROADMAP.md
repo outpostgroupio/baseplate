@@ -160,7 +160,7 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   draft is pending; the first create refuses if live keys aren't declared (import first); `destroy`
   (Terraform-aligned) removes every plain key and publishes, leaving conditional rules alone — no
   DELETE API exists, so it reuses apply's PATCH-null path and checks; protect production config
-  with `lifecycle { prevent_destroy = true }` (engine meta-argument, separate PR).
+  with `lifecycle { prevent_destroy = true }` (see `docs/config-reference.md#lifecycle`).
   New `opencloud.ExperienceConfigClient`. Engine fixes for structural attrs: diff treats identical
   JSON encodings as equal (map vs object, list vs tuple), plan renders objects as JSON, config
   rejects references nested in a map (`IsWhollyKnown`), `configgen.zeroValue` handles non-primitive

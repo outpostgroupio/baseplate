@@ -19,9 +19,6 @@ resource "roblox_experience" "main" {
 #     to = roblox_experience_config.flags
 #     id = "10438196190"
 #   }
-#
-# `destroy` removes every plain key and publishes (conditional rules are kept).
-# Protect production config with `lifecycle { prevent_destroy = true }`.
 resource "roblox_experience_config" "flags" {
   universe_id = roblox_experience.main.id # resolved at apply time
 
@@ -37,6 +34,12 @@ resource "roblox_experience_config" "flags" {
     }
   }
 
-  # "Immediate" (default) or "GradualRollout" (~15 minutes).
+  # "Immediate" (default) or "GradualRollout" (~15-20 minutes).
   deployment_strategy = "Immediate"
+
+  # `destroy` removes every plain key and publishes (conditional rules are kept).
+  # For a production game, make any plan that would do that fail instead.
+  lifecycle {
+    prevent_destroy = true
+  }
 }

@@ -68,7 +68,7 @@ func (e *experienceConfig) Doc() provider.ResourceDoc {
 			"To protect an existing game, the **first** apply (create) refuses if the repository already has keys that aren't declared — `import` it first so the plan shows what would be removed. " +
 			"Conditional rules and the conditional (targeted) values of keys you keep are **preserved** (Baseplate never sends them, and verifies the staged draft and the published result); a removed key's conditional values are removed with it, and a type change for a key with conditional values is rejected by Roblox. " +
 			"Apply refuses if the repository has an unpublished draft (e.g. pending edits in Creator Hub) — publish or discard it first. " +
-			"`destroy` removes every plain key in the repository and publishes (the same ownership as apply; conditional rules are left alone, and an empty or never-published repository is a no-op). Protect production config with `lifecycle { prevent_destroy = true }`. " +
+			"`destroy` removes every plain key in the repository and publishes (the same ownership as apply; conditional rules are left alone, and an empty or never-published repository is a no-op). Protect production config with [`lifecycle { prevent_destroy = true }`](config-reference.md#lifecycle), which makes any plan that would destroy it fail. " +
 			"With `GradualRollout` (observed ~20 minutes), the API keeps returning the previous values until the rollout completes and rejects new drafts meanwhile, so a re-plan in that window shows the change again and an apply fails with a retry-later error. " +
 			"Numbers are stored as doubles (exact only up to 2^53).",
 		Scopes:      []string{"universe:read", "universe:write"},
