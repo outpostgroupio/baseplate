@@ -35,8 +35,10 @@ A few are easy to miss because they don't match the "obvious" name:
   hard-deleted; `destroy` disables it.
 - **`universe.analytics.alert:read` / `universe.analytics.alert:write`** for
   `roblox_analytics_alert` are their own scopes, separate from `universe:write`. Without them the
-  gateway answers `403 Scope not authorized.` Roblox also says the experience itself must be
-  eligible for analytics alerts, or every call returns `403 PERMISSION_DENIED`.
+  gateway answers `403 Scope not authorized.` Even with the scopes, the experience itself must be
+  eligible for alerts (the Performance dashboard's 100+ daily-active-user requirement; no opt-in
+  is documented). Otherwise every call returns `403 PERMISSION_DENIED … not enrolled in
+  PerformanceMonitoringV2`, which Baseplate reports as "not eligible for analytics alerts".
 
 ## Scopes are per-universe — and you must save
 

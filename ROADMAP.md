@@ -98,10 +98,14 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   remote value. General fixes made along the way: plan rendering prints collection values as
   compact JSON instead of a cty Go dump, `configgen.zeroValue` now gives typed empty collections
   (closing the slice-6 deferral), and `opencloud.parseAPIError` also decodes the
-  `{"errorCode"}` and gateway `{"errors":[…]}` envelopes. **Live status:** the test key lacks
-  `universe.analytics.alert:*`, and every endpoint returned `403 Scope not authorized.`, so the
-  gated `TestLiveAnalyticsAlertLifecycle` skips on 401/403. **Before calling this proven,** grant
-  the scopes, run the live test, and check: that `alertId` is really a string, that the list is
+  `{"errorCode"}` and gateway `{"errors":[…]}` envelopes. **Live status:** the key first lacked
+  `universe.analytics.alert:*` (`403 Scope not authorized.`). Once the scopes were granted, every
+  endpoint returned `403 PERMISSION_DENIED "Universe … is not enrolled in
+  PerformanceMonitoringV2."`. The docs gate alerts on the Performance dashboard's **100+ DAU**
+  eligibility and document no opt-in, and the test universe is below that bar. The client now
+  translates that 403 into an actionable `AlertsNotEligibleError`, and the gated
+  `TestLiveAnalyticsAlertLifecycle` skips on it (and on any other 401/403). **Before calling this
+  proven,** run the live test against a universe with 100+ DAU and check: that `alertId` is really a string, that the list is
   really unpaginated, that an empty `description`/`filter`/`breakdown` PATCH clears the value, how
   `configState` behaves while `Syncing`, and how a moderated name is reported.
 - **Release automation COMPLETE:** goreleaser pipeline (`.goreleaser.yaml` + `.github/workflows/release.yml`)

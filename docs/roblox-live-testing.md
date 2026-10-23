@@ -55,7 +55,10 @@ secrets after destroy. Run it in isolation with `-run LiveSecret`.
 `Baseplate live test <unixtime>` alert, converges, updates and disables it, converges,
 destroys it and verifies it's gone (a `t.Cleanup` deletes it if a step fails). If a
 preflight list returns 401/403 (missing scopes, or an experience that isn't
-alert-eligible) the test **skips** rather than fails.
+alert-eligible) the test **skips** rather than fails. Alerts only work for experiences
+that meet the Performance dashboard's 100+ daily-active-user eligibility bar. A small
+test universe gets `403 … not enrolled in PerformanceMonitoringV2` and skips, so point
+`BASEPLATE_TEST_UNIVERSE` at a qualifying experience to actually exercise it.
 
 ## Using the CLI directly
 With `ROBLOX_API_KEY` exported, the `baseplate` CLI uses the real provider

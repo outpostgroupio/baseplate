@@ -111,9 +111,15 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
   has **no `configState`**, so disable is a follow-up PATCH. `breakdown` allows at most one entry
   with one dimension, and that dimension must also be in `filter`. Service errors are
   `{"errorCode","message"}`. Scopes are **`universe.analytics.alert:read`/`:write`**; without them
-  the gateway returns `403 {"errors":[{"code":0,"message":"Scope not authorized."}]}`. That
-  403 is the only part verified live (2026-10-23): the test key lacked the scopes, so the shapes
-  above come from the spec and the creator-docs guide, not from live calls.
+  the gateway returns `403 {"errors":[{"code":0,"message":"Scope not authorized."}]}`. With the
+  scopes granted, a universe that isn't eligible gets this on **every** endpoint (list, create,
+  patch and delete alike): `403 {"errorCode":"PERMISSION_DENIED","message":"Universe N is not
+  enrolled in PerformanceMonitoringV2."}`. "PerformanceMonitoringV2" is undocumented. The documented
+  rule (creator-docs `production/analytics/alerts.md`) is that alerts are available to experiences
+  meeting the Performance dashboard eligibility requirement of **100+ DAU**, and no opt-in is
+  documented. The client translates this error to `opencloud.AlertsNotEligibleError`. Both 403s
+  are verified live (2026-10-23). The test universe is below the bar, so the request and response
+  shapes above come from the spec and docs, not from live calls.
 
 ## Workflow used here
 Superpowers: brainstorm → spec → bite-sized TDD plan → build (subagent-per-task, or inline for
