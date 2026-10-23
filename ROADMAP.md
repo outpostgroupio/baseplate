@@ -315,9 +315,17 @@ calls was removed, renamed or newly deprecated since the June spec. Corrections 
     Title 1–70 chars, uri 1–256 and validated per platform. **Live-verified** (set → sub-path
     retitle → clear, converged at each step, restored).
   - `public` via `POST /legacy-develop/v1/universes/{id}/activate`/`deactivate`, read back from v2
-    `visibility`, called only when it differs. **NOT live-verified:** the test key lacks
-    `legacy-universe:manage` (`403 {"errors":[{"code":0,"message":"Scope not authorized."}]}`);
-    the live test self-skips that part. Re-run it once the scope is granted.
+    `visibility`, called only when it differs, then a bounded poll (≤10×1s) until `visibility`
+    matches. Live (key with `legacy-universe:manage`): `deactivate` → `200 {}`, idempotent on a
+    PRIVATE universe. **`activate` is refused** on the test universe with `403
+    {"code":3,"message":"You are not authorized to configure this universe.","field":"universeId"}`
+    (identical to the response for a universe the key doesn't own, so the cause isn't
+    identifiable from the API). So the **public flip, its convergence and any visibility lag are
+    still NOT live-verified**; the live `public` subtest skips on that refusal. Follow-up: find
+    out in Creator Hub why the test experience can't go public (e.g. an eligibility or account
+    requirement), then re-run `TestLiveExperienceExtras/public`. Without the scope the error is
+    `403 {"code":0,"message":"Scope not authorized."}`; only that case is reported as a scope
+    problem.
 - **New resource candidate: experience events** — `virtual-events/v3` full CRUD incl. real DELETE
   (`POST /virtual-events/v3/universes/{u}/game-events`, `GET`/`PATCH`/`DELETE
   /virtual-events/v3/game-events/{id}`; scopes `universe.event:read`/`:write`; EXPERIMENTAL).

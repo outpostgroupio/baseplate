@@ -31,6 +31,9 @@ A few are easy to miss because they don't match the "obvious" name:
   visibility through Roblox's EXPERIMENTAL `legacy-develop` activate/deactivate endpoints (the v2
   universe API can't write visibility). Without it, apply fails with
   `403 Scope not authorized.` The other `roblox_experience` attributes need only `universe:write`.
+  Even with the scope, Roblox can refuse to make an experience public with
+  `403 You are not authorized to configure this universe.`. That isn't a scope problem, so check
+  in Creator Hub that the experience can be made public.
 - **`universe.secret:read` / `universe.secret:write`** are separate from `universe:write` — a key
   that can edit universe config still can't touch secrets without them.
 - **`universe.event:read` / `universe.event:write`** for `roblox_experience_event` are also separate

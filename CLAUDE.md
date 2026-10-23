@@ -81,8 +81,15 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
     link fields when the link is being created"). Title 1–70 chars; uri validated per platform.
   - Visibility is written via `POST /legacy-develop/v1/universes/{id}/activate|deactivate`
     (EXPERIMENTAL, scope `legacy-universe:manage`); legacy errors use the
-    `{"errors":[{code,message}]}` envelope. Without the scope: `403 Scope not authorized.` (the
-    test key lacks it, so activate/deactivate are **not yet live-verified**).
+    `{"errors":[{code,message}]}` envelope. Without the scope: `403 {"code":0,"message":"Scope
+    not authorized."}`. With it (verified live): `deactivate` → `200 {}` (application/json),
+    idempotent on an already-PRIVATE universe. `activate` on the test universe →
+    `403 {"code":3,"message":"You are not authorized to configure this universe.","field":"universeId"}`,
+    the same response as for a universe the key doesn't own, so it's a generic refusal (cause not
+    determined; the universe is user-owned, has a root place, and deactivate works). Hence the
+    public flip and any read-back lag are **not live-verified**; `roblox_experience` polls v2
+    `visibility` (≤10×1s) after a toggle as a guard and only blames the scope when the 403 message
+    mentions "scope".
 - Place config: `GET/PATCH /cloud/v2/universes/{u}/places/{p}?updateMask=` (scope
   `universe.place:write`, distinct from publish's `universe-places:write`); PATCH 409s while the
   place is open in Team Create.
