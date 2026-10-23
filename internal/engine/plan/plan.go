@@ -63,6 +63,11 @@ type Plan struct {
 	// zero instances. Set by the caller from config; Warnings uses it to call
 	// out that every instance of such a resource still in state is destroyed.
 	EmptyForEach []string
+	// PreventDestroy names the resource blocks (type.name) whose config sets
+	// lifecycle.prevent_destroy = true. Build fills it from the desired
+	// resources; callers add blocks that have no desired instance (destroy,
+	// or an empty for_each) from config. Checked by CheckPreventDestroy.
+	PreventDestroy []string
 }
 
 func (p *Plan) HasChanges() bool {
@@ -112,7 +117,7 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 		return nil, err
 	}
 
-	pl := &Plan{}
+	pl := &Plan{PreventDestroy: protectedBlocks(desired)}
 	for _, addr := range order {
 		if r, isDelete := deletes[addr]; isDelete {
 			pl.Changes = append(pl.Changes, Change{
