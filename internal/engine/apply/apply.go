@@ -9,6 +9,7 @@ import (
 	"github.com/zclconf/go-cty/cty"
 	ctyjson "github.com/zclconf/go-cty/cty/json"
 
+	"github.com/outpostgroupio/baseplate/internal/addr"
 	"github.com/outpostgroupio/baseplate/internal/engine/plan"
 	"github.com/outpostgroupio/baseplate/internal/provider"
 	"github.com/outpostgroupio/baseplate/internal/state"
@@ -206,6 +207,11 @@ func Import(ctx context.Context, p provider.Provider, b backend.Backend, s *stat
 		}
 	}
 	if !found {
+		for _, cand := range desired {
+			if cand.Key != "" && addr.Format(cand.Type, cand.Name, "") == address {
+				return fmt.Errorf("%s has for_each; import a specific instance, e.g. %s", address, addr.Format(cand.Type, cand.Name, cand.Key))
+			}
+		}
 		return fmt.Errorf("resource %q is not declared in the configuration", address)
 	}
 	if existing, ok := s.Find(address); ok {

@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zclconf/go-cty/cty"
 
+	"github.com/outpostgroupio/baseplate/internal/addr"
 	"github.com/outpostgroupio/baseplate/internal/cli/output"
 	"github.com/outpostgroupio/baseplate/internal/config"
 	"github.com/outpostgroupio/baseplate/internal/config/configgen"
@@ -113,8 +114,9 @@ type validateResult struct {
 }
 
 type planResult struct {
-	Changes []plan.JSONChange `json:"changes"`
-	Summary plan.Summary      `json:"summary"`
+	Changes  []plan.JSONChange `json:"changes"`
+	Summary  plan.Summary      `json:"summary"`
+	Warnings []string          `json:"warnings,omitempty"`
 }
 
 type importResult struct {
@@ -193,7 +195,7 @@ func run(args []string, s streams) int {
 	root.Version = version.Version
 	root.PersistentFlags().StringVar(&cfgPath, "config", "baseplate.bp.hcl", "config file")
 	root.PersistentFlags().StringVar(&statePath, "state", "baseplate.bpstate", "state file")
-	root.PersistentFlags().StringVar(&target, "target", "", "limit to a single resource address")
+	root.PersistentFlags().StringVar(&target, "target", "", `limit to one resource (type.name, every instance) or one instance (type.name["key"])`)
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "machine-readable output")
 	root.SetOut(s.out)
 	root.SetErr(s.err)
@@ -220,6 +222,10 @@ func run(args []string, s streams) int {
 
 	planCmd := &cobra.Command{Use: "plan", RunE: func(cmd *cobra.Command, _ []string) error {
 		cmdName = cmd.Name()
+		tgt, err := parseTarget(target)
+		if err != nil {
+			return err
+		}
 		desired, imports, err := load()
 		if err != nil {
 			return err
@@ -252,10 +258,10 @@ func run(args []string, s streams) int {
 				return err
 			}
 		}
-		filterPlanByTarget(pl, target)
+		filterPlanByTarget(pl, tgt)
 		if err := output.Emit(s.out, fmtOf(jsonOut), "plan",
 			pl.RenderText(true),
-			planResult{Changes: pl.JSONChanges(), Summary: pl.Summary()}); err != nil {
+			planResult{Changes: pl.JSONChanges(), Summary: pl.Summary(), Warnings: pl.Warnings()}); err != nil {
 			return err
 		}
 		if pl.HasChanges() {
@@ -291,6 +297,19 @@ func run(args []string, s streams) int {
 		},
 	})
 	root.AddCommand(&cobra.Command{
+		Use:   "show [address]",
+		Short: "Print the resources recorded in state",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cmdName = cmd.Name()
+			address := ""
+			if len(args) == 1 {
+				address = args[0]
+			}
+			return showRun(p, cfgPath, statePath, address, fmtOf(jsonOut), s)
+		},
+	})
+	root.AddCommand(&cobra.Command{
 		Use:   "version",
 		Short: "Print the baseplate version",
 		Args:  cobra.NoArgs,
@@ -314,6 +333,10 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 	verb := "apply"
 	if destroy {
 		verb = "destroy"
+	}
+	tgt, err := parseTarget(target)
+	if err != nil {
+		return err
 	}
 	var desired []plan.DesiredResource
 	var imports []plan.ImportBlock
@@ -357,7 +380,7 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 	if err := plan.ResolveImports(context.Background(), p, st, pl, imports); err != nil {
 		return err
 	}
-	filterPlanByTarget(pl, target)
+	filterPlanByTarget(pl, tgt)
 
 	if pl.HasChanges() {
 		if format == output.Text {
@@ -383,6 +406,11 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 // importRun adopts an existing resource (declared in config) into state by id,
 // under the state lock. It never mutates the remote.
 func importRun(p provider.Provider, cfgPath, statePath, address, id string, format output.Format, s streams) error {
+	typ, name, key, _, err := addr.Parse(address)
+	if err != nil {
+		return fmt.Errorf("import: %w", err)
+	}
+	address = addr.Format(typ, name, key)
 	_, desired, _, err := config.Load(cfgPath, p)
 	if err != nil {
 		return err
@@ -412,15 +440,45 @@ func importRun(p provider.Provider, cfgPath, statePath, address, id string, form
 		importResult{Address: address, ID: id})
 }
 
-// filterPlanByTarget restricts the plan to a single resource address when
-// --target is set, so targeted operations never touch (or delete) other resources.
-func filterPlanByTarget(pl *plan.Plan, target string) {
-	if target == "" {
+// targetAddr is a parsed --target: a whole resource (every instance, when key is
+// empty and hasKey is false) or one for_each instance.
+type targetAddr struct {
+	typ, name, key string
+	hasKey         bool
+}
+
+// matches reports whether a change (or state resource) at type/name/key is
+// selected by the target.
+func (t *targetAddr) matches(typ, name, key string) bool {
+	if typ != t.typ || name != t.name {
+		return false
+	}
+	return !t.hasKey || key == t.key
+}
+
+// parseTarget parses --target. An empty flag means no target (nil). A
+// malformed address is an error rather than silently matching nothing.
+func parseTarget(s string) (*targetAddr, error) {
+	if s == "" {
+		return nil, nil
+	}
+	typ, name, key, hasKey, err := addr.Parse(s)
+	if err != nil {
+		return nil, fmt.Errorf("--target: %w", err)
+	}
+	return &targetAddr{typ: typ, name: name, key: key, hasKey: hasKey}, nil
+}
+
+// filterPlanByTarget restricts the plan to the targeted resource (all of its
+// instances) or instance when --target is set, so targeted operations never
+// touch (or delete) other resources.
+func filterPlanByTarget(pl *plan.Plan, t *targetAddr) {
+	if t == nil {
 		return
 	}
 	var out []plan.Change
 	for _, c := range pl.Changes {
-		if c.Address == target {
+		if t.matches(c.Type, c.Name, c.Key) {
 			out = append(out, c)
 		}
 	}
@@ -455,7 +513,13 @@ func generateConfig(ctx context.Context, p provider.Provider, imports []plan.Imp
 			return fmt.Errorf("duplicate import block for %q", imp.Address)
 		}
 		seen[imp.Address] = true
-		typ, name := splitAddress(imp.Address)
+		typ, name, _, hasKey, err := addr.Parse(imp.Address)
+		if err != nil {
+			return err
+		}
+		if hasKey {
+			return fmt.Errorf("generate %s: --generate-config does not support for_each resources; declare the resource block by hand", imp.Address)
+		}
 		r, ok := resources[typ]
 		if !ok {
 			return fmt.Errorf("generate %s: unknown resource type %q", imp.Address, typ)
@@ -481,11 +545,4 @@ func generateConfig(ctx context.Context, p provider.Provider, imports []plan.Imp
 	}
 	fmt.Fprintf(stdout, "Generated configuration for %d resource(s) → %s\n", len(blocks), outPath)
 	return nil
-}
-
-func splitAddress(addr string) (typ, name string) {
-	if i := strings.IndexByte(addr, '.'); i >= 0 {
-		return addr[:i], addr[i+1:]
-	}
-	return addr, ""
 }

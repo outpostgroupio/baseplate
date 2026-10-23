@@ -56,6 +56,7 @@ func (p *Provider) Resources() map[string]provider.Resource {
 		"mock_computed": &res{p: p, typ: "mock_computed"},
 		"mock_ref":      &res{p: p, typ: "mock_ref"},
 		"mock_trigger":  &res{p: p, typ: "mock_trigger"},
+		"mock_secret":   &res{p: p, typ: "mock_secret"},
 	}
 }
 
@@ -80,6 +81,9 @@ func (r *res) DecodeSpec() hcldec.Spec {
 	}
 	if r.typ == "mock_trigger" {
 		spec["rev"] = &hcldec.AttrSpec{Name: "rev", Type: cty.String, Required: false}
+	}
+	if r.typ == "mock_secret" {
+		spec["value"] = &hcldec.AttrSpec{Name: "value", Type: cty.String, Required: false}
 	}
 	return spec
 }
@@ -124,6 +128,14 @@ func (r *res) Computed() []string {
 	}
 	if r.typ == "mock_trigger" {
 		return []string{"rev"}
+	}
+	return nil
+}
+
+// Sensitive marks mock_secret's value as sensitive (redacted from output).
+func (r *res) Sensitive() []string {
+	if r.typ == "mock_secret" {
+		return []string{"value"}
 	}
 	return nil
 }
