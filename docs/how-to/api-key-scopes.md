@@ -13,6 +13,7 @@ during `apply`/`destroy`, so grant both sides.
 |---|---|
 | `roblox_experience` | `universe:write` |
 | `roblox_place` | `universe-places:write` |
+| `roblox_place_config` | `universe.place:read`, `universe.place:write` |
 | `roblox_asset` | `asset:read`, `asset:write` |
 | `roblox_developer_product` | `developer-product:read`, `developer-product:write` |
 | `roblox_game_pass` | `game-pass:read`, `game-pass:write` |
@@ -22,7 +23,9 @@ during `apply`/`destroy`, so grant both sides.
 A few are easy to miss because they don't match the "obvious" name:
 
 - **`universe-places:write`** for `roblox_place` is distinct from `universe:write` and from
-  `universe.place:write`. Using the wrong one gives `401 … insufficient scope`.
+  `universe.place:write`. Using the wrong one gives `401 … insufficient scope`. Conversely,
+  `roblox_place_config` (name/description/server size) uses `universe.place:write`, not
+  `universe-places:write`.
 - **`universe.secret:read` / `universe.secret:write`** are separate from `universe:write` — a key
   that can edit universe config still can't touch secrets without them.
 - **`roblox_badge`** needs three legacy scopes: `legacy-universe.badge:manage-and-spend-robux`
