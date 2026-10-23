@@ -91,6 +91,19 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   amd64/arm64) and publishes a GitHub Release (archives, `checksums.txt`, grouped changelog,
   `prerelease: auto`). New `internal/version` stamped via `-ldflags`, surfaced by `baseplate version`.
   See `docs/superpowers/specs/2026-07-13-baseplate-release-automation-design.md`.
+- **`for_each`, `locals`, config functions and `baseplate show` (GitHub #2 items 3 and 5, slice A):**
+  new `internal/addr` (single source of truth for `type.name["key"]` render/parse); state **v2**
+  (`index_key`, no-op v1 migration, so older binaries refuse keyed state); `for_each` on `resource`
+  and `import` blocks (map or set of strings, known at load time) with `each`; indexed references
+  (`type.name["k"].attr`, `type.name[each.key].attr`; bare `type.name` depends on every instance);
+  `locals {}` + `path.config` + a function library (`fileset` via doublestar, `file`, `basename`,
+  `dirname`, go-cty stdlib subset); `--target`/`import` parse addresses (resource-wide or instance,
+  malformed is an error); `baseplate show [address] [--json]` (state inventory, no lock/network);
+  a plan warning when one resource both destroys and creates instances (key rename);
+  `--generate-config` refuses `for_each` imports. Docs: `docs/how-to/many-assets.md`,
+  `docs/config-reference.md`. **Deferred to slice B:** `moved {}` blocks (state-only rename,
+  including singular → keyed adoption). Later, if wanted: `output {}` blocks, repeatable
+  `--target`, `--generate-config` for keyed imports.
 - Next: **Phase 2** remaining slices (see Roadmap below).
 
 Read `docs/superpowers/specs/2026-07-03-baseplate-phase1-roblox-provider-design.md` for the

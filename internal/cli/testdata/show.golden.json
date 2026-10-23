@@ -1,0 +1,40 @@
+{
+  "format_version": 1,
+  "command": "show",
+  "result": {
+    "serial": 42,
+    "lineage": "00000000-0000-4000-8000-000000000000",
+    "resources": [
+      {
+        "address": "mock_secret.api",
+        "type": "mock_secret",
+        "name": "api",
+        "id": "mock_secret/1",
+        "attributes": {
+          "name": "API_KEY"
+        }
+      },
+      {
+        "address": "mock_thing.solo",
+        "type": "mock_thing",
+        "name": "solo",
+        "id": "mock_thing/3",
+        "attributes": {
+          "count": 3,
+          "name": "solo"
+        }
+      },
+      {
+        "address": "roblox_asset.sprites[\"ui/gem.png\"]",
+        "type": "roblox_asset",
+        "name": "sprites",
+        "key": "ui/gem.png",
+        "id": "1234567890",
+        "attributes": {
+          "asset_type": "Image",
+          "display_name": "sprite/ui/gem"
+        }
+      }
+    ]
+  }
+}
