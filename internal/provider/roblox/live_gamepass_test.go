@@ -18,7 +18,7 @@ import (
 // TestLiveGamePassLifecycle runs plan→apply→converge→update→destroy for a game
 // pass against the real Roblox API. Skipped unless BASEPLATE_LIVE=1.
 //
-//	set -a; . ./.env.local; set +a
+//	set -a; . ./.env; set +a
 //	BASEPLATE_LIVE=1 go test ./internal/provider/roblox/ -run LiveGamePass -v
 func TestLiveGamePassLifecycle(t *testing.T) {
 	if os.Getenv("BASEPLATE_LIVE") != "1" {

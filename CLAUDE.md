@@ -40,7 +40,7 @@ Exit codes: `0` no changes, `2` changes present, `1` error. With `ROBLOX_API_KEY
 uses the real provider; otherwise the in-memory mock.
 
 **Live tests** (real Roblox, opt-in): put `ROBLOX_API_KEY` + `BASEPLATE_TEST_UNIVERSE` in a
-gitignored `.env.local`, then `set -a; . ./.env.local; set +a; BASEPLATE_LIVE=1 go test
+gitignored `.env`, then `set -a; . ./.env; set +a; BASEPLATE_LIVE=1 go test
 ./internal/provider/roblox/ -run Live -v`. See `docs/roblox-live-testing.md`. Test universe is
 `10438196190` (user-owned, `users/5822334358`).
 

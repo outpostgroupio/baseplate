@@ -66,7 +66,7 @@ provider "roblox" {
 }
 ```
 
-Export it in your shell, or keep it in a gitignored `.env.local` and source it. Never commit an API
+Export it in your shell, or keep it in a gitignored `.env` and source it. Never commit an API
 key.
 
 ## See also

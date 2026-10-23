@@ -21,7 +21,7 @@ import (
 // write); the experience's writable flags aren't declared, so no remote change.
 // SKIPPED unless BASEPLATE_LIVE=1 + ROBLOX_API_KEY + BASEPLATE_TEST_UNIVERSE.
 //
-//	set -a; . ./.env.local; set +a
+//	set -a; . ./.env; set +a
 //	BASEPLATE_LIVE=1 go test ./internal/provider/roblox/ -run Live -v
 func TestLiveImportBlockExperience(t *testing.T) {
 	if os.Getenv("BASEPLATE_LIVE") != "1" {
