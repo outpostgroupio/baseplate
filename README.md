@@ -123,10 +123,11 @@ baseplate <command> [--config baseplate.bp.hcl] [--state baseplate.bpstate] [--t
   apply      Reconcile resources to the config, writing state.
   destroy    Remove everything the state manages.
   import <address> <id>   Adopt an existing resource into state.
+  show [address]          Print the resources in state (--json for tooling).
 ```
 
 `--config` defaults to `baseplate.bp.hcl`, `--state` to `baseplate.bpstate`. `--target` limits an
-apply/plan to one resource address; `--json` emits machine-readable output for CI.
+apply/plan to one resource, or one `for_each` instance (`'type.name["key"]'`); `--json` emits machine-readable output for CI.
 
 ## Status
 
@@ -138,9 +139,11 @@ against a live universe. Current status, the remaining roadmap, and tracked defe
 
 - [Getting started](docs/getting-started.md) — install → API key → first config → apply → destroy.
 - [CLI reference](docs/cli-reference.md) — commands, flags, exit codes.
+- [Config reference](docs/config-reference.md) — blocks, `for_each`, references, `locals`, functions.
 - [Resource reference](docs/resource-reference.md) — every `roblox_*` resource and its attributes.
 - **How-to guides:**
   - [Import existing resources](docs/how-to/importing-existing-resources.md)
+  - [Manage many assets (`for_each`, `fileset`, `show --json`)](docs/how-to/many-assets.md)
   - [Manage universe secrets](docs/how-to/managing-secrets.md)
   - [References and `env()`](docs/how-to/references-and-env.md)
   - [API key scopes](docs/how-to/api-key-scopes.md)

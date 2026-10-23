@@ -1,6 +1,11 @@
 # State file versioning
 
-Baseplate's state file carries a `version` field. This build reads and writes **version 1**.
+Baseplate's state file carries a `version` field. This build reads and writes **version 2**.
+
+| Version | Change |
+|---|---|
+| 1 | Initial format. |
+| 2 | Resources may carry an `index_key`: the instance key of a `for_each` resource. Version 1 files are upgraded automatically on read (a v1 resource is simply singular). The bump exists so an older Baseplate refuses a file with keyed instances instead of merging them onto one address. |
 
 - A state file written by a **newer** Baseplate (higher `version`) is refused with a clear message —
   upgrade Baseplate rather than risk corrupting newer-format state with an older binary.
