@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zclconf/go-cty/cty"
 
@@ -21,9 +22,22 @@ type maskingUniverse struct {
 	masks     [][]string
 	setPublic []bool
 	publicErr error
+	// visLag delays a SetPublic visibility change by this many Get calls,
+	// to model eventual consistency in the v2 read-back.
+	visLag     int
+	pendingVis string
+	gets       int
 }
 
 func (f *maskingUniverse) Get(_ context.Context, id string) (opencloud.Universe, error) {
+	f.gets++
+	if f.pendingVis != "" {
+		if f.visLag == 0 {
+			f.cur.Visibility, f.pendingVis = f.pendingVis, ""
+		} else {
+			f.visLag--
+		}
+	}
 	u := f.cur
 	u.ID = id
 	return u, nil
@@ -69,10 +83,14 @@ func (f *maskingUniverse) SetPublic(_ context.Context, _ string, public bool) er
 	if f.publicErr != nil {
 		return f.publicErr
 	}
+	vis := "PRIVATE"
 	if public {
-		f.cur.Visibility = "PUBLIC"
+		vis = "PUBLIC"
+	}
+	if f.visLag > 0 {
+		f.pendingVis = vis
 	} else {
-		f.cur.Visibility = "PRIVATE"
+		f.cur.Visibility = vis
 	}
 	return nil
 }
@@ -253,6 +271,65 @@ func TestExperiencePublicScopeError(t *testing.T) {
 	var apiErr *opencloud.APIError
 	if err == nil || !strings.Contains(err.Error(), "legacy-universe:manage") || !errors.As(err, &apiErr) {
 		t.Fatalf("want an actionable scope error wrapping the API error, got %v", err)
+	}
+}
+
+func TestExperiencePublicEligibilityError(t *testing.T) {
+	// Live: with the scope granted, activate can still be refused with a
+	// generic 403 code 3; that must not be blamed on the scope.
+	f := &maskingUniverse{cur: opencloud.Universe{Visibility: "PRIVATE"},
+		publicErr: &opencloud.APIError{Status: 403, Message: "You are not authorized to configure this universe."}}
+	_, err := Experience(f).Update(context.Background(), "1", provider.Attributes{
+		"universe_id": cty.StringVal("1"), "public": cty.True,
+	})
+	var apiErr *opencloud.APIError
+	if err == nil || !errors.As(err, &apiErr) {
+		t.Fatalf("want an error wrapping the API error, got %v", err)
+	}
+	if strings.Contains(err.Error(), "needs the legacy-universe:manage scope") {
+		t.Fatalf("eligibility refusal must not be reported as a missing scope: %v", err)
+	}
+	if !strings.Contains(err.Error(), "refused to make") {
+		t.Fatalf("want an actionable refusal message, got %v", err)
+	}
+}
+
+func TestExperiencePublicWaitsForVisibility(t *testing.T) {
+	f := &maskingUniverse{cur: opencloud.Universe{Visibility: "PRIVATE"}, visLag: 2}
+	e := Experience(f).(*experience)
+	var slept int
+	e.sleep = func(time.Duration) { slept++ }
+
+	attrs, err := e.Update(context.Background(), "1", provider.Attributes{
+		"universe_id": cty.StringVal("1"), "public": cty.True,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !attrs["public"].True() {
+		t.Fatalf("read-back should wait for the visibility change, attrs = %#v", attrs)
+	}
+	if slept == 0 {
+		t.Fatal("expected a poll with sleeps between reads")
+	}
+}
+
+func TestExperiencePublicPollIsBounded(t *testing.T) {
+	f := &maskingUniverse{cur: opencloud.Universe{Visibility: "PRIVATE"}, visLag: 1000}
+	e := Experience(f).(*experience)
+	e.sleep = func(time.Duration) {}
+
+	attrs, err := e.Update(context.Background(), "1", provider.Attributes{
+		"universe_id": cty.StringVal("1"), "public": cty.True,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attrs["public"].True() {
+		t.Fatal("never-converging fake should still read back PRIVATE")
+	}
+	if f.gets > 20 {
+		t.Fatalf("poll must be bounded, did %d gets", f.gets)
 	}
 }
 

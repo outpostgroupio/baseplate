@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
+	"time"
 
 	"github.com/hashicorp/hcl/v2/hcldec"
 	"github.com/zclconf/go-cty/cty"
@@ -49,10 +51,24 @@ var experienceLinkLabel = map[string]string{
 
 const priceWire = "privateServerPriceRobux"
 
-type experience struct{ uc opencloud.UniverseClient }
+// visibilityPolls bounds how many times apply re-reads the universe waiting for
+// v2 `visibility` to reflect an activate/deactivate call (visibilityPollEvery
+// apart). If it never does, apply returns what it read and the next plan shows
+// the drift instead of hanging.
+const (
+	visibilityPolls     = 10
+	visibilityPollEvery = time.Second
+)
+
+type experience struct {
+	uc    opencloud.UniverseClient
+	sleep func(time.Duration)
+}
 
 // Experience returns the roblox_experience resource backed by a UniverseClient.
-func Experience(uc opencloud.UniverseClient) provider.Resource { return &experience{uc: uc} }
+func Experience(uc opencloud.UniverseClient) provider.Resource {
+	return &experience{uc: uc, sleep: time.Sleep}
+}
 
 func (e *experience) Type() string { return "roblox_experience" }
 
@@ -67,7 +83,7 @@ func (e *experience) Doc() provider.ResourceDoc {
 		"vr_enabled":              "Playable in VR.",
 		"private_servers_enabled": "Whether private servers can be bought. `false` disables them (and must not be combined with `private_server_price`). `true` needs `private_server_price` unless they're already enabled.",
 		"private_server_price":    "Private server price in Robux: `0` (free) or 10–500. Setting it enables private servers.",
-		"public":                  "Whether the experience is public (`true`) or private (`false`). Uses the EXPERIMENTAL legacy-develop activate/deactivate API and needs the extra `legacy-universe:manage` scope.",
+		"public":                  "Whether the experience is public (`true`) or private (`false`). Uses the EXPERIMENTAL legacy-develop activate/deactivate API and needs the extra `legacy-universe:manage` scope. Roblox can still refuse to make an experience public (403 \"You are not authorized to configure this universe.\"); check it can be made public in Creator Hub.",
 	}
 	for p, label := range experienceLinkLabel {
 		attrs[p+"_link_uri"] = fmt.Sprintf("%s social link URL. `\"\"` removes the link. Creating a link needs `%s_link_title` too.", label, p)
@@ -159,11 +175,7 @@ func (e *experience) apply(ctx context.Context, id string, desired provider.Attr
 	}
 	if hasPublic {
 		if err := e.uc.SetPublic(ctx, id, wantPublic); err != nil {
-			var apiErr *opencloud.APIError
-			if errors.As(err, &apiErr) && (apiErr.Status == http.StatusUnauthorized || apiErr.Status == http.StatusForbidden) {
-				return nil, fmt.Errorf("roblox_experience: changing `public` needs the legacy-universe:manage scope on the API key for universe %s: %w", id, err)
-			}
-			return nil, err
+			return nil, publicError(id, wantPublic, err)
 		}
 	}
 
@@ -171,7 +183,32 @@ func (e *experience) apply(ctx context.Context, id string, desired provider.Attr
 	if err != nil {
 		return nil, err
 	}
+	for i := 0; hasPublic && i < visibilityPolls && (got.Visibility == "PUBLIC") != wantPublic; i++ {
+		e.sleep(visibilityPollEvery)
+		if got, err = e.uc.Get(ctx, id); err != nil {
+			return nil, err
+		}
+	}
 	return universeAttrs(id, got), nil
+}
+
+// publicError makes a failed activate/deactivate actionable. Roblox answers a
+// missing scope with 403 "Scope not authorized." but also refuses activation
+// for a key that has the scope with 403 "You are not authorized to configure
+// this universe." (code 3), so only the former is blamed on the scope.
+func publicError(id string, public bool, err error) error {
+	var apiErr *opencloud.APIError
+	if !errors.As(err, &apiErr) || (apiErr.Status != http.StatusUnauthorized && apiErr.Status != http.StatusForbidden) {
+		return err
+	}
+	if strings.Contains(strings.ToLower(apiErr.Message), "scope") {
+		return fmt.Errorf("roblox_experience: changing `public` needs the legacy-universe:manage scope on the API key for universe %s: %w", id, err)
+	}
+	verb := "private"
+	if public {
+		verb = "public"
+	}
+	return fmt.Errorf("roblox_experience: Roblox refused to make universe %s %s; check in Creator Hub that the key's owner can configure it and that the experience meets Roblox's requirements for going public: %w", id, verb, err)
 }
 
 // Delete is a no-op: Baseplate adopts an existing universe's config but does

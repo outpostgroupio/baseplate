@@ -97,7 +97,7 @@ Manages a universe's writable configuration. Adopts an existing universe (create
 | `mobile_enabled` | bool | optional, diffable | Playable on mobile. |
 | `private_server_price` | number | optional, diffable | Private server price in Robux: `0` (free) or 10–500. Setting it enables private servers. |
 | `private_servers_enabled` | bool | optional, diffable | Whether private servers can be bought. `false` disables them (and must not be combined with `private_server_price`). `true` needs `private_server_price` unless they're already enabled. |
-| `public` | bool | optional, diffable | Whether the experience is public (`true`) or private (`false`). Uses the EXPERIMENTAL legacy-develop activate/deactivate API and needs the extra `legacy-universe:manage` scope. |
+| `public` | bool | optional, diffable | Whether the experience is public (`true`) or private (`false`). Uses the EXPERIMENTAL legacy-develop activate/deactivate API and needs the extra `legacy-universe:manage` scope. Roblox can still refuse to make an experience public (403 "You are not authorized to configure this universe."); check it can be made public in Creator Hub. |
 | `roblox_group_link_title` | string | optional, diffable | Roblox group (community) social link title (1–70 characters). |
 | `roblox_group_link_uri` | string | optional, diffable | Roblox group (community) social link URL. `""` removes the link. Creating a link needs `roblox_group_link_title` too. |
 | `tablet_enabled` | bool | optional, diffable | Playable on tablet. |

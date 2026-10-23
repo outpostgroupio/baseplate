@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zclconf/go-cty/cty"
@@ -68,7 +69,9 @@ func TestLiveExperienceExtras(t *testing.T) {
 	}
 	b := backend.NewLocal(filepath.Join(t.TempDir(), "live-experience-extras.bpstate"))
 	s := state.New()
-	step := func(name string, attrs provider.Attributes) {
+	// tryStep plans and applies, returning an apply error to the caller; on
+	// success it asserts a re-plan converges.
+	tryStep := func(t *testing.T, name string, attrs provider.Attributes) error {
 		t.Helper()
 		attrs["universe_id"] = cty.StringVal(universe)
 		desired := []plan.DesiredResource{{Type: "roblox_experience", Name: "main", Attributes: attrs}}
@@ -78,7 +81,7 @@ func TestLiveExperienceExtras(t *testing.T) {
 		}
 		t.Logf("%s plan:\n%s", name, pl.RenderText(false))
 		if err := apply.Apply(ctx, p, b, s, pl); err != nil {
-			t.Fatalf("%s: apply: %v", name, err)
+			return err
 		}
 		pl2, err := plan.Build(ctx, p, s, desired)
 		if err != nil {
@@ -86,6 +89,13 @@ func TestLiveExperienceExtras(t *testing.T) {
 		}
 		if pl2.HasChanges() {
 			t.Fatalf("%s: expected convergence, got:\n%s", name, pl2.RenderText(false))
+		}
+		return nil
+	}
+	step := func(t *testing.T, name string, attrs provider.Attributes) {
+		t.Helper()
+		if err := tryStep(t, name, attrs); err != nil {
+			t.Fatalf("%s: apply: %v", name, err)
 		}
 	}
 
@@ -96,7 +106,7 @@ func TestLiveExperienceExtras(t *testing.T) {
 	const uri = "https://discord.gg/roblox"
 
 	// 1. Enable private servers at a price and create a Discord link.
-	step("set", provider.Attributes{
+	step(t, "set", provider.Attributes{
 		"private_server_price": cty.NumberIntVal(price),
 		"discord_link_uri":     cty.StringVal(uri),
 		"discord_link_title":   cty.StringVal("Baseplate live test"),
@@ -114,7 +124,7 @@ func TestLiveExperienceExtras(t *testing.T) {
 
 	// 2. Title-only change (sub-path mask) leaves the uri alone; enabled=true
 	// without a price is a no-op while private servers are already on.
-	step("retitle", provider.Attributes{
+	step(t, "retitle", provider.Attributes{
 		"private_servers_enabled": cty.True,
 		"discord_link_title":      cty.StringVal("Baseplate live test 2"),
 	})
@@ -127,7 +137,7 @@ func TestLiveExperienceExtras(t *testing.T) {
 	}
 
 	// 3. Disable private servers and remove the link.
-	step("clear", provider.Attributes{
+	step(t, "clear", provider.Attributes{
 		"private_servers_enabled": cty.False,
 		"discord_link_uri":        cty.StringVal(""),
 	})
@@ -142,20 +152,35 @@ func TestLiveExperienceExtras(t *testing.T) {
 		t.Fatalf("discord link not removed: %+v", l)
 	}
 
-	// 4. public: probe the scope with a no-op call to the current visibility.
-	if orig.Visibility != "PUBLIC" && orig.Visibility != "PRIVATE" {
-		t.Logf("skipping public: unexpected visibility %q", orig.Visibility)
-		return
-	}
-	isPublic := orig.Visibility == "PUBLIC"
-	if err := uc.SetPublic(ctx, universe, isPublic); err != nil {
-		var apiErr *opencloud.APIError
-		if errors.As(err, &apiErr) && (apiErr.Status == http.StatusUnauthorized || apiErr.Status == http.StatusForbidden) {
-			t.Logf("skipping public toggle: key lacks legacy-universe:manage (%v)", err)
-			return
+	// 4. public, as a subtest so a skip here doesn't hide steps 1-3 passing.
+	// The parent's t.Cleanup restores visibility whatever happens.
+	t.Run("public", func(t *testing.T) {
+		if orig.Visibility != "PUBLIC" && orig.Visibility != "PRIVATE" {
+			t.Skipf("unexpected visibility %q", orig.Visibility)
 		}
-		t.Fatalf("public probe: %v", err)
-	}
-	step("flip-public", provider.Attributes{"public": cty.BoolVal(!isPublic)})
-	step("restore-public", provider.Attributes{"public": cty.BoolVal(isPublic)})
+		isPublic := orig.Visibility == "PUBLIC"
+		// Probe the scope with a no-op call to the current visibility
+		// (deactivate on a PRIVATE universe is accepted: 200 {}).
+		if err := uc.SetPublic(ctx, universe, isPublic); err != nil {
+			var apiErr *opencloud.APIError
+			if errors.As(err, &apiErr) && (apiErr.Status == http.StatusUnauthorized || apiErr.Status == http.StatusForbidden) {
+				t.Skipf("key lacks legacy-universe:manage (%v)", err)
+			}
+			t.Fatalf("public probe: %v", err)
+		}
+		// Roblox can refuse activation for a key that has the scope (403 code
+		// 3, "You are not authorized to configure this universe."). That's a
+		// limit of the test universe/account, not a Baseplate bug: skip.
+		if err := tryStep(t, "flip-public", provider.Attributes{"public": cty.BoolVal(!isPublic)}); err != nil {
+			var apiErr *opencloud.APIError
+			if errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden && strings.Contains(err.Error(), "refused to make") {
+				t.Skipf("Roblox refused the flip for this universe (%v)", err)
+			}
+			t.Fatalf("flip-public: apply: %v", err)
+		}
+		if got, err := uc.Get(ctx, universe); err != nil || (got.Visibility == "PUBLIC") == isPublic {
+			t.Fatalf("visibility not flipped on Roblox: %q (%v)", got.Visibility, err)
+		}
+		step(t, "restore-public", provider.Attributes{"public": cty.BoolVal(isPublic)})
+	})
 }
