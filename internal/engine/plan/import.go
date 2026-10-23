@@ -51,7 +51,10 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 			return err
 		}
 		d := DesiredResource{Type: c.Type, Name: nameFromAddress(c.Address), Attributes: c.Desired, Refs: c.Refs}
-		effectiveDesired := mergeRefsFromState(d, s)
+		effectiveDesired, err := normalize(r, c.Address, mergeRefsFromState(d, s))
+		if err != nil {
+			return err
+		}
 		diffs := diffAttrs(actual, effectiveDesired, r.Computed())
 		c.ImportID = imp.ID
 		c.ID = imp.ID
