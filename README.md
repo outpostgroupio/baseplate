@@ -56,6 +56,7 @@ $ baseplate destroy   # tear down what's managed
 | `roblox_experience_event` | Experience (virtual) events for live-ops: title, schedule, visibility, venue, thumbnails, featuring. Experimental Roblox API; live-verified. |
 | `roblox_universe_secret` | Open Cloud secrets — full CRUD incl. real delete; values sealed client-side, never stored. |
 | `roblox_analytics_alert` | Analytics alerts on experience metrics (crash rate, CCU, …): threshold/period-over-period conditions, dimension filters, Dashboard-created webhooks. EXPERIMENTAL Roblox API; not yet live-verified. |
+| `roblox_experience_config` | Experience Config (BETA): runtime key/value settings read via `ConfigService` — feature flags and tuning values, published with draft → publish. |
 
 Plus declarative `import { to = <address>  id = "<id>" }` blocks to adopt existing resources during a
 normal `apply`.

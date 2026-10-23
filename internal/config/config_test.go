@@ -6,9 +6,63 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zclconf/go-cty/cty"
+
 	"github.com/outpostgroupio/baseplate/internal/engine/plan"
 	"github.com/outpostgroupio/baseplate/internal/provider/mock"
+	"github.com/outpostgroupio/baseplate/internal/provider/roblox"
 )
+
+// A map-valued attribute (roblox_experience_config.entries) decodes as native
+// HCL: mixed bool/number/string/object values keep their types.
+func TestLoadMapAttributeKeepsValueTypes(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.bp.hcl")
+	os.WriteFile(p, []byte(`
+resource "roblox_experience_config" "flags" {
+  universe_id = "1"
+  entries = {
+    on   = true
+    n    = 100
+    s    = "x"
+    nest = { a = [1, "b"] }
+  }
+}
+`), 0o644)
+	_, res, _, err := Load(p, roblox.SchemaProvider())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := res[0].Attributes["entries"]
+	if !e.Type().IsObjectType() {
+		t.Fatalf("entries type = %s", e.Type().FriendlyName())
+	}
+	if e.GetAttr("on").Type() != cty.Bool || e.GetAttr("n").Type() != cty.Number || e.GetAttr("s").Type() != cty.String {
+		t.Fatalf("value types not preserved: %#v", e)
+	}
+}
+
+// A reference nested inside a map attribute leaves the container known but an
+// element unknown; Load must reject it rather than pass an unknown to apply.
+func TestLoadRejectsReferenceNestedInMap(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.bp.hcl")
+	os.WriteFile(p, []byte(`
+resource "roblox_developer_product" "gems" {
+  universe_id = "1"
+  name        = "Gems"
+  price       = 10
+}
+resource "roblox_experience_config" "flags" {
+  universe_id = "1"
+  entries = {
+    product = roblox_developer_product.gems.id
+  }
+}
+`), 0o644)
+	_, _, _, err := Load(p, roblox.SchemaProvider())
+	if err == nil || !strings.Contains(err.Error(), "unsupported way") {
+		t.Fatalf("err = %v, want an unsupported-reference error", err)
+	}
+}
 
 func TestLoadBackendParsesHTTPBlock(t *testing.T) {
 	dir := t.TempDir()

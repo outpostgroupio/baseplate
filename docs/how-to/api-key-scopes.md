@@ -21,6 +21,7 @@ during `apply`/`destroy`, so grant both sides.
 | `roblox_universe_secret` | `universe.secret:read`, `universe.secret:write` |
 | `roblox_experience_event` | `universe.event:read`, `universe.event:write` |
 | `roblox_analytics_alert` | `universe.analytics.alert:read`, `universe.analytics.alert:write` |
+| `roblox_experience_config` | `universe:read`, `universe:write` |
 
 A few are easy to miss because they don't match the "obvious" name:
 
@@ -53,6 +54,10 @@ A few are easy to miss because they don't match the "obvious" name:
   eligible for alerts (the Performance dashboard's 100+ daily-active-user requirement; no opt-in
   is documented). Otherwise every call returns `403 PERMISSION_DENIED … not enrolled in
   PerformanceMonitoringV2`, which Baseplate reports as "not eligible for analytics alerts".
+- **`roblox_experience_config`** uses the plain `universe:read` / `universe:write` scopes (no
+  dedicated "config" scope). `plan` needs `universe:read` (reads the published config and checks for
+  a pending draft); `apply` and `destroy` need `universe:write` (draft + publish). Without view
+  access the API answers `403 "User does not have View permission for universe …"`.
 
 ## Scopes for commands
 
