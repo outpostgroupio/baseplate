@@ -47,7 +47,7 @@ $ baseplate destroy   # tear down what's managed
 
 | Resource | What it manages |
 |---|---|
-| `roblox_experience` | A universe's writable config (voice chat, device enablement incl. console/VR). |
+| `roblox_experience` | A universe's writable config (voice chat, device enablement incl. console/VR, private-server price, social links, public/private). |
 | `roblox_place` | Publishes a place's `.rbxl`/`.rbxlx` and re-publishes on content change. |
 | `roblox_place_config` | A place's name, description and server size (the root place's name/description are the experience's). |
 | `roblox_asset` | User- or group-owned image, decal and audio assets (multipart upload). |
@@ -66,11 +66,11 @@ candidate resources — see the [roadmap](ROADMAP.md#resource-surface-audit-2026
 Dashboard, so Baseplate can't and won't manage them):
 
 - **Subscription products** — read-only API (per-user subscription lookups only); no create/update.
-- **Experience social links** — a write API exists for *groups* only, not experiences/universes.
-- **Universe visibility and age rating** — read-only on the API. (The experience's display name and
-  description are read-only on the universe too, but they follow the root place's, which
-  `roblox_place_config` manages.) Baseplate manages the writable universe settings (voice chat,
-  device enablement) via `roblox_experience`.
+- **Universe age rating** — read-only on the API. (The experience's display name and description
+  are read-only on the universe too, but they follow the root place's, which `roblox_place_config`
+  manages.) Baseplate manages the writable universe settings (voice chat, device enablement,
+  private servers, social links) via `roblox_experience`, and public/private visibility through
+  Roblox's experimental activate/deactivate API (extra `legacy-universe:manage` scope).
 
 ## Install
 
