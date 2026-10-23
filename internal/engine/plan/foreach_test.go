@@ -156,3 +156,26 @@ func TestWarningsEmptyForEachQuietWithNothingInState(t *testing.T) {
 		t.Fatalf("nothing to destroy, nothing to warn about: %v", ws)
 	}
 }
+
+func TestResolveImportsUndeclaredTargetMessages(t *testing.T) {
+	ctx := context.Background()
+	p := mock.New()
+	pl, err := Build(ctx, p, state.New(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]string{
+		`mock_thing.set["a"]`: "is not a declared instance",
+		// A singular address gets the --generate-config hint.
+		"mock_thing.solo": "plan --generate-config",
+		// Unparseable addresses are reported as such, not as undeclared.
+		"mock_thing.set[a]": "key must be a quoted string",
+	}
+	for address, want := range cases {
+		err := ResolveImports(ctx, p, state.New(), pl, []ImportBlock{{Address: address, ID: "x"}})
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("ResolveImports(%s) = %v, want error containing %q", address, err, want)
+		}
+	}
+}
+

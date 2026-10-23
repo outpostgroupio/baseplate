@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
+	"github.com/outpostgroupio/baseplate/internal/addr"
 	"github.com/outpostgroupio/baseplate/internal/provider"
 	"github.com/outpostgroupio/baseplate/internal/state"
 )
@@ -37,10 +37,14 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 		}
 		seen[imp.Address] = true
 		i, ok := idx[imp.Address]
-		if !ok && strings.HasSuffix(imp.Address, "]") {
-			return fmt.Errorf("import target %q is not a declared instance (no resource block's for_each produces that key)", imp.Address)
-		}
 		if !ok {
+			_, _, _, hasKey, err := addr.Parse(imp.Address)
+			if err != nil {
+				return fmt.Errorf("import target: %w", err)
+			}
+			if hasKey {
+				return fmt.Errorf("import target %q is not a declared instance (no resource block's for_each produces that key)", imp.Address)
+			}
 			return fmt.Errorf("import target %q is not declared as a resource (add a resource block, or run plan --generate-config=FILE to generate one)", imp.Address)
 		}
 		c := &pl.Changes[i]
