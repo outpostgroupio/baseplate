@@ -27,6 +27,9 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 	for _, c := range pl.Changes {
 		r := resources[c.Type]
 		if c.ImportID != "" {
+			if err := plan.ImportCollision(s, c.Type, c.Address, c.ImportID); err != nil {
+				return err
+			}
 			desired, err := resolveRefs(c, outputs)
 			if err != nil {
 				return err
@@ -216,6 +219,9 @@ func Import(ctx context.Context, p provider.Provider, b backend.Backend, s *stat
 	}
 	if existing, ok := s.Find(address); ok {
 		return fmt.Errorf("resource %q is already in state (id %s)", address, existing.ID)
+	}
+	if err := plan.ImportCollision(s, d.Type, address, id); err != nil {
+		return err
 	}
 	r := p.Resources()[d.Type]
 	if r == nil {

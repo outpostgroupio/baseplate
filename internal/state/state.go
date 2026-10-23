@@ -136,6 +136,16 @@ func (s *State) Find(address string) (*Resource, bool) {
 	return nil, false
 }
 
+// FindByID returns the resource of type typ whose remote id is id, if any.
+func (s *State) FindByID(typ, id string) (*Resource, bool) {
+	for i := range s.Resources {
+		if s.Resources[i].Type == typ && s.Resources[i].ID == id {
+			return &s.Resources[i], true
+		}
+	}
+	return nil, false
+}
+
 func (s *State) Upsert(r Resource) {
 	if existing, ok := s.Find(r.Address()); ok {
 		*existing = r

@@ -30,6 +30,7 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 		idx[pl.Changes[i].Address] = i
 	}
 	seen := map[string]bool{}
+	claimed := map[[2]string]string{} // {type, id} -> address importing it
 	for _, imp := range imports {
 		if seen[imp.Address] {
 			return fmt.Errorf("duplicate import block for %q", imp.Address)
@@ -43,6 +44,13 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 			return fmt.Errorf("import target %q is not declared as a resource (add a resource block, or run plan --generate-config=FILE to generate one)", imp.Address)
 		}
 		c := &pl.Changes[i]
+		if prev, dup := claimed[[2]string{c.Type, imp.ID}]; dup {
+			return fmt.Errorf("import id %q is used for both %s and %s; one remote object can only be managed at one address", imp.ID, prev, imp.Address)
+		}
+		claimed[[2]string{c.Type, imp.ID}] = imp.Address
+		if err := ImportCollision(s, c.Type, imp.Address, imp.ID); err != nil {
+			return err
+		}
 		if c.Action != provider.ActionCreate {
 			continue // already in state → import already satisfied
 		}
@@ -66,6 +74,17 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 		} else {
 			c.Action = provider.ActionNoop
 		}
+	}
+	return nil
+}
+
+// ImportCollision returns an error when a state entry other than address
+// already manages the remote object (typ, id). Two addresses managing one
+// object is never safe: when one of them is later destroyed, the object the
+// other still manages is deleted with it (a hard delete for some types).
+func ImportCollision(s *state.State, typ, address, id string) error {
+	if other, ok := s.FindByID(typ, id); ok && other.Address() != address {
+		return fmt.Errorf("import %s: %s id %q is already managed as %s; one remote object can only be managed at one address", address, typ, id, other.Address())
 	}
 	return nil
 }
