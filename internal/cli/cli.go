@@ -28,7 +28,10 @@ import (
 
 // newProvider selects the real Roblox provider when ROBLOX_API_KEY is set,
 // otherwise the in-memory mock (so tests and demos work without credentials).
-func newProvider() provider.Provider {
+// It is a variable so CLI tests can inject a provider into run().
+var newProvider = defaultProvider
+
+func defaultProvider() provider.Provider {
 	if key := os.Getenv("ROBLOX_API_KEY"); key != "" {
 		if p, err := roblox.New(key); err == nil {
 			return p
@@ -127,18 +130,22 @@ type importResult struct {
 type applyResult struct {
 	Applied int               `json:"applied"`
 	Changes []plan.JSONChange `json:"changes"`
+	// Restarts lists the server restarts requested by apply --restart-servers.
+	Restarts []restartResult `json:"restarts,omitempty"`
 }
 
 var errCancelled = errors.New("cancelled at confirmation prompt")
 
 var confirmPrompts = map[string]string{
-	"apply":   "Do you want to perform these actions?",
-	"destroy": "Do you really want to destroy all resources?",
+	"apply":           "Do you want to perform these actions?",
+	"destroy":         "Do you really want to destroy all resources?",
+	"restart-servers": "Do you want to restart these servers?",
 }
 
 var cancelLabel = map[string]string{
-	"apply":   "Apply",
-	"destroy": "Destroy",
+	"apply":           "Apply",
+	"destroy":         "Destroy",
+	"restart-servers": "Restart",
 }
 
 // confirm decides whether an apply/destroy may proceed. It auto-approves when
@@ -272,15 +279,20 @@ func run(args []string, s streams) int {
 
 	applyCmd := &cobra.Command{Use: "apply", RunE: func(cmd *cobra.Command, _ []string) error {
 		cmdName = cmd.Name()
-		return applyRun(p, cfgPath, statePath, target, false, autoApproved(cmd), fmtOf(jsonOut), s)
+		restart, err := applyRestartFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+		return applyRun(p, cfgPath, statePath, target, false, autoApproved(cmd), fmtOf(jsonOut), s, restart)
 	}}
 	applyCmd.Flags().Bool("auto-approve", false, "skip the interactive approval prompt")
 	applyCmd.Flags().Bool("yes", false, "alias for --auto-approve")
+	addApplyRestartFlags(applyCmd)
 	root.AddCommand(applyCmd)
 
 	destroyCmd := &cobra.Command{Use: "destroy", RunE: func(cmd *cobra.Command, _ []string) error {
 		cmdName = cmd.Name()
-		return applyRun(p, cfgPath, statePath, target, true, autoApproved(cmd), fmtOf(jsonOut), s)
+		return applyRun(p, cfgPath, statePath, target, true, autoApproved(cmd), fmtOf(jsonOut), s, nil)
 	}}
 	destroyCmd.Flags().Bool("auto-approve", false, "skip the interactive approval prompt")
 	destroyCmd.Flags().Bool("yes", false, "alias for --auto-approve")
@@ -294,6 +306,7 @@ func run(args []string, s streams) int {
 			return importRun(p, cfgPath, statePath, args[0], args[1], fmtOf(jsonOut), s)
 		},
 	})
+	root.AddCommand(newRestartServersCmd(p, &cfgPath, &jsonOut, &cmdName, s))
 	root.AddCommand(&cobra.Command{
 		Use:   "show [address]",
 		Short: "Print the resources recorded in state",
@@ -327,10 +340,17 @@ func run(args []string, s streams) int {
 	return exit
 }
 
-func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, autoApprove bool, format output.Format, s streams) error {
+// restart, when non-nil (apply --restart-servers), restarts the servers of any
+// roblox_place the apply published, only after the apply fully succeeds.
+func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, autoApprove bool, format output.Format, s streams, restart *applyRestart) error {
 	verb := "apply"
 	if destroy {
 		verb = "destroy"
+	}
+	if restart != nil {
+		if err := restart.check(p); err != nil {
+			return err
+		}
 	}
 	tgt, err := parseTarget("--target", target)
 	if err != nil {
@@ -385,6 +405,9 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 	if pl.HasChanges() {
 		if format == output.Text {
 			fmt.Fprint(s.out, pl.RenderText(true))
+			if restart != nil {
+				fmt.Fprint(s.out, restart.describe(pl))
+			}
 		}
 		ok, err := confirm(s, format, autoApprove, verb)
 		if err != nil {
@@ -398,9 +421,19 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 	if err := apply.Apply(context.Background(), p, b, st, pl); err != nil {
 		return err
 	}
-	return output.Emit(s.out, format, verb,
-		fmt.Sprintf("Apply complete. %d change(s).\n", len(pl.Changes)),
-		applyResult{Applied: len(pl.Changes), Changes: pl.JSONChanges()})
+	text := fmt.Sprintf("Apply complete. %d change(s).\n", len(pl.Changes))
+	var restarts []restartResult
+	if restart != nil {
+		if restarts, err = restart.run(context.Background(), p, st, pl); err != nil {
+			if format == output.Text {
+				fmt.Fprint(s.out, text)
+			}
+			return fmt.Errorf("apply succeeded, but restarting servers failed: %w", err)
+		}
+		text += restartText(restarts)
+	}
+	return output.Emit(s.out, format, verb, text,
+		applyResult{Applied: len(pl.Changes), Changes: pl.JSONChanges(), Restarts: restarts})
 }
 
 // importRun adopts an existing resource (declared in config) into state by id,

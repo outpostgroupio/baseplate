@@ -36,6 +36,17 @@ A few are easy to miss because they don't match the "obvious" name:
   upload. Grant all three to match the spec. Reads are public. The badge itself is never
   hard-deleted; `destroy` disables it.
 
+## Scopes for commands
+
+Commands that act on Roblox directly, rather than through a resource, need scopes too:
+
+| Command | Scopes |
+|---|---|
+| `baseplate restart-servers`, `apply --restart-servers` | `universe:write` |
+
+`apply --restart-servers` needs `universe:write` on top of the scopes for the resources you apply
+(e.g. `universe-places:write` for the `roblox_place` that gets published).
+
 ## Scopes are per-universe — and you must save
 
 The single most common failure isn't the scope itself, it's **the universe binding**. On the
