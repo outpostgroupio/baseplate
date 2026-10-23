@@ -117,3 +117,26 @@ func TestAssetReadMapsNotFound(t *testing.T) {
 		t.Fatalf("want provider.ErrNotFound, got %v", err)
 	}
 }
+
+func TestAssetAudioTypeInferredFromExtension(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "click.ogg")
+	if err := os.WriteFile(path, []byte("OggS"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeAsset{}
+	_, attrs, err := Asset(f).Create(context.Background(), provider.Attributes{
+		"file":            cty.StringVal(path),
+		"display_name":    cty.StringVal("Click"),
+		"description":     cty.StringVal("UI click"),
+		"creator_user_id": cty.NumberIntVal(42),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.created.AssetType != "Audio" || attrs["asset_type"].AsString() != "Audio" {
+		t.Fatalf("asset type = %q / %v, want Audio", f.created.AssetType, attrs["asset_type"])
+	}
+	if got := contentType(path); got != "audio/ogg" {
+		t.Fatalf("content type = %q", got)
+	}
+}
