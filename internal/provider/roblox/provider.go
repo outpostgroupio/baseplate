@@ -9,7 +9,8 @@ import (
 )
 
 const (
-	// rootBase serves the cloud (universe) and developer-products APIs.
+	// rootBase serves the cloud (universe), developer-products and
+	// creator-configs (Experience Config) APIs.
 	rootBase = "https://apis.roblox.com"
 	// assetsBase serves the assets API (paths are /v1/assets...).
 	assetsBase = "https://apis.roblox.com/assets"
@@ -45,6 +46,7 @@ func New(apiKey string) (*Provider, error) {
 		"roblox_universe_secret":   resources.UniverseSecret(opencloud.NewSecretClient(root)),
 		"roblox_experience_event":  resources.ExperienceEvent(opencloud.NewGameEventClient(root)),
 		"roblox_analytics_alert":   resources.AnalyticsAlert(opencloud.NewAnalyticsAlertClient(root)),
+		"roblox_experience_config": resources.ExperienceConfig(opencloud.NewExperienceConfigClient(root)),
 	}, restarter: opencloud.NewServerRestartClient(root)}, nil
 }
 
@@ -66,5 +68,6 @@ func SchemaProvider() *Provider {
 		"roblox_badge":             resources.Badge(nil),
 		"roblox_experience_event":  resources.ExperienceEvent(nil),
 		"roblox_analytics_alert":   resources.AnalyticsAlert(nil),
+		"roblox_experience_config": resources.ExperienceConfig(nil),
 	}}
 }

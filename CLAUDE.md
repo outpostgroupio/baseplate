@@ -172,6 +172,41 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
   documented. The client translates this error to `opencloud.AlertsNotEligibleError`. Both 403s
   are verified live (2026-10-23). The test universe is below the bar, so the request and response
   shapes above come from the spec and docs, not from live calls.
+- Experience Config (BETA; `/creator-configs-public-api/v1/configs/universes/{id}/repositories/{repo}`,
+  base `https://apis.roblox.com`, plain **`universe:read`/`universe:write`** suffice). All verified live:
+  - A **never-published** repo 404s on GET (and on `…/revisions`, text/plain `ResourceNotFound`) —
+    treat as empty. **But** the values GET has also 404'd transiently right after a publish, so the
+    client only treats a 404 as empty when `…/revisions` confirms nothing was ever published; a universe you can't see is **403**
+    `"User does not have View permission…"`. No draft → `GET …/draft` 404; `DELETE …/draft` 404s too.
+  - GET values: `entries` is a **flat** map; numbers come back as floats (`100` → `100.0`); bool,
+    string, object and array values all round-trip. **Conditional branches are flat entry keys**
+    `<key>.RBX.conditional.<ruleId>` (undocumented); `conditionalRules` carries explicit nulls and can
+    be sent back verbatim.
+  - `draft:overwrite` **without `conditionalRules` deletes every rule and branch**. `PATCH …/draft`
+    is the safe write: a changed base key keeps its branches, `null` deletes a key **and its
+    branches**, and omitted `conditionalRules` leaves rules untouched — so `roblox_experience_config`
+    writes via PATCH (desired keys + nulls for undeclared ones) and never echoes rules back (an
+    overwrite built from a briefly-stale read would wipe them). **Once** (in ~15 back-to-back live
+    runs) a rules-free PATCH right after a publish still published a version that dropped every rule
+    + branch; the resource therefore reads the staged draft back and discards/re-stages it if it
+    deletes anything unrequested, and re-checks after publish (loud error naming the version to
+    restore). Publishing a no-op draft → 400
+    `validationErrors[].code = "EmptyDraft"` (and the draft stays — discard it). `publish` works without
+    `draftHash`; a stale hash → 400 bare string `"The provided draft hash does not match…"`.
+  - **`GradualRollout` took ~20 min**: meanwhile GET serves the OLD version, the new revision isn't
+    listed, and any `draft:overwrite` → 400 text/plain `MultipleDraftNotSupported`.
+  - A draft write within a few seconds of the previous write/publish can 400 text/plain
+    **`ETagMismatch`** or **`MultipleDraftNotSupported`** (even after an *Immediate* publish) —
+    transient; the client retries both for ~15s. A `publish` with the hash the PATCH just returned
+    can still 400 "The provided draft hash does not match the current draft." — the resource
+    re-reads + re-verifies the draft and publishes with its current hash. Reads **flap between
+    versions** for a few seconds after a publish, so a PATCH computed from one read can miss keys
+    to delete: the resource takes the newest of 3 reads, then re-checks the published version and
+    deletes any leftovers in a follow-up round. A GET right after an Immediate publish can still
+    serve the previous version briefly (wait for `metadata.configVersion`). Publishes are tightly
+    rate-limited (429 after a few dozen calls in a minute).
+  - Error bodies are a mix of bare JSON strings, `{"validationErrors":[…]}`, RFC 9110 problem JSON and
+    text/plain — none match `{code,message}`; `parseAPIError` now falls back to the body text.
 
 ## Workflow used here
 Superpowers: brainstorm → spec → bite-sized TDD plan → build (subagent-per-task, or inline for

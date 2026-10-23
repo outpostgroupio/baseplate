@@ -233,6 +233,7 @@ func ctyString(v cty.Value) string {
 		}
 		return bf.Text('f', -1)
 	default:
+
 		if t := v.Type(); t.IsListType() || t.IsSetType() || t.IsTupleType() {
 			// Render collections HCL-style: ["a", "b"] (strings quoted).
 			parts := []string{}
@@ -246,9 +247,13 @@ func ctyString(v cty.Value) string {
 			}
 			return "[" + strings.Join(parts, ", ") + "]"
 		}
-		// Maps/objects (e.g. a map of sets) render as compact JSON rather than a
-		// Go-syntax cty dump.
-		if b, err := (ctyjson.SimpleJSONValue{Value: v}).MarshalJSON(); err == nil {
+		// Maps/objects (e.g. a config map): render as compact JSON, which reads
+		// like the HCL the user wrote. A partially-unknown value can't be
+		// marshaled; it is only "known after apply" anyway.
+		if !v.IsWhollyKnown() {
+			return "(known after apply)"
+		}
+		if b, err := ctyjson.Marshal(v, v.Type()); err == nil {
 			return string(b)
 		}
 		return v.GoString()

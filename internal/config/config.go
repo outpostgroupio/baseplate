@@ -329,7 +329,10 @@ func (l *loader) decodeInstance(body, remain hcl.Body, r provider.Resource, typ,
 	// reference used in an unsupported form (e.g. inside a string template
 	// or a function call). Reject it loudly rather than silently dropping it.
 	for k, v := range attrs {
-		if !v.IsKnown() {
+		// IsWhollyKnown, not IsKnown: a reference nested inside a map/object
+		// attribute (e.g. entries = { id = type.name.id }) leaves the container
+		// known but an element unknown.
+		if !v.IsWhollyKnown() {
 			return plan.DesiredResource{}, fmt.Errorf("%s: %s: attribute %q references another resource in an unsupported way; use a bare reference like type.name.attr", l.path, inst, k)
 		}
 	}

@@ -151,6 +151,23 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   so removing the block lifts the protection (Terraform parity). The engine has no replace action,
   so deletes are the only path guarded. **Deferred:** `ignore_changes`, `create_before_destroy`,
   `replace_triggered_by`, `precondition`/`postcondition`.
+- **`roblox_experience_config` COMPLETE (Experience Config / `ConfigService`, BETA API), proven
+  live:** first resource with a **map-valued attribute** — `entries` is a native-HCL map
+  (`DynamicPseudoType`, so mixed bool/number/string/object values keep their types; `map(any)`
+  would unify them to string). Writes are `PATCH draft` → `publish` (not `draft:overwrite`, which
+  deletes any rule/branch it isn't sent). The resource is authoritative for base keys but **never
+  touches conditional rules or the conditional branches of kept keys**. Safety rails: refuses when a
+  draft is pending; the first create refuses if live keys aren't declared (import first); `destroy`
+  (Terraform-aligned) removes every plain key and publishes, leaving conditional rules alone — no
+  DELETE API exists, so it reuses apply's PATCH-null path and checks; protect production config
+  with `lifecycle { prevent_destroy = true }` (see `docs/config-reference.md#lifecycle`).
+  New `opencloud.ExperienceConfigClient`. Engine fixes for structural attrs: diff treats identical
+  JSON encodings as equal (map vs object, list vs tuple), plan renders objects as JSON, config
+  rejects references nested in a map (`IsWhollyKnown`), `configgen.zeroValue` handles non-primitive
+  types, resource docs render `any`; `parseAPIError` falls back to the raw body when there's no
+  `{code,message}`. Live lifecycle verified (refused unsafe create → import adopt removing an
+  undeclared key while keeping a rule + branch → converge → update → converge → destroy removed every
+  plain key and kept the rule). See the CLAUDE.md "spec gotchas" for the live-verified wire behaviour.
 - Next: **Phase 2** remaining slices (see Roadmap below).
 
 Read `docs/superpowers/specs/2026-07-03-baseplate-phase1-roblox-provider-design.md` for the
@@ -214,7 +231,8 @@ Phase 1 design + rationale, and `docs/superpowers/plans/` for the executed task-
     client-level `SecretClient.Update` unit test (the re-seal path is covered by the live rotate).
   - **From slice 6 (config generation, all defer):** ~~`configgen.zeroValue` defaults a non-primitive
     required attr (list/map/object) to `""`~~ (FIXED with `roblox_analytics_alert`: typed empty
-    collections); `configgen.Generate`'s doc comment says "sensitive is always a
+    collections; `roblox_experience_config` added tuples and `any` → `{}`); `configgen.Generate`'s
+    doc comment says "sensitive is always a
     placeholder" but optional+sensitive is actually omitted (value still never leaks; only sensitive
     attr today, `secret.value`, is Required); `roblox_asset` "one-of" `creator_user_id`/
     `creator_group_id` is omitted from generated config (a `# TODO`-worthy gap the generic emitter
@@ -244,6 +262,14 @@ Phase 1 design + rationale, and `docs/superpowers/plans/` for the executed task-
     with the api-key (`opencloud.New(apiKey, badgesBase)`) even though `badges.roblox.com` reads
     are public/unauthenticated; a keyless read client would avoid sending the credential to an
     endpoint that ignores it.
+
+  - **From `roblox_experience_config` (defer):** plan output for an update prints the whole
+    `entries` object (JSON) rather than a per-key diff — fine at a handful of keys, noisy near the
+    100-key limit (a generic per-key render for map attributes would fix it). `deployment_strategy`
+    is write-only but the docs generator can only label it "create-only" (a `WriteOnlyAttrs` doc
+    kind would be more accurate). Entry `description`s set in Creator Hub aren't modelled; whether
+    `draft:overwrite` preserves them is unverified (the public API can't set one to test with).
+    Only `InExperienceConfig` is documented/tested; other repositories are accepted but untested.
 
 ### Resource surface audit (2026-07-13)
 Audit of the vendored unified Open Cloud spec (`opencloud/specs/openapi-unified.json`) for the

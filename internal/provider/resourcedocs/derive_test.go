@@ -14,6 +14,8 @@ func TestAttrTypeName(t *testing.T) {
 		{cty.String, "string"},
 		{cty.Bool, "bool"},
 		{cty.Number, "number"},
+		{cty.DynamicPseudoType, "any"},
+		{cty.Map(cty.String), "map of string"},
 	}
 	for _, c := range cases {
 		if got := attrTypeName(c.ty); got != c.want {

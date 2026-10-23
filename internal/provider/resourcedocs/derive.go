@@ -17,6 +17,8 @@ func attrTypeName(t cty.Type) string {
 		return "bool"
 	case t == cty.Number:
 		return "number"
+	case t == cty.DynamicPseudoType:
+		return "any"
 	default:
 		return t.FriendlyName()
 	}

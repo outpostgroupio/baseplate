@@ -244,11 +244,32 @@ func diffAttrs(actual, desired provider.Attributes, computed []string) []AttrDif
 	for _, k := range names {
 		o := valOr(actual, k)
 		n := desired[k]
-		if !o.RawEquals(n) {
+		if !o.RawEquals(n) && !sameJSON(o, n) {
 			diffs = append(diffs, AttrDiff{Name: k, Old: o, New: n})
 		}
 	}
 	return diffs
+}
+
+// sameJSON reports whether two wholly-known, non-null values have identical JSON
+// encodings. It complements RawEquals for structural attributes, whose cty TYPE
+// can legitimately differ between config and read-back while the value is the
+// same — e.g. a map(string) vs an object with the same keys, or a list vs a
+// tuple. JSON keeps the distinctions that matter remotely (the string "1" is not
+// the number 1), so it never hides a real change.
+func sameJSON(a, b cty.Value) bool {
+	if a.IsNull() || b.IsNull() || !a.IsWhollyKnown() || !b.IsWhollyKnown() {
+		return false
+	}
+	aj, err := ctyjson.Marshal(a, a.Type())
+	if err != nil {
+		return false
+	}
+	bj, err := ctyjson.Marshal(b, b.Type())
+	if err != nil {
+		return false
+	}
+	return string(aj) == string(bj)
 }
 
 // triggerDiffs compares a Triggerable resource's config-computed triggers against

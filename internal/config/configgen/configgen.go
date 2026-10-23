@@ -76,26 +76,45 @@ func sortedKeys(spec hcldec.ObjectSpec) []string {
 	return keys
 }
 
+// zeroValue is the placeholder written for a required-but-unreadable attribute:
+// an empty value of the attribute's type, so the generated file still parses and
+// decodes against the schema.
 func zeroValue(t cty.Type) cty.Value {
-	// The placeholder must have the attribute's type so the generated HCL still
-	// decodes (a "" placeholder for a list/map attribute would be a type error).
 	switch {
 	case t == cty.Number:
 		return cty.NumberIntVal(0)
 	case t == cty.Bool:
 		return cty.False
+	case t == cty.String:
+		return cty.StringVal("")
+	case t.IsMapType():
+		return cty.MapValEmpty(t.ElementType())
 	case t.IsListType():
 		return cty.ListValEmpty(t.ElementType())
 	case t.IsSetType():
 		return cty.SetValEmpty(t.ElementType())
-	case t.IsMapType():
-		return cty.MapValEmpty(t.ElementType())
 	case t.IsObjectType():
+		if len(t.AttributeTypes()) == 0 {
+			return cty.EmptyObjectVal
+		}
 		attrs := map[string]cty.Value{}
-		for k, at := range t.AttributeTypes() {
-			attrs[k] = zeroValue(at)
+		for name, at := range t.AttributeTypes() {
+			attrs[name] = zeroValue(at)
 		}
 		return cty.ObjectVal(attrs)
+	case t.IsTupleType():
+		if len(t.TupleElementTypes()) == 0 {
+			return cty.EmptyTupleVal
+		}
+		elems := make([]cty.Value, 0, len(t.TupleElementTypes()))
+		for _, et := range t.TupleElementTypes() {
+			elems = append(elems, zeroValue(et))
+		}
+		return cty.TupleVal(elems)
+	case t == cty.DynamicPseudoType:
+		// "any": an empty object is the most useful placeholder (e.g. a map-like
+		// attribute such as roblox_experience_config.entries).
+		return cty.EmptyObjectVal
 	default:
 		return cty.StringVal("")
 	}
