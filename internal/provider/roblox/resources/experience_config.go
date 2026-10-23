@@ -26,6 +26,9 @@ const (
 	configPublishMessage = "Published by Baseplate"
 )
 
+// configSleep is the resource's sleeper (swapped out in unit tests).
+var configSleep = time.Sleep
+
 var configStrategies = map[string]bool{"Immediate": true, "GradualRollout": true}
 
 type experienceConfig struct {
@@ -49,7 +52,7 @@ type experienceConfig struct {
 // alone, as on apply). Production config should be protected with
 // `lifecycle { prevent_destroy = true }`.
 func ExperienceConfig(cc opencloud.ExperienceConfigClient) provider.Resource {
-	return &experienceConfig{cc: cc, sleep: time.Sleep}
+	return &experienceConfig{cc: cc, sleep: configSleep}
 }
 
 func (e *experienceConfig) Type() string { return "roblox_experience_config" }
@@ -154,7 +157,7 @@ func (e *experienceConfig) Delete(ctx context.Context, id string) error {
 	if err := e.refusePendingDraft(ctx, universeID, repo); err != nil {
 		return err
 	}
-	pub, err := e.cc.GetPublished(ctx, universeID, repo)
+	pub, err := e.freshPublished(ctx, universeID, repo)
 	if err != nil {
 		return err
 	}
@@ -167,7 +170,7 @@ func (e *experienceConfig) Delete(ctx context.Context, id string) error {
 	if len(changes) == 0 {
 		return nil // nothing to remove
 	}
-	_, err = e.publishChanges(ctx, universeID, repo, changes, pub, "Immediate")
+	_, err = e.publishChanges(ctx, universeID, repo, changes, pub, "Immediate", func(string) bool { return false })
 	return err
 }
 
@@ -204,7 +207,7 @@ func (e *experienceConfig) write(ctx context.Context, universeID, repo string, d
 		return nil, err
 	}
 
-	pub, err := e.cc.GetPublished(ctx, universeID, repo)
+	pub, err := e.freshPublished(ctx, universeID, repo)
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +238,7 @@ func (e *experienceConfig) write(ctx context.Context, universeID, repo string, d
 			changes[k] = nil // delete
 		}
 	}
-	version, err := e.publishChanges(ctx, universeID, repo, changes, pub, strategy)
+	version, err := e.publishChanges(ctx, universeID, repo, changes, pub, strategy, func(k string) bool { _, ok := want[k]; return ok })
 	if err != nil {
 		return nil, err
 	}
@@ -252,14 +255,67 @@ func (e *experienceConfig) write(ctx context.Context, universeID, repo string, d
 	return out, nil
 }
 
-// publishChanges stages changes (verified by stage), publishes them and, for an
+// freshReads is how many reads freshPublished takes to pick the newest version.
+const freshReads = 3
+
+// freshPublished reads the published config a few times and keeps the newest
+// version: right after a publish, reads flap between the old and new versions
+// (verified live), and the keys to delete are computed from this read.
+func (e *experienceConfig) freshPublished(ctx context.Context, universeID, repo string) (opencloud.ConfigValues, error) {
+	var best opencloud.ConfigValues
+	for i := 0; i < freshReads; i++ {
+		if i > 0 {
+			e.sleep(300 * time.Millisecond)
+		}
+		pub, err := e.cc.GetPublished(ctx, universeID, repo)
+		if err != nil {
+			return opencloud.ConfigValues{}, err
+		}
+		if i == 0 || pub.Version > best.Version {
+			best = pub
+		}
+	}
+	return best, nil
+}
+
+// reconcileRounds bounds the extra PATCH+publish rounds publishChanges runs to
+// remove keys a stale initial read hid from it.
+const reconcileRounds = 2
+
+// publishChanges publishes changes and then, for an Immediate publish, checks
+// the result (read at the published version, so not stale) for plain keys that
+// shouldn't be there; keep reports which base keys belong. Reads flap between
+// versions for a few seconds after a publish (verified live), so the read the
+// deletions were computed from can miss keys; leftovers are deleted in a
+// follow-up round.
+func (e *experienceConfig) publishChanges(ctx context.Context, universeID, repo string, changes map[string]json.RawMessage, pub opencloud.ConfigValues, strategy string, keep func(string) bool) (int64, error) {
+	for round := 0; ; round++ {
+		version, after, err := e.publishOnce(ctx, universeID, repo, changes, pub, strategy)
+		if err != nil || after == nil || round >= reconcileRounds {
+			return version, err
+		}
+		leftovers := map[string]json.RawMessage{}
+		for k := range after.Entries {
+			if !isBranchKey(k) && !keep(k) {
+				leftovers[k] = nil
+			}
+		}
+		if len(leftovers) == 0 {
+			return version, nil
+		}
+		changes, pub = leftovers, *after
+	}
+}
+
+// publishOnce stages changes (verified by stage), publishes them and, for an
 // Immediate publish, waits for the new version and checks nothing Baseplate
-// preserves went missing. A no-op publish (EmptyDraft) is success: the draft is
-// discarded and the current version returned.
-func (e *experienceConfig) publishChanges(ctx context.Context, universeID, repo string, changes map[string]json.RawMessage, pub opencloud.ConfigValues, strategy string) (int64, error) {
+// preserves went missing, returning that read (nil when not awaited). A no-op
+// publish (EmptyDraft) is success: the draft is discarded and the current
+// version returned.
+func (e *experienceConfig) publishOnce(ctx context.Context, universeID, repo string, changes map[string]json.RawMessage, pub opencloud.ConfigValues, strategy string) (int64, *opencloud.ConfigValues, error) {
 	hash, err := e.stage(ctx, universeID, repo, changes, pub)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	version, err := e.cc.Publish(ctx, universeID, repo, hash, configPublishMessage, strategy)
 	// Observed live: the hash returned by the PATCH can already be stale when we
@@ -270,11 +326,11 @@ func (e *experienceConfig) publishChanges(ctx context.Context, universeID, repo 
 		e.sleep(time.Duration(attempt+1) * time.Second)
 		draft, derr := e.cc.GetDraft(ctx, universeID, repo)
 		if derr != nil {
-			return 0, fmt.Errorf("roblox_experience_config: re-reading the staged draft: %w", derr)
+			return 0, nil, fmt.Errorf("roblox_experience_config: re-reading the staged draft: %w", derr)
 		}
 		if problem := unintendedChanges(draft, changes, pub); problem != "" {
 			_ = e.cc.DiscardDraft(ctx, universeID, repo, "")
-			return 0, fmt.Errorf("roblox_experience_config: universe %s repository %s: the staged draft changed under Baseplate and now %s; it was discarded and nothing was published — retry shortly", universeID, repo, problem)
+			return 0, nil, fmt.Errorf("roblox_experience_config: universe %s repository %s: the staged draft changed under Baseplate and now %s; it was discarded and nothing was published — retry shortly", universeID, repo, problem)
 		}
 		hash = draft.Hash
 		version, err = e.cc.Publish(ctx, universeID, repo, hash, configPublishMessage, strategy)
@@ -284,25 +340,26 @@ func (e *experienceConfig) publishChanges(ctx context.Context, universeID, repo 
 		// Nothing changed remotely (e.g. drift already reverted). Don't leave the
 		// no-op draft behind — it would block the next apply.
 		if derr := e.discard(ctx, universeID, repo, hash); derr != nil {
-			return 0, fmt.Errorf("roblox_experience_config: discarding no-op draft: %w", derr)
+			return 0, nil, fmt.Errorf("roblox_experience_config: discarding no-op draft: %w", derr)
 		}
 		version = pub.Version
 	case err != nil:
 		if derr := e.discard(ctx, universeID, repo, hash); derr != nil {
-			return 0, fmt.Errorf("roblox_experience_config: publish failed: %w (and discarding the staged draft also failed: %v)", err, derr)
+			return 0, nil, fmt.Errorf("roblox_experience_config: publish failed: %w (and discarding the staged draft also failed: %v)", err, derr)
 		}
-		return 0, fmt.Errorf("roblox_experience_config: publish failed (staged draft discarded): %w", err)
+		return 0, nil, fmt.Errorf("roblox_experience_config: publish failed (staged draft discarded): %w", err)
 	}
 
 	if strategy == "Immediate" && version > pub.Version {
 		if after, ok := e.awaitVersion(ctx, universeID, repo, version); ok {
 			if lost := lostPreserved(pub, after, changes); lost != "" {
-				return 0, fmt.Errorf("roblox_experience_config: universe %s repository %s: Roblox published version %d WITHOUT %s, which Baseplate did not ask to remove; restore version %d from the config's version history in Creator Hub (or POST …/revisions/{id}/restore)", universeID, repo, version, lost, pub.Version)
+				return 0, nil, fmt.Errorf("roblox_experience_config: universe %s repository %s: Roblox published version %d WITHOUT %s, which Baseplate did not ask to remove; restore version %d from the config's version history in Creator Hub (or POST …/revisions/{id}/restore)", universeID, repo, version, lost, pub.Version)
 			}
+			return version, &after, nil
 		}
 	}
 
-	return version, nil
+	return version, nil, nil
 }
 
 // discard resets the draft Baseplate just staged. The hash can already be stale

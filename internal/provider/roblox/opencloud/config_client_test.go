@@ -89,6 +89,28 @@ func TestConfigGetPublishedTransient404IsRetried(t *testing.T) {
 	}
 }
 
+// Both endpoints 404'ing once is not enough to call the repo empty: a flapping
+// read must not make destroy skip keys or plan show every key as drift.
+func TestConfigGetPublishedNeverPublishedNeedsConfirmation(t *testing.T) {
+	valueCalls := 0
+	cc := newConfigTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == cfgPath+"/revisions" {
+			w.WriteHeader(404)
+			return
+		}
+		valueCalls++
+		if valueCalls == 1 {
+			w.WriteHeader(404)
+			return
+		}
+		io.WriteString(w, liveValuesBody)
+	})
+	got, err := cc.GetPublished(context.Background(), "42", "InExperienceConfig")
+	if err != nil || got.Version != 3 || len(got.Entries) == 0 {
+		t.Fatalf("got=%+v err=%v: a single 404 must not read as empty", got, err)
+	}
+}
+
 func TestConfigGetPublishedPersistent404WithRevisionsIsError(t *testing.T) {
 	cc := newConfigTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == cfgPath+"/revisions" {

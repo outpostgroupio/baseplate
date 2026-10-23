@@ -111,6 +111,7 @@ type draftHashWire struct {
 
 func (cc *configClient) GetPublished(ctx context.Context, universeID, repo string) (ConfigValues, error) {
 	var w configValuesWire
+	unpublished := 0
 	for attempt := 0; ; attempt++ {
 		_, err := cc.c.Do(ctx, http.MethodGet, configBase(universeID, repo), nil, &w)
 		if err == nil {
@@ -121,13 +122,20 @@ func (cc *configClient) GetPublished(ctx context.Context, universeID, repo strin
 		}
 		// A 404 means "never published" — but the values endpoint has also been
 		// seen to 404 transiently right after a publish. Reading that as "empty"
-		// would show every key as drift, so confirm against the revision history.
+		// would show every key as drift (or make destroy skip them), so confirm
+		// against the revision history, and only believe "never published" once
+		// it has held for neverPublishedChecks consecutive checks.
 		published, rerr := cc.hasRevisions(ctx, universeID, repo)
 		if rerr != nil {
 			return ConfigValues{}, rerr
 		}
 		if !published {
-			return ConfigValues{Entries: map[string]json.RawMessage{}}, nil
+			unpublished++
+			if unpublished >= neverPublishedChecks {
+				return ConfigValues{Entries: map[string]json.RawMessage{}}, nil
+			}
+			cc.c.sleep(time.Second)
+			continue
 		}
 		if attempt >= len(etagRetryDelays) {
 			return ConfigValues{}, fmt.Errorf("published config of universe %s repository %s is temporarily unavailable (404 despite published revisions): %w", universeID, repo, err)
@@ -143,6 +151,10 @@ func (cc *configClient) GetPublished(ctx context.Context, universeID, repo strin
 	}
 	return out, nil
 }
+
+// neverPublishedChecks is how many consecutive "404 + no revisions" checks it
+// takes to conclude a repository was never published.
+const neverPublishedChecks = 3
 
 // hasRevisions reports whether the repository has ever been published. The
 // revisions endpoint 404s (text/plain "ResourceNotFound") for a never-published
