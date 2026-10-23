@@ -36,6 +36,21 @@ Plan: 1 to import, 0 to add, 0 to change, 0 to destroy.
 `apply` adopts and reconciles. Once imported, you can delete the `import {}` block — it's a no-op
 after the resource is in state, so it's also fine to leave it in for reproducibility.
 
+### Importing many at once
+
+An `import` block can take `for_each`, which adopts every instance of a `for_each` resource from a
+map of ids in one block:
+
+```hcl
+import {
+  for_each = jsondecode(file("${path.config}/asset-ids.json"))  # { "ui/gem.png": "1234567890", ... }
+  to       = roblox_asset.sprites[each.key]
+  id       = each.value
+}
+```
+
+See [managing many assets](many-assets.md#2-adopt-assets-youve-already-uploaded).
+
 ## Option B: one-off CLI import
 
 Adopt a single resource without editing config. The resource must already be **declared** in the

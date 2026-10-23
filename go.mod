@@ -3,6 +3,7 @@ module github.com/outpostgroupio/baseplate
 go 1.24.0
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.10.3
 	github.com/gofrs/flock v0.13.0
 	github.com/hashicorp/hcl/v2 v2.20.1
 	github.com/spf13/cobra v1.10.2

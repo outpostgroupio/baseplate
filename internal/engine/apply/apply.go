@@ -9,6 +9,7 @@ import (
 	"github.com/zclconf/go-cty/cty"
 	ctyjson "github.com/zclconf/go-cty/cty/json"
 
+	"github.com/outpostgroupio/baseplate/internal/addr"
 	"github.com/outpostgroupio/baseplate/internal/engine/plan"
 	"github.com/outpostgroupio/baseplate/internal/provider"
 	"github.com/outpostgroupio/baseplate/internal/state"
@@ -26,6 +27,9 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 	for _, c := range pl.Changes {
 		r := resources[c.Type]
 		if c.ImportID != "" {
+			if err := plan.ImportCollision(s, c.Type, c.Address, c.ImportID); err != nil {
+				return err
+			}
 			desired, err := resolveRefs(c, outputs)
 			if err != nil {
 				return err
@@ -39,7 +43,7 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 				return err
 			}
 			if err := commit(b, s, state.Resource{
-				Type: c.Type, Name: name(c.Address), ID: c.ImportID,
+				Type: c.Type, Name: c.Name, Key: c.Key, ID: c.ImportID,
 				Attributes: encodeValues(actual), Triggers: trigs, Dependencies: c.DependsOn,
 			}); err != nil {
 				return err
@@ -54,6 +58,17 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 		case provider.ActionNoop:
 			if c.ID != "" {
 				outputs[c.Address] = withID(c.Actual, c.ID)
+			}
+			// Nothing changed remotely, but the dependency edges may have (e.g. a
+			// for_each dependency lost an instance). Refresh them so state never
+			// keeps an edge to something that's gone; write only on a real
+			// change so a converged apply doesn't churn the serial.
+			if st, ok := s.Find(c.Address); ok && !sameSet(st.Dependencies, c.DependsOn) {
+				st.Dependencies = c.DependsOn
+				s.Serial++
+				if err := b.Put(s); err != nil {
+					return err
+				}
 			}
 			continue
 		case provider.ActionCreate:
@@ -187,18 +202,9 @@ func encodeValues(attrs provider.Attributes) map[string]json.RawMessage {
 
 func stateResource(c plan.Change, id string, attrs provider.Attributes, triggers map[string]json.RawMessage) state.Resource {
 	return state.Resource{
-		Type: c.Type, Name: name(c.Address), ID: id,
+		Type: c.Type, Name: c.Name, Key: c.Key, ID: id,
 		Attributes: encodeValues(attrs), Triggers: triggers, Dependencies: c.DependsOn,
 	}
-}
-
-func name(address string) string {
-	for i := 0; i < len(address); i++ {
-		if address[i] == '.' {
-			return address[i+1:]
-		}
-	}
-	return address
 }
 
 // Import adopts an existing remote resource into state: it reads the resource by
@@ -215,10 +221,18 @@ func Import(ctx context.Context, p provider.Provider, b backend.Backend, s *stat
 		}
 	}
 	if !found {
+		for _, cand := range desired {
+			if cand.Key != "" && addr.Format(cand.Type, cand.Name, "") == address {
+				return fmt.Errorf("%s has for_each; import a specific instance, e.g. %s", address, addr.Format(cand.Type, cand.Name, cand.Key))
+			}
+		}
 		return fmt.Errorf("resource %q is not declared in the configuration", address)
 	}
 	if existing, ok := s.Find(address); ok {
 		return fmt.Errorf("resource %q is already in state (id %s)", address, existing.ID)
+	}
+	if err := plan.ImportCollision(s, d.Type, address, id); err != nil {
+		return err
 	}
 	r := p.Resources()[d.Type]
 	if r == nil {
@@ -237,10 +251,29 @@ func Import(ctx context.Context, p provider.Provider, b backend.Backend, s *stat
 	}
 	return commit(b, s, state.Resource{
 		Type:         d.Type,
-		Name:         name(address),
+		Name:         d.Name,
+		Key:          d.Key,
 		ID:           id,
 		Attributes:   encodeValues(actual),
 		Triggers:     trigs,
 		Dependencies: d.DependsOn,
 	})
+}
+
+// sameSet reports whether a and b hold the same strings, ignoring order.
+func sameSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]int, len(a))
+	for _, x := range a {
+		seen[x]++
+	}
+	for _, x := range b {
+		if seen[x] == 0 {
+			return false
+		}
+		seen[x]--
+	}
+	return true
 }
