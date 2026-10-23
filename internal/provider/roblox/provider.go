@@ -21,6 +21,8 @@ const (
 // Provider is the real Roblox Open Cloud provider.
 type Provider struct {
 	resources map[string]provider.Resource
+	// restarter backs the provider.ServerRestarter capability (restart.go).
+	restarter opencloud.ServerRestartClient
 }
 
 // New builds the Roblox provider from an Open Cloud API key. The key must be
@@ -41,7 +43,7 @@ func New(apiKey string) (*Provider, error) {
 		"roblox_place":             resources.Place(opencloud.NewPlaceClient(root)),
 		"roblox_place_config":      resources.PlaceConfig(opencloud.NewPlaceConfigClient(root)),
 		"roblox_universe_secret":   resources.UniverseSecret(opencloud.NewSecretClient(root)),
-	}}, nil
+	}, restarter: opencloud.NewServerRestartClient(root)}, nil
 }
 
 // Resources implements provider.Provider.
