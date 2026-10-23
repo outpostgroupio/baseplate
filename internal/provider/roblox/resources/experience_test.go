@@ -33,6 +33,7 @@ func (f *fakeUniverse) Update(_ context.Context, u opencloud.Universe, mask []st
 	f.store[u.ID] = u
 	return u, nil
 }
+func (f *fakeUniverse) SetPublic(context.Context, string, bool) error { return nil }
 
 func TestExperienceCreateAdoptsAndConfigures(t *testing.T) {
 	f := &fakeUniverse{store: map[string]opencloud.Universe{}}

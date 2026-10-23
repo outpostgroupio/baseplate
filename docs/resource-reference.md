@@ -88,13 +88,30 @@ Manages a universe's writable configuration. Adopts an existing universe (create
 |---|---|---|---|
 | `console_enabled` | bool | optional, diffable | Playable on console. |
 | `desktop_enabled` | bool | optional, diffable | Playable on desktop. |
+| `discord_link_title` | string | optional, diffable | Discord social link title (1–70 characters). |
+| `discord_link_uri` | string | optional, diffable | Discord social link URL. `""` removes the link. Creating a link needs `discord_link_title` too. |
+| `facebook_link_title` | string | optional, diffable | Facebook social link title (1–70 characters). |
+| `facebook_link_uri` | string | optional, diffable | Facebook social link URL. `""` removes the link. Creating a link needs `facebook_link_title` too. |
+| `guilded_link_title` | string | optional, diffable | Guilded social link title (1–70 characters). |
+| `guilded_link_uri` | string | optional, diffable | Guilded social link URL. `""` removes the link. Creating a link needs `guilded_link_title` too. |
 | `mobile_enabled` | bool | optional, diffable | Playable on mobile. |
+| `private_server_price` | number | optional, diffable | Private server price in Robux: `0` (free) or 10–500. Setting it enables private servers. |
+| `private_servers_enabled` | bool | optional, diffable | Whether private servers can be bought. `false` disables them (and must not be combined with `private_server_price`). `true` needs `private_server_price` unless they're already enabled. |
+| `public` | bool | optional, diffable | Whether the experience is public (`true`) or private (`false`). Uses the EXPERIMENTAL legacy-develop activate/deactivate API and needs the extra `legacy-universe:manage` scope. Roblox can still refuse to make an experience public (403 "You are not authorized to configure this universe."); check it can be made public in Creator Hub. |
+| `roblox_group_link_title` | string | optional, diffable | Roblox group (community) social link title (1–70 characters). |
+| `roblox_group_link_uri` | string | optional, diffable | Roblox group (community) social link URL. `""` removes the link. Creating a link needs `roblox_group_link_title` too. |
 | `tablet_enabled` | bool | optional, diffable | Playable on tablet. |
+| `twitch_link_title` | string | optional, diffable | Twitch social link title (1–70 characters). |
+| `twitch_link_uri` | string | optional, diffable | Twitch social link URL. `""` removes the link. Creating a link needs `twitch_link_title` too. |
+| `twitter_link_title` | string | optional, diffable | Twitter/X social link title (1–70 characters). |
+| `twitter_link_uri` | string | optional, diffable | Twitter/X social link URL. `""` removes the link. Creating a link needs `twitter_link_title` too. |
 | `universe_id` | string | required, diffable | The universe to manage. Its `id` output equals this. |
 | `voice_chat_enabled` | bool | optional, diffable | Enable voice chat. |
 | `vr_enabled` | bool | optional, diffable | Playable in VR. |
+| `youtube_link_title` | string | optional, diffable | YouTube social link title (1–70 characters). |
+| `youtube_link_uri` | string | optional, diffable | YouTube social link URL. `""` removes the link. Creating a link needs `youtube_link_title` too. |
 
-`displayName`/`description`/`visibility`/`ageRating` are read-only on the Open Cloud v2 API. The display name and description follow the root place's, so manage them with `roblox_place_config` on the root place. `destroy` unmanages the universe (it is never deleted).
+Only declared attributes are managed. `displayName`/`description`/`ageRating` are read-only on the Open Cloud v2 API. The display name and description follow the root place's, so manage them with `roblox_place_config` on the root place. A social link's URL is validated by Roblox for its platform (e.g. a `discord.gg` invite for Discord). `public` additionally needs the `legacy-universe:manage` scope. `destroy` unmanages the universe (it is never deleted, and nothing is reverted).
 
 Requires the `universe:write` [scope](how-to/api-key-scopes.md).
 

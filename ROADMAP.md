@@ -301,15 +301,29 @@ calls was removed, renamed or newly deprecated since the June spec. Corrections 
   config — surface unconfirmed" backlog spike. PATCH returns **409 while the place is open in Team
   Create** (translated to an actionable error). **Live-verified 2026-10-23** (`live_place_config_test.go`:
   console/VR + place name/description/server size applied, converged, restored).
-- **Universe social links are writable on v2** (the old "groups only" note was wrong):
-  `facebookSocialLink`, `twitterSocialLink`, `youtubeSocialLink`, `twitchSocialLink`,
-  `discordSocialLink`, `robloxGroupSocialLink`, `guildedSocialLink`, each `{title, uri}`; removable
-  only via an `updateMask`. **Live-probe before shipping** (mask granularity is unconfirmed).
-- **Universe `privateServerPriceRobux`** is writable (null + mask disables private servers) but
-  isn't implemented yet, despite older docs claiming it was. Needs a "disabled" representation.
-- **Universe visibility** — not on v2, but `POST /legacy-develop/v1/universes/{id}/activate` /
-  `deactivate` (scope `legacy-universe:manage`, EXPERIMENTAL) toggles public/private; readable via
-  v2 `visibility`. Candidate `roblox_experience.public` attr after a live probe.
+- **SHIPPED: `roblox_experience` private servers, social links and `public`** (live-probed
+  2026-10-23; `live_experience_extras_test.go`):
+  - `private_servers_enabled` + `private_server_price` (`privateServerPriceRobux`). Price `0` is a
+    real "free" price (Roblox: "must be 0 or between 10 and 500"), so "disabled" is a separate
+    bool. Disable = field **masked and omitted** from the body; an explicit JSON `null` 400s
+    ("payload is not correctly formatted"). Disabled → GET omits the field.
+  - `<platform>_link_uri`/`_link_title` for the seven `*SocialLink` fields (flat primitives, so
+    plan diff, `--generate-config` and resource docs work unchanged). The updateMask accepts the
+    whole field or sub-paths (`discordSocialLink.uri`/`.title`, which patch half of an *existing*
+    link; creating one needs both or 400 "update mask must contain all social link fields when the
+    link is being created"). Masked + omitted (or `null`) clears. Unset links are absent from GET.
+    Title 1–70 chars, uri 1–256 and validated per platform. **Live-verified** (set → sub-path
+    retitle → clear, converged at each step, restored).
+  - `public` via `POST /legacy-develop/v1/universes/{id}/activate`/`deactivate`, read back from v2
+    `visibility`, called only when it differs, then a bounded poll (≤10×1s) until `visibility`
+    matches. Live (key with `legacy-universe:manage`): `deactivate` → `200 {}`, idempotent on a
+    PRIVATE universe. `activate` returned an opaque `403 {"code":3,"message":"You are not authorized
+    to configure this universe."}` until the experience's maturity questionnaire was completed in
+    Creator Hub; after that the **public flip, convergence and restore passed live** (2026-10-23,
+    `TestLiveExperienceExtras/public`). Docs should point users at the questionnaire when they hit
+    that 403. Without the scope the error is
+    `403 {"code":0,"message":"Scope not authorized."}`; only that case is reported as a scope
+    problem.
 - **New resource candidate: experience events** — `virtual-events/v3` full CRUD incl. real DELETE
   (`POST /virtual-events/v3/universes/{u}/game-events`, `GET`/`PATCH`/`DELETE
   /virtual-events/v3/game-events/{id}`; scopes `universe.event:read`/`:write`; EXPERIMENTAL).
