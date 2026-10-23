@@ -192,6 +192,9 @@ func parseAPIError(resp *http.Response) error {
 			e.Code = alt.ErrorCode
 		}
 	}
+	if e.Message == "" {
+		e.Message = fallbackErrorMessage(b)
+	}
 	return e
 }
 
@@ -221,4 +224,39 @@ func altErrorMessage(b []byte) string {
 	default:
 		return alt.Title
 	}
+}
+
+// fallbackErrorMessage extracts a human-readable message from an error body that
+// isn't the {code,message} envelope: a bare JSON string (e.g. the configs API's
+// "The provided draft hash does not match the current draft.") is unquoted; any
+// other non-empty body (e.g. {"validationErrors":[...]}) is returned compacted and
+// truncated, so the failure reason isn't silently dropped. Generic RFC 9110
+// problem bodies that only restate the status ({"title":"Not Found",...}) add
+// nothing and yield "".
+func fallbackErrorMessage(b []byte) string {
+	b = bytes.TrimSpace(b)
+	if len(b) == 0 {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(b, &s) == nil {
+		return s
+	}
+	var problem struct {
+		Type   string          `json:"type"`
+		Title  string          `json:"title"`
+		Errors json.RawMessage `json:"errors"`
+	}
+	if json.Unmarshal(b, &problem) == nil && strings.HasPrefix(problem.Type, "https://tools.ietf.org/") && len(problem.Errors) == 0 {
+		return ""
+	}
+	var buf bytes.Buffer
+	if json.Compact(&buf, b) == nil {
+		b = buf.Bytes()
+	}
+	const max = 500
+	if len(b) > max {
+		return string(b[:max]) + "…"
+	}
+	return string(b)
 }
