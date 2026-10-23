@@ -187,7 +187,7 @@ func TestForEachKeyRenameWarns(t *testing.T) {
 	e.apply(e.plan(threeThings))
 	pl := e.plan(strings.Replace(threeThings, `"a", "b", "c"`, `"a", "b", "z"`, 1))
 	ws := pl.Warnings()
-	if len(ws) != 1 || !strings.Contains(ws[0], "mock_thing.set: 1 instance(s) will be destroyed and 1 created") {
+	if len(ws) != 1 || !strings.Contains(ws[0], "mock_thing.set: this plan destroys 1 instance(s) and creates 1") {
 		t.Fatalf("expected a rename warning, got %v", ws)
 	}
 	if !strings.Contains(pl.RenderText(false), "Warning: mock_thing.set") {

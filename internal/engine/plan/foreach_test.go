@@ -73,11 +73,16 @@ func TestWarningsFlagKeyRename(t *testing.T) {
 	if len(ws) != 1 {
 		t.Fatalf("want one rename warning, got %v", ws)
 	}
-	for _, want := range []string{"mock_thing.set:", "1 instance(s) will be destroyed and 1 created",
-		`baseplate import 'mock_thing.set["icons/gem.png"]' mock_thing/1`} {
+	for _, want := range []string{"mock_thing.set:", "destroys 1 instance(s) and creates 1", "new id", "moved {}"} {
 		if !strings.Contains(ws[0], want) {
 			t.Fatalf("warning missing %q:\n%s", want, ws[0])
 		}
+	}
+	// The warning must not recommend a state surgery workaround: there is no
+	// command to drop an entry from state, and importing the old id under the
+	// new key would leave two addresses managing one object.
+	if strings.Contains(ws[0], "baseplate import") || strings.Contains(ws[0], "mock_thing/1") {
+		t.Fatalf("warning must not suggest re-importing the old id:\n%s", ws[0])
 	}
 	if out := pl.RenderText(false); !strings.Contains(out, "Warning: mock_thing.set:") {
 		t.Fatalf("text plan should print the warning:\n%s", out)
@@ -93,5 +98,27 @@ func TestWarningsQuietForPlainAddOrDelete(t *testing.T) {
 	}
 	if ws := pl.Warnings(); ws != nil {
 		t.Fatalf("a delete and a create of different resources is not a rename: %v", ws)
+	}
+}
+
+// With several deletes and creates on one resource there is no meaningful
+// old→new pairing; the warning names the resource and the counts only.
+func TestWarningsReportCountsWithoutPairing(t *testing.T) {
+	s := state.New()
+	s.Upsert(state.Resource{Type: "mock_thing", Name: "set", Key: "old1", ID: "mock_thing/1"})
+	s.Upsert(state.Resource{Type: "mock_thing", Name: "set", Key: "old2", ID: "mock_thing/2"})
+	pl, err := Build(context.Background(), mock.New(), s,
+		[]DesiredResource{keyed("new1", "x"), keyed("new2", "y"), keyed("new3", "z")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws := pl.Warnings()
+	if len(ws) != 1 || !strings.Contains(ws[0], "mock_thing.set: this plan destroys 2 instance(s) and creates 3") {
+		t.Fatalf("want one count-only warning, got %v", ws)
+	}
+	for _, addr := range []string{"old1", "old2", "new1", "new2", "new3"} {
+		if strings.Contains(ws[0], addr) {
+			t.Fatalf("warning must not pair specific instances (found %q):\n%s", addr, ws[0])
+		}
 	}
 }

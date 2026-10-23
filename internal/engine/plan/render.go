@@ -62,17 +62,14 @@ func (p *Plan) JSONChanges() []JSONChange {
 
 // Warnings flags plan shapes that are legal but probably unintended. Today that
 // is one: a resource (type.name) that both destroys and creates instances in the
-// same plan, which is what renaming a for_each key looks like. The new instance
-// is a new remote object with a new id (for roblox_asset, a fresh upload), so it
-// is worth a second look before applying. The result is nil when there is
-// nothing to warn about; order is by resource address.
+// same plan, which is what renaming a for_each key looks like. A created
+// instance is a new remote object with a new id (for roblox_asset, a fresh
+// upload), so it is worth a second look before applying. Instances are not
+// paired up — with several of each there is no meaningful old→new mapping — so
+// the warning names the resource and the counts. The result is nil when there
+// is nothing to warn about; order is by resource address.
 func (p *Plan) Warnings() []string {
-	type counts struct {
-		del, add int
-		oldAddr  string
-		newAddr  string
-		oldID    string
-	}
+	type counts struct{ del, add int }
 	byRes := map[string]*counts{}
 	for _, c := range p.Changes {
 		if c.ImportID != "" || (c.Action != provider.ActionDelete && c.Action != provider.ActionCreate) {
@@ -86,14 +83,8 @@ func (p *Plan) Warnings() []string {
 		}
 		if c.Action == provider.ActionDelete {
 			n.del++
-			if n.oldAddr == "" {
-				n.oldAddr, n.oldID = c.Address, c.ID
-			}
 		} else {
 			n.add++
-			if n.newAddr == "" {
-				n.newAddr = c.Address
-			}
 		}
 	}
 	var bases []string
@@ -107,18 +98,12 @@ func (p *Plan) Warnings() []string {
 	for _, b := range bases {
 		n := byRes[b]
 		out = append(out, fmt.Sprintf(
-			"%s: %d instance(s) will be destroyed and %d created in the same plan. If a for_each key was renamed, "+
-				"the new instance is a new remote object with a new id. To keep the existing object, drop the old "+
-				"instance from state and adopt it under the new key instead, e.g. baseplate import %s %s "+
-				"(moved blocks are planned to automate this).",
-			b, n.del, n.add, shellQuote(n.newAddr), n.oldID))
+			"%s: this plan destroys %d instance(s) and creates %d. Each created instance is a new remote object "+
+				"with a new id (for roblox_asset, a new upload), so if a for_each key was renamed the object is "+
+				"replaced, not moved. moved {} blocks, which will rename an instance in place, are planned.",
+			b, n.del, n.add))
 	}
 	return out
-}
-
-// shellQuote wraps s in single quotes for copy-pasting into a POSIX shell.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // Summary counts changes by action, matching the RenderText footer.
