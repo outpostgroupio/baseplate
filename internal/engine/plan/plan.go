@@ -4,19 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 
 	"github.com/zclconf/go-cty/cty"
 	ctyjson "github.com/zclconf/go-cty/cty/json"
 
+	"github.com/outpostgroupio/baseplate/internal/addr"
 	"github.com/outpostgroupio/baseplate/internal/engine/graph"
 	"github.com/outpostgroupio/baseplate/internal/provider"
 	"github.com/outpostgroupio/baseplate/internal/state"
 )
 
 type DesiredResource struct {
-	Type       string
-	Name       string
+	Type string
+	Name string
+	// Key is the for_each instance key; empty for a resource without for_each.
+	Key        string
 	Attributes provider.Attributes
 	DependsOn  []string
 	// Refs maps an attribute name to the resource output it references
@@ -25,7 +29,7 @@ type DesiredResource struct {
 	Refs map[string]provider.Ref
 }
 
-func (d DesiredResource) Address() string { return d.Type + "." + d.Name }
+func (d DesiredResource) Address() string { return addr.Format(d.Type, d.Name, d.Key) }
 
 type AttrDiff struct {
 	Name string
@@ -36,6 +40,8 @@ type AttrDiff struct {
 type Change struct {
 	Address   string
 	Type      string
+	Name      string
+	Key       string // for_each instance key; empty for a singular resource
 	ID        string
 	Action    provider.ChangeAction
 	ImportID  string
@@ -49,6 +55,10 @@ type Change struct {
 
 type Plan struct {
 	Changes []Change
+	// EmptyForEach names for_each resources (type.name) whose for_each declared
+	// zero instances. Set by the caller from config; Warnings uses it to call
+	// out that every instance of such a resource still in state is destroyed.
+	EmptyForEach []string
 }
 
 func (p *Plan) HasChanges() bool {
@@ -62,6 +72,9 @@ func (p *Plan) HasChanges() bool {
 
 func Build(ctx context.Context, p provider.Provider, s *state.State, desired []DesiredResource) (*Plan, error) {
 	resources := p.Resources()
+	if err := checkMixedKeys(desired); err != nil {
+		return nil, err
+	}
 	byAddr := map[string]DesiredResource{}
 	var nodes []graph.Node
 	for _, d := range desired {
@@ -70,11 +83,24 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 	}
 	// deletions: in state, not desired. Carry the recorded dependency edges so
 	// deletes are ordered by real (reverse) dependency order, not lexical luck.
+	// A recorded edge can name something that no longer exists (a dependent left
+	// unchanged while one of its dependency instances was removed keeps the old
+	// list), so only edges to resources still in config or state are kept.
+	known := map[string]bool{}
+	for _, r := range s.Resources {
+		known[r.Address()] = true
+	}
 	deletes := map[string]state.Resource{}
 	for _, r := range s.Resources {
 		if _, ok := byAddr[r.Address()]; !ok {
 			deletes[r.Address()] = r
-			nodes = append(nodes, graph.Node{Address: r.Address(), DependsOn: r.Dependencies})
+			var deps []string
+			for _, d := range r.Dependencies {
+				if _, desired := byAddr[d]; desired || known[d] {
+					deps = append(deps, d)
+				}
+			}
+			nodes = append(nodes, graph.Node{Address: r.Address(), DependsOn: deps})
 		}
 	}
 	order, err := graph.TopoSort(nodes)
@@ -86,7 +112,7 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 	for _, addr := range order {
 		if r, isDelete := deletes[addr]; isDelete {
 			pl.Changes = append(pl.Changes, Change{
-				Address: addr, Type: r.Type, ID: r.ID, Action: provider.ActionDelete,
+				Address: addr, Type: r.Type, Name: r.Name, Key: r.Key, ID: r.ID, Action: provider.ActionDelete,
 				Actual:    decodeAttrs(r.Attributes),
 				Sensitive: sensitiveAttrs(resources[r.Type]),
 			})
@@ -96,7 +122,7 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 		st, inState := s.Find(addr)
 		if !inState {
 			pl.Changes = append(pl.Changes, Change{
-				Address: addr, Type: d.Type, Action: provider.ActionCreate, Desired: d.Attributes, DependsOn: d.DependsOn, Refs: d.Refs,
+				Address: addr, Type: d.Type, Name: d.Name, Key: d.Key, Action: provider.ActionCreate, Desired: d.Attributes, DependsOn: d.DependsOn, Refs: d.Refs,
 				Sensitive: sensitiveAttrs(resources[d.Type]),
 			})
 			continue
@@ -104,7 +130,7 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 		actual, err := resources[d.Type].Read(ctx, st.ID)
 		if errors.Is(err, provider.ErrNotFound) {
 			pl.Changes = append(pl.Changes, Change{
-				Address: addr, Type: d.Type, Action: provider.ActionCreate, Desired: d.Attributes, DependsOn: d.DependsOn, Refs: d.Refs,
+				Address: addr, Type: d.Type, Name: d.Name, Key: d.Key, Action: provider.ActionCreate, Desired: d.Attributes, DependsOn: d.DependsOn, Refs: d.Refs,
 				Sensitive: sensitiveAttrs(resources[d.Type]),
 			})
 			continue
@@ -127,7 +153,7 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 			action = provider.ActionUpdate
 		}
 		pl.Changes = append(pl.Changes, Change{
-			Address: addr, Type: d.Type, ID: st.ID, Action: action,
+			Address: addr, Type: d.Type, Name: d.Name, Key: d.Key, ID: st.ID, Action: action,
 			Desired: d.Attributes, Actual: actual, AttrDiffs: diffs, DependsOn: d.DependsOn, Refs: d.Refs,
 			Sensitive: sensitiveAttrs(resources[d.Type]),
 		})
@@ -135,6 +161,21 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 	// deletes must run in reverse dependency order; re-sort delete block.
 	reorderDeletes(pl)
 	return pl, nil
+}
+
+// checkMixedKeys rejects a desired set in which the same type.name is both a
+// singular resource and a for_each resource. Config loading can't produce this
+// (one block per type.name), but the engine guards its own invariant.
+func checkMixedKeys(desired []DesiredResource) error {
+	keyed := map[string]bool{}
+	for _, d := range desired {
+		base := addr.Format(d.Type, d.Name, "")
+		if was, seen := keyed[base]; seen && was != (d.Key != "") {
+			return fmt.Errorf("%s is declared both with and without for_each; a resource is either singular or keyed (converting between them in place needs `moved` blocks, which are not supported yet)", base)
+		}
+		keyed[base] = d.Key != ""
+	}
+	return nil
 }
 
 // mergeRefsFromState returns d.Attributes with referenced attributes resolved

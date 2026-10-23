@@ -3,13 +3,18 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hcldec"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty"
+	"github.com/zclconf/go-cty/cty/convert"
 	"github.com/zclconf/go-cty/cty/function"
 
+	"github.com/outpostgroupio/baseplate/internal/addr"
 	"github.com/outpostgroupio/baseplate/internal/engine/plan"
 	"github.com/outpostgroupio/baseplate/internal/provider"
 )
@@ -79,46 +84,148 @@ var rootSchema = &hcl.BodySchema{
 		{Type: "provider", LabelNames: []string{"name"}},
 		{Type: "resource", LabelNames: []string{"type", "name"}},
 		{Type: "import"},
+		{Type: "locals"},
 		{Type: "backend", LabelNames: []string{"type"}},
 	},
 }
 
+// forEachSchema pulls the for_each meta-argument out of a resource body before
+// hcldec decoding, so no resource has to declare it in its DecodeSpec.
+var forEachSchema = &hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "for_each"}}}
+
+// declaredResource records what Load knows about one resource block before
+// decoding any bodies: whether it has for_each and, if so, its instance keys.
+// References are checked against it (missing keys, unindexed for_each refs).
+type declaredResource struct {
+	keyed  bool
+	keys   []string // sorted
+	keySet map[string]bool
+	values map[string]cty.Value // each.value per key
+	body   hcl.Body             // the body with for_each stripped
+}
+
+// loader carries the per-Load state shared by the block handlers.
+type loader struct {
+	path      string
+	resources map[string]map[string]*declaredResource // type -> name -> block
+}
+
+// Config is everything Load extracts from a config file.
+type Config struct {
+	Provider  ProviderConfig
+	Resources []plan.DesiredResource
+	Imports   []plan.ImportBlock
+	// EmptyForEach lists the for_each resources (type.name) that declare zero
+	// instances, so plan can warn that every instance in state is destroyed.
+	EmptyForEach []string
+}
+
+// Load is LoadConfig for callers that only need the provider config, the
+// resources and the import blocks.
 func Load(path string, p provider.Provider) (ProviderConfig, []plan.DesiredResource, []plan.ImportBlock, error) {
-	src, err := os.ReadFile(path)
+	cfg, err := LoadConfig(path, p)
 	if err != nil {
 		return ProviderConfig{}, nil, nil, err
 	}
+	return cfg.Provider, cfg.Resources, cfg.Imports, nil
+}
+
+// LoadConfig parses and evaluates a config file: locals, for_each expansion,
+// references and import blocks.
+func LoadConfig(path string, p provider.Provider) (*Config, error) {
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
 	f, diags := hclsyntax.ParseConfig(src, path, hcl.InitialPos)
 	if diags.HasErrors() {
-		return ProviderConfig{}, nil, nil, diags
+		return nil, diags
 	}
 	content, diags := f.Body.Content(rootSchema)
 	if diags.HasErrors() {
-		return ProviderConfig{}, nil, nil, diags
+		return nil, diags
 	}
 
 	resTypes := p.Resources()
+	l := &loader{path: path, resources: map[string]map[string]*declaredResource{}}
 
-	ctx := &hcl.EvalContext{
-		Variables: buildRefObject(content.Blocks),
-		Functions: map[string]function.Function{"env": envFunc()},
+	// Index every resource block first, so locals and for_each expressions can
+	// recognise (and reject) resource references, and so a reference can be
+	// checked against its target's instance keys regardless of block order.
+	for _, b := range content.Blocks {
+		if b.Type != "resource" {
+			continue
+		}
+		typ, name := b.Labels[0], b.Labels[1]
+		if l.resources[typ][name] != nil {
+			return nil, fmt.Errorf("%s: duplicate resource block %s.%s", path, typ, name)
+		}
+		if l.resources[typ] == nil {
+			l.resources[typ] = map[string]*declaredResource{}
+		}
+		l.resources[typ][name] = &declaredResource{}
+	}
+
+	locals, err := l.evalLocals(content.Blocks)
+	if err != nil {
+		return nil, err
+	}
+	vars := buildRefObject(content.Blocks)
+	vars["local"] = cty.ObjectVal(locals)
+	vars["path"] = pathObject(path)
+	ctx := &hcl.EvalContext{Variables: vars, Functions: functions()}
+
+	var empty []string
+	// Expand for_each on every resource block. Keys must be known now, before
+	// any body is decoded, because references are validated against them.
+	for _, b := range content.Blocks {
+		if b.Type != "resource" {
+			continue
+		}
+		typ, name := b.Labels[0], b.Labels[1]
+		fe, remain, d := b.Body.PartialContent(forEachSchema)
+		if d.HasErrors() {
+			return nil, d
+		}
+		decl := l.resources[typ][name]
+		decl.body = remain
+		if a, ok := fe.Attributes["for_each"]; ok {
+			keys, values, err := l.evalForEach(a, ctx, typ+"."+name)
+			if err != nil {
+				return nil, err
+			}
+			decl.keyed, decl.keys, decl.values = true, keys, values
+			if len(keys) == 0 {
+				empty = append(empty, typ+"."+name)
+			}
+			decl.keySet = map[string]bool{}
+			for _, k := range keys {
+				decl.keySet[k] = true
+			}
+		} else if err := noEach(bodyTraversals(b.Body)); err != nil {
+			return nil, err
+		}
 	}
 
 	var pc ProviderConfig
 	var out []plan.DesiredResource
 	var imports []plan.ImportBlock
+	importSeen := map[string]bool{}
 	for _, b := range content.Blocks {
 		switch b.Type {
 		case "provider":
 			attrs, d := b.Body.JustAttributes()
 			if d.HasErrors() {
-				return pc, nil, nil, d
+				return nil, d
 			}
 			pc.Attributes = provider.Attributes{}
 			for k, a := range attrs {
+				if err := noEach(a.Expr.Variables()); err != nil {
+					return nil, err
+				}
 				v, vd := a.Expr.Value(ctx)
 				if vd.HasErrors() {
-					return pc, nil, nil, vd
+					return nil, vd
 				}
 				pc.Attributes[k] = v
 			}
@@ -126,82 +233,297 @@ func Load(path string, p provider.Provider) (ProviderConfig, []plan.DesiredResou
 			typ, name := b.Labels[0], b.Labels[1]
 			r, ok := resTypes[typ]
 			if !ok {
-				return pc, nil, nil, fmt.Errorf("%s: unknown resource type %q", path, typ)
+				return nil, fmt.Errorf("%s: unknown resource type %q", path, typ)
 			}
-			val, d := hcldec.Decode(b.Body, r.DecodeSpec(), ctx)
-			if d.HasErrors() {
-				return pc, nil, nil, d
+			decl := l.resources[typ][name]
+			keys := []string{""}
+			if decl.keyed {
+				keys = decl.keys
 			}
-			attrs := provider.Attributes{}
-			for k, v := range val.AsValueMap() {
-				attrs[k] = v
-			}
-			// Attributes whose value is a reference to another resource carry an
-			// unknown placeholder here; move them out of literal Attributes into
-			// Refs (resolved at apply time). 2-part resource refs (used purely as
-			// a dependency) are dropped from literal attrs entirely.
-			refAttrs, refNames := resourceRefs(b.Body)
-			for k := range refNames {
-				delete(attrs, k)
-			}
-			// hcldec decodes UNSET optional attributes as present-but-null. Keep
-			// only attributes the user actually wrote in the HCL body, so unset
-			// optional fields aren't treated as declared (which would make them
-			// diff as null-vs-real-value forever). References were already removed
-			// above; what remains must be genuine literals the user authored.
-			written := bodyAttrNames(b.Body)
-			for k := range attrs {
-				if !written[k] {
-					delete(attrs, k)
+			for _, key := range keys {
+				ictx := ctx
+				if decl.keyed {
+					ictx = eachContext(ctx, key, decl.values[key])
 				}
-			}
-			// After removing bare references, any remaining unknown attribute is a
-			// reference used in an unsupported form (e.g. inside a string template
-			// or a function call). Reject it loudly rather than silently dropping it.
-			for k, v := range attrs {
-				if !v.IsKnown() {
-					return pc, nil, nil, fmt.Errorf("%s: %s.%s: attribute %q references another resource in an unsupported way; use a bare reference like type.name.attr", path, typ, name, k)
+				dr, err := l.decodeInstance(b.Body, decl.body, r, typ, name, key, ictx)
+				if err != nil {
+					return nil, err
 				}
+				out = append(out, dr)
 			}
-			out = append(out, plan.DesiredResource{
-				Type: typ, Name: name, Attributes: attrs,
-				DependsOn: extractDeps(b.Body), Refs: refAttrs,
-			})
 		case "import":
-			attrs, d := b.Body.JustAttributes()
-			if d.HasErrors() {
-				return pc, nil, nil, d
+			imps, err := l.expandImport(b, ctx)
+			if err != nil {
+				return nil, err
 			}
-			toAttr, ok := attrs["to"]
-			if !ok {
-				return pc, nil, nil, fmt.Errorf("%s: import block requires a `to` argument", path)
+			for _, imp := range imps {
+				if importSeen[imp.Address] {
+					return nil, fmt.Errorf("%s: duplicate import target %s", path, imp.Address)
+				}
+				importSeen[imp.Address] = true
 			}
-			addr, ok := importAddress(toAttr.Expr)
-			if !ok {
-				return pc, nil, nil, fmt.Errorf("%s: import `to` must be a resource address like type.name", path)
-			}
-			idAttr, ok := attrs["id"]
-			if !ok {
-				return pc, nil, nil, fmt.Errorf("%s: import block requires an `id` argument", path)
-			}
-			idv, vd := idAttr.Expr.Value(ctx)
-			if vd.HasErrors() {
-				return pc, nil, nil, vd
-			}
-			if idv.IsNull() || idv.Type() != cty.String {
-				return pc, nil, nil, fmt.Errorf("%s: import `id` must be a string", path)
-			}
-			imports = append(imports, plan.ImportBlock{Address: addr, ID: idv.AsString()})
+			imports = append(imports, imps...)
 		}
 	}
-	return pc, out, imports, nil
+	sort.Strings(empty)
+	return &Config{Provider: pc, Resources: out, Imports: imports, EmptyForEach: empty}, nil
+}
+
+// decodeInstance decodes one resource instance (the whole resource, for a
+// block without for_each) in its eval context. body is the original block
+// body (for reference analysis); remain has for_each stripped (for decoding).
+func (l *loader) decodeInstance(body, remain hcl.Body, r provider.Resource, typ, name, key string, ctx *hcl.EvalContext) (plan.DesiredResource, error) {
+	inst := addr.Format(typ, name, key)
+	// Attributes whose value is a reference to another resource carry an
+	// unknown placeholder after decoding; move them out of literal Attributes
+	// into Refs (resolved at apply time). 2-part resource refs (used purely as
+	// a dependency) are dropped from literal attrs entirely.
+	refAttrs, refNames, deps, err := l.bodyRefs(body, ctx, inst)
+	if err != nil {
+		return plan.DesiredResource{}, err
+	}
+	val, d := hcldec.Decode(remain, r.DecodeSpec(), ctx)
+	if d.HasErrors() {
+		return plan.DesiredResource{}, d
+	}
+	attrs := provider.Attributes{}
+	for k, v := range val.AsValueMap() {
+		attrs[k] = v
+	}
+	for k := range refNames {
+		delete(attrs, k)
+	}
+	// hcldec decodes UNSET optional attributes as present-but-null. Keep
+	// only attributes the user actually wrote in the HCL body, so unset
+	// optional fields aren't treated as declared (which would make them
+	// diff as null-vs-real-value forever). References were already removed
+	// above; what remains must be genuine literals the user authored.
+	written := bodyAttrNames(body)
+	for k := range attrs {
+		if !written[k] {
+			delete(attrs, k)
+		}
+	}
+	// After removing bare references, any remaining unknown attribute is a
+	// reference used in an unsupported form (e.g. inside a string template
+	// or a function call). Reject it loudly rather than silently dropping it.
+	for k, v := range attrs {
+		if !v.IsKnown() {
+			return plan.DesiredResource{}, fmt.Errorf("%s: %s: attribute %q references another resource in an unsupported way; use a bare reference like type.name.attr", l.path, inst, k)
+		}
+	}
+	return plan.DesiredResource{
+		Type: typ, Name: name, Key: key, Attributes: attrs,
+		DependsOn: deps, Refs: refAttrs,
+	}, nil
+}
+
+// expandImport turns one import block into one ImportBlock per for_each
+// instance (or exactly one without for_each). `to` may index the target with a
+// static key or any expression (e.g. [each.key]); `id` may use each.
+func (l *loader) expandImport(b *hcl.Block, ctx *hcl.EvalContext) ([]plan.ImportBlock, error) {
+	attrs, d := b.Body.JustAttributes()
+	if d.HasErrors() {
+		return nil, d
+	}
+	toAttr, ok := attrs["to"]
+	if !ok {
+		return nil, fmt.Errorf("%s: import block requires a `to` argument", l.path)
+	}
+	idAttr, ok := attrs["id"]
+	if !ok {
+		return nil, fmt.Errorf("%s: import block requires an `id` argument", l.path)
+	}
+	keys := []string{""}
+	var values map[string]cty.Value
+	fe, hasForEach := attrs["for_each"]
+	if hasForEach {
+		var err error
+		if keys, values, err = l.evalForEach(fe, ctx, "import"); err != nil {
+			return nil, err
+		}
+	} else if err := noEach(append(toAttr.Expr.Variables(), idAttr.Expr.Variables()...)); err != nil {
+		return nil, err
+	}
+	var out []plan.ImportBlock
+	for _, key := range keys {
+		ictx := ctx
+		if hasForEach {
+			ictx = eachContext(ctx, key, values[key])
+		}
+		address, err := l.importTarget(toAttr.Expr, ictx)
+		if err != nil {
+			return nil, err
+		}
+		idv, vd := idAttr.Expr.Value(ictx)
+		if vd.HasErrors() {
+			return nil, vd
+		}
+		// Accept a number too: id maps decoded from JSON often hold numeric ids.
+		if !idv.IsNull() && idv.IsKnown() && idv.Type() == cty.Number {
+			idv, _ = convert.Convert(idv, cty.String)
+		}
+		if idv.IsNull() || !idv.IsKnown() || idv.Type() != cty.String {
+			return nil, fmt.Errorf("%s: import %s: `id` must be a string", l.path, address)
+		}
+		out = append(out, plan.ImportBlock{Address: address, ID: idv.AsString()})
+	}
+	return out, nil
+}
+
+// importTarget resolves an import block's `to` to an instance address. The
+// target needn't be declared (plan --generate-config handles undeclared ones),
+// but when it is, its for_each-ness must match the address shape.
+func (l *loader) importTarget(expr hcl.Expression, ctx *hcl.EvalContext) (string, error) {
+	bad := fmt.Errorf(`%s: import `+"`to`"+` must be a resource address like type.name or type.name["key"]`, l.path)
+	var typ, name, key string
+	var hasKey bool
+	switch e := expr.(type) {
+	case *hclsyntax.ScopeTraversalExpr:
+		tr := e.Traversal
+		n, ok := traversalIndexName(tr, 1)
+		if !ok || len(tr) > 3 {
+			return "", bad
+		}
+		typ, name = tr.RootName(), n
+		if len(tr) == 3 {
+			idx, ok := tr[2].(hcl.TraverseIndex)
+			if !ok {
+				return "", bad
+			}
+			if idx.Key.Type() != cty.String {
+				return "", fmt.Errorf("%s: import `to`: instance key must be a string", l.path)
+			}
+			key, hasKey = idx.Key.AsString(), true
+		}
+	case *hclsyntax.IndexExpr:
+		st, ok := e.Collection.(*hclsyntax.ScopeTraversalExpr)
+		if !ok || len(st.Traversal) != 2 {
+			return "", bad
+		}
+		n, ok := traversalIndexName(st.Traversal, 1)
+		if !ok {
+			return "", bad
+		}
+		typ, name = st.Traversal.RootName(), n
+		k, err := l.evalKey(e.Key, ctx, "import `to`")
+		if err != nil {
+			return "", err
+		}
+		key, hasKey = k, true
+	default:
+		return "", bad
+	}
+	if hasKey && key == "" {
+		return "", fmt.Errorf("%s: import `to`: instance key must not be empty", l.path)
+	}
+	if decl := l.resources[typ][name]; decl != nil {
+		base := typ + "." + name
+		if decl.keyed && !hasKey {
+			return "", fmt.Errorf("%s: import `to`: %s has for_each; import into a specific instance, e.g. to = %s[each.key]", l.path, base, base)
+		}
+		if !decl.keyed && hasKey {
+			return "", fmt.Errorf("%s: import `to`: %s does not have for_each, so it has no instance %s", l.path, base, addr.Quote(key))
+		}
+	}
+	return addr.Format(typ, name, key), nil
+}
+
+// evalForEach evaluates a for_each expression and returns its instance keys
+// (sorted lexically) and each key's each.value. The value must be known at load
+// time: a map/object (keys -> values) or a set of strings (each.key ==
+// each.value). Lists are rejected — order isn't identity, and silently
+// de-duplicating would hide mistakes.
+func (l *loader) evalForEach(a *hcl.Attribute, ctx *hcl.EvalContext, what string) ([]string, map[string]cty.Value, error) {
+	trs := a.Expr.Variables()
+	if err := noEach(trs); err != nil {
+		return nil, nil, err
+	}
+	for _, tr := range trs {
+		if l.resources[tr.RootName()] != nil {
+			return nil, nil, fmt.Errorf("%s: %s: for_each value depends on %s, which is only known at apply time", l.path, what, traversalString(tr))
+		}
+	}
+	v, d := a.Expr.Value(ctx)
+	if d.HasErrors() {
+		return nil, nil, d
+	}
+	if v.IsNull() {
+		return nil, nil, fmt.Errorf("%s: %s: for_each must not be null", l.path, what)
+	}
+	if !v.IsWhollyKnown() {
+		return nil, nil, fmt.Errorf("%s: %s: for_each value must be known when the config loads", l.path, what)
+	}
+	ty := v.Type()
+	values := map[string]cty.Value{}
+	switch {
+	case ty.IsMapType() || ty.IsObjectType():
+		for it := v.ElementIterator(); it.Next(); {
+			k, ev := it.Element()
+			values[k.AsString()] = ev
+		}
+	case ty.IsSetType():
+		// An empty set may be untyped (toset([]) is a set of dynamic).
+		if !ty.ElementType().Equals(cty.String) && v.LengthInt() > 0 {
+			return nil, nil, fmt.Errorf("%s: %s: for_each must be a map or a set of strings; got %s", l.path, what, ty.FriendlyName())
+		}
+		for it := v.ElementIterator(); it.Next(); {
+			_, ev := it.Element()
+			if ev.IsNull() {
+				return nil, nil, fmt.Errorf("%s: %s: for_each set must not contain null", l.path, what)
+			}
+			values[ev.AsString()] = ev
+		}
+	case ty.IsListType() || ty.IsTupleType():
+		return nil, nil, fmt.Errorf("%s: %s: for_each must be a map or a set of strings; got list — wrap it in toset(...)", l.path, what)
+	default:
+		return nil, nil, fmt.Errorf("%s: %s: for_each must be a map or a set of strings; got %s", l.path, what, ty.FriendlyName())
+	}
+	keys := make([]string, 0, len(values))
+	for k := range values {
+		if k == "" {
+			return nil, nil, fmt.Errorf("%s: %s: for_each keys must be non-empty strings", l.path, what)
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys, values, nil
+}
+
+// eachContext returns a child of ctx in which `each` is bound to one instance.
+func eachContext(ctx *hcl.EvalContext, key string, value cty.Value) *hcl.EvalContext {
+	child := ctx.NewChild()
+	child.Variables = map[string]cty.Value{
+		"each": cty.ObjectVal(map[string]cty.Value{"key": cty.StringVal(key), "value": value}),
+	}
+	return child
+}
+
+// noEach rejects any `each.*` traversal; used for blocks without for_each.
+func noEach(trs []hcl.Traversal) error {
+	for _, tr := range trs {
+		if tr.RootName() == "each" {
+			return fmt.Errorf(`%s: "each" is only available in a block that sets for_each`, tr.SourceRange())
+		}
+	}
+	return nil
+}
+
+// pathObject is the `path` variable: path.config is the config file's
+// directory (forward slashes), so a config can address files relative to
+// itself regardless of the working directory.
+func pathObject(cfgPath string) cty.Value {
+	return cty.ObjectVal(map[string]cty.Value{
+		"config": cty.StringVal(filepath.ToSlash(filepath.Dir(cfgPath))),
+	})
 }
 
 // buildRefObject makes each resource block referenceable in expressions as
 // `<type>.<name>`. Each reference is an UNKNOWN dynamic value: attribute access
-// like `roblox_asset.gem_icon.id` yields another unknown, which decodes cleanly
-// to any target type. The real value is unknown until apply — config only needs
-// to record the Ref (see resourceRefs); the unknown is discarded.
+// like `roblox_asset.gem_icon.id` (or indexing, for a for_each resource) yields
+// another unknown, which decodes cleanly to any target type. The real value is
+// unknown until apply — config only needs to record the Ref (see bodyRefs);
+// the unknown is discarded.
 func buildRefObject(blocks hcl.Blocks) map[string]cty.Value {
 	byType := map[string]map[string]cty.Value{}
 	for _, b := range blocks {
@@ -221,46 +543,34 @@ func buildRefObject(blocks hcl.Blocks) map[string]cty.Value {
 	return out
 }
 
-// resourceRefs inspects a resource body and classifies attributes whose value
-// is a single reference to another resource. It returns:
-//   - refAttrs: attr name -> Ref, for 3-part references `<type>.<name>.<attr>`
-//     (resolved at apply time).
-//   - refNames: the set of ALL attr names that are pure resource references
-//     (2-part `<type>.<name>` or 3-part), so the caller drops them from literal
-//     attributes.
-func resourceRefs(body hcl.Body) (map[string]provider.Ref, map[string]bool) {
-	refAttrs := map[string]provider.Ref{}
-	refNames := map[string]bool{}
-	syn, ok := body.(*hclsyntax.Body)
-	if !ok {
-		return refAttrs, refNames
-	}
-	for name, attr := range syn.Attributes {
-		te, ok := attr.Expr.(*hclsyntax.ScopeTraversalExpr)
-		if !ok {
-			continue
-		}
-		tr := te.Traversal
-		resName, ok := traversalIndexName(tr, 1)
-		if !ok {
-			continue
-		}
-		refNames[name] = true
-		if attrName, ok := traversalIndexName(tr, 2); ok {
-			refAttrs[name] = provider.Ref{Address: tr.RootName() + "." + resName, Attr: attrName}
-		}
-	}
-	return refAttrs, refNames
-}
-
 // bodyAttrNames returns the set of attribute names the user actually wrote in
 // the resource body (as opposed to optional attributes hcldec defaults to null).
+// The for_each meta-argument is not a resource attribute and is skipped.
 func bodyAttrNames(body hcl.Body) map[string]bool {
 	out := map[string]bool{}
 	if syn, ok := body.(*hclsyntax.Body); ok {
 		for name := range syn.Attributes {
-			out[name] = true
+			if name != "for_each" {
+				out[name] = true
+			}
 		}
+	}
+	return out
+}
+
+// bodyTraversals returns every variable traversal used in a body's attributes
+// and nested blocks.
+func bodyTraversals(body hcl.Body) []hcl.Traversal {
+	syn, ok := body.(*hclsyntax.Body)
+	if !ok {
+		return nil
+	}
+	var out []hcl.Traversal
+	for _, a := range syn.Attributes {
+		out = append(out, a.Expr.Variables()...)
+	}
+	for _, b := range syn.Blocks {
+		out = append(out, bodyTraversals(b.Body)...)
 	}
 	return out
 }
@@ -275,61 +585,23 @@ func traversalIndexName(tr hcl.Traversal, i int) (string, bool) {
 	return "", false
 }
 
-// extractDeps finds `<type>.<name>` traversals used in a resource body and
-// returns them as dependency addresses.
-func extractDeps(body hcl.Body) []string {
-	syn, ok := body.(*hclsyntax.Body)
-	if !ok {
-		return nil
-	}
-	seen := map[string]bool{}
-	var deps []string
-	for _, attr := range syn.Attributes {
-		for _, tr := range attr.Expr.Variables() {
-			name, ok := traversalName(tr)
-			if !ok {
-				continue
-			}
-			addr := tr.RootName() + "." + name
-			if !seen[addr] {
-				seen[addr] = true
-				deps = append(deps, addr)
+// traversalString renders a traversal for error messages, e.g.
+// roblox_experience.main.id or roblox_asset.sprites["k"].id.
+func traversalString(tr hcl.Traversal) string {
+	var b strings.Builder
+	for _, step := range tr {
+		switch s := step.(type) {
+		case hcl.TraverseRoot:
+			b.WriteString(s.Name)
+		case hcl.TraverseAttr:
+			b.WriteString("." + s.Name)
+		case hcl.TraverseIndex:
+			if s.Key.Type() == cty.String {
+				b.WriteString("[" + addr.Quote(s.Key.AsString()) + "]")
+			} else {
+				b.WriteString("[…]")
 			}
 		}
 	}
-	return deps
-}
-
-func traversalName(tr hcl.Traversal) (string, bool) {
-	if len(tr) < 2 {
-		return "", false
-	}
-	if a, ok := tr[1].(hcl.TraverseAttr); ok {
-		return a.Name, true
-	}
-	return "", false
-}
-
-// importAddress extracts a "<type>.<name>" address from an import block's `to`
-// expression, which must be a bare 2-part resource-reference traversal.
-func importAddress(expr hcl.Expression) (string, bool) {
-	te, ok := expr.(*hclsyntax.ScopeTraversalExpr)
-	if !ok {
-		return "", false
-	}
-	name, ok := traversalName(te.Traversal)
-	if !ok {
-		return "", false
-	}
-	return te.Traversal.RootName() + "." + name, true
-}
-
-func envFunc() function.Function {
-	return function.New(&function.Spec{
-		Params: []function.Parameter{{Name: "name", Type: cty.String}},
-		Type:   function.StaticReturnType(cty.String),
-		Impl: func(args []cty.Value, _ cty.Type) (cty.Value, error) {
-			return cty.StringVal(os.Getenv(args[0].AsString())), nil
-		},
-	})
+	return b.String()
 }
