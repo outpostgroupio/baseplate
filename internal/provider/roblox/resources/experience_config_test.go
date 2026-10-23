@@ -312,13 +312,85 @@ func TestConfigEmptyEntriesClearsRepository(t *testing.T) {
 	}
 }
 
-func TestConfigDeleteUnmanagesOnly(t *testing.T) {
-	f := &fakeConfig{published: opencloud.ConfigValues{Version: 1, Entries: raws(map[string]string{"a": `true`})}}
+func TestConfigDeleteRemovesPlainKeysAndKeepsRules(t *testing.T) {
+	rules := json.RawMessage(`{"rules":{"c1":{"tokens":[]}},"rulesOrder":["c1"]}`)
+	f := &fakeConfig{published: opencloud.ConfigValues{Version: 7, ConditionalRules: rules, Entries: raws(map[string]string{
+		"a": `true`, "b": `{"x":1.0}`, "a.RBX.conditional.c1": `false`,
+	})}}
 	if err := ExperienceConfig(f).Delete(context.Background(), "42/InExperienceConfig"); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.patches) != 0 || len(f.publishes) != 0 {
-		t.Fatal("destroy must not touch the live config")
+	if len(f.patches) != 1 || len(f.publishes) != 1 || f.publishes[0] != "Immediate" {
+		t.Fatalf("patches=%v publishes=%v", f.patches, f.publishes)
+	}
+	p := f.patches[0]
+	if len(p) != 2 || p["a"] != nil || p["b"] != nil {
+		t.Fatalf("patch must null exactly the plain keys, got %v", p)
+	}
+	if _, sent := p["a.RBX.conditional.c1"]; sent {
+		t.Fatal("branch keys are never sent (they go with their base key)")
+	}
+	if len(f.published.Entries) != 0 {
+		t.Fatalf("published entries = %v", f.published.Entries)
+	}
+	if string(f.published.ConditionalRules) != string(rules) {
+		t.Fatalf("rules must be left alone, got %s", f.published.ConditionalRules)
+	}
+}
+
+func TestConfigDeleteEmptyOrUnpublishedIsNoop(t *testing.T) {
+	for name, pub := range map[string]opencloud.ConfigValues{
+		"never published": {},
+		"empty":           {Version: 3, Entries: raws(map[string]string{})},
+		"rules only":      {Version: 3, Entries: raws(map[string]string{}), ConditionalRules: json.RawMessage(`{"rules":{}}`)},
+	} {
+		f := &fakeConfig{published: pub}
+		if err := ExperienceConfig(f).Delete(context.Background(), "42"); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(f.patches) != 0 || len(f.publishes) != 0 {
+			t.Fatalf("%s: must not write", name)
+		}
+	}
+}
+
+func TestConfigDeleteEmptyDraftPublishIsSuccess(t *testing.T) {
+	f := &fakeConfig{
+		published:  opencloud.ConfigValues{Version: 2, Entries: raws(map[string]string{"a": `1.0`})},
+		publishErr: &opencloud.APIError{Status: 400, Message: `{"validationErrors":[{"code":"EmptyDraft"}]}`},
+	}
+	if err := ExperienceConfig(f).Delete(context.Background(), "42"); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.discarded) != 1 {
+		t.Fatal("the no-op draft must be discarded")
+	}
+}
+
+func TestConfigDeleteRefusesWhenDraftPending(t *testing.T) {
+	f := &fakeConfig{
+		published: opencloud.ConfigValues{Version: 2, Entries: raws(map[string]string{"a": `1.0`})},
+		draft:     &opencloud.ConfigDraft{Hash: "X", Entries: raws(map[string]string{"someone_else": `1`})},
+	}
+	err := ExperienceConfig(f).Delete(context.Background(), "42")
+	if err == nil || !strings.Contains(err.Error(), "unpublished draft") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(f.patches) != 0 || len(f.discarded) != 0 {
+		t.Fatal("must not touch someone else's draft")
+	}
+}
+
+func TestConfigDeletePublishFailureIsError(t *testing.T) {
+	f := &fakeConfig{
+		published:  opencloud.ConfigValues{Version: 2, Entries: raws(map[string]string{"a": `1.0`})},
+		publishErr: &opencloud.APIError{Status: 400, Message: "boom"},
+	}
+	if err := ExperienceConfig(f).Delete(context.Background(), "42"); err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(f.discarded) != 1 {
+		t.Fatal("the staged draft must be discarded")
 	}
 }
 

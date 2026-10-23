@@ -261,6 +261,15 @@ func IsEmptyDraft(err error) bool {
 	return errors.As(err, &e) && e.Status == http.StatusBadRequest && strings.Contains(e.Message, "EmptyDraft")
 }
 
+// IsDraftHashMismatch reports whether a write was rejected because the supplied
+// draftHash is not the current draft's (400, bare JSON string "The provided
+// draft hash does not match the current draft."). Observed live even when the
+// hash came straight from the preceding PATCH.
+func IsDraftHashMismatch(err error) bool {
+	var e *APIError
+	return errors.As(err, &e) && e.Status == http.StatusBadRequest && strings.Contains(e.Message, "draft hash does not match")
+}
+
 // IsMultipleDraft reports whether a draft write was rejected because another
 // publish is still in flight — observed live for a few seconds after an
 // Immediate publish and for the whole of a GradualRollout (400, text/plain

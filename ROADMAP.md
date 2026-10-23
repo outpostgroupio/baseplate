@@ -158,14 +158,16 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   deletes any rule/branch it isn't sent). The resource is authoritative for base keys but **never
   touches conditional rules or the conditional branches of kept keys**. Safety rails: refuses when a
   draft is pending; the first create refuses if live keys aren't declared (import first); `destroy`
-  only unmanages (no DELETE, and wiping a live game's config is unsafe — clear with `entries = {}`).
+  (Terraform-aligned) removes every plain key and publishes, leaving conditional rules alone — no
+  DELETE API exists, so it reuses apply's PATCH-null path and checks; protect production config
+  with `lifecycle { prevent_destroy = true }` (engine meta-argument, separate PR).
   New `opencloud.ExperienceConfigClient`. Engine fixes for structural attrs: diff treats identical
   JSON encodings as equal (map vs object, list vs tuple), plan renders objects as JSON, config
   rejects references nested in a map (`IsWhollyKnown`), `configgen.zeroValue` handles non-primitive
   types, resource docs render `any`; `parseAPIError` falls back to the raw body when there's no
   `{code,message}`. Live lifecycle verified (refused unsafe create → import adopt removing an
-  undeclared key while keeping a rule + branch → converge → update → converge → destroy left config
-  live). See the CLAUDE.md "spec gotchas" for the live-verified wire behaviour.
+  undeclared key while keeping a rule + branch → converge → update → converge → destroy removed every
+  plain key and kept the rule). See the CLAUDE.md "spec gotchas" for the live-verified wire behaviour.
 - Next: **Phase 2** remaining slices (see Roadmap below).
 
 Read `docs/superpowers/specs/2026-07-03-baseplate-phase1-roblox-provider-design.md` for the

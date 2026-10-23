@@ -197,7 +197,9 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
     listed, and any `draft:overwrite` → 400 text/plain `MultipleDraftNotSupported`.
   - A draft write within a few seconds of the previous write/publish can 400 text/plain
     **`ETagMismatch`** or **`MultipleDraftNotSupported`** (even after an *Immediate* publish) —
-    transient; the client retries both for ~15s, and a GET right after an Immediate publish can still
+    transient; the client retries both for ~15s. A `publish` with the hash the PATCH just returned
+    can still 400 "The provided draft hash does not match the current draft." — the resource
+    re-reads + re-verifies the draft and publishes with its current hash. A GET right after an Immediate publish can still
     serve the previous version briefly (wait for `metadata.configVersion`). Publishes are tightly
     rate-limited (429 after a few dozen calls in a minute).
   - Error bodies are a mix of bare JSON strings, `{"validationErrors":[…]}`, RFC 9110 problem JSON and

@@ -45,7 +45,9 @@ type experienceConfig struct {
 // conditionalRules), never draft:overwrite, which deletes every rule/branch that
 // isn't echoed back and so would be one stale read away from wiping them.
 //
-// Destroy only unmanages (drops from state); the published config is left live.
+// Destroy removes every plain key and publishes (conditional rules are left
+// alone, as on apply). Production config should be protected with
+// `lifecycle { prevent_destroy = true }`.
 func ExperienceConfig(cc opencloud.ExperienceConfigClient) provider.Resource {
 	return &experienceConfig{cc: cc, sleep: time.Sleep}
 }
@@ -66,7 +68,7 @@ func (e *experienceConfig) Doc() provider.ResourceDoc {
 			"To protect an existing game, the **first** apply (create) refuses if the repository already has keys that aren't declared — `import` it first so the plan shows what would be removed. " +
 			"Conditional rules and the conditional (targeted) values of keys you keep are **preserved** (Baseplate never sends them, and verifies the staged draft and the published result); a removed key's conditional values are removed with it, and a type change for a key with conditional values is rejected by Roblox. " +
 			"Apply refuses if the repository has an unpublished draft (e.g. pending edits in Creator Hub) — publish or discard it first. " +
-			"`destroy` only unmanages: the published config stays live (there is no delete API, and wiping a live game's config on destroy is unsafe). To clear it, apply `entries = {}` before removing the block. " +
+			"`destroy` removes every plain key in the repository and publishes (the same ownership as apply; conditional rules are left alone, and an empty or never-published repository is a no-op). Protect production config with `lifecycle { prevent_destroy = true }`. " +
 			"With `GradualRollout` (observed ~20 minutes), the API keeps returning the previous values until the rollout completes and rejects new drafts meanwhile, so a re-plan in that window shows the change again and an apply fails with a retry-later error. " +
 			"Numbers are stored as doubles (exact only up to 2^53).",
 		Scopes:      []string{"universe:read", "universe:write"},
@@ -139,10 +141,49 @@ func (e *experienceConfig) Update(ctx context.Context, id string, desired provid
 	return e.write(ctx, universeID, repo, desired, false)
 }
 
-// Delete unmanages without touching the live config: there is no DELETE API, and
-// overwriting a production game's config with an empty set on `destroy` would
-// silently break it. Users who really want it cleared apply `entries = {}` first.
-func (e *experienceConfig) Delete(context.Context, string) error { return nil }
+// Delete removes every plain key the resource owns and publishes — the same
+// ownership as apply (which already removes undeclared plain keys), so it needs
+// no state. Conditional rules are left alone and the same draft guard, draft
+// verification and post-publish checks apply. An empty or never-published
+// repository, or a publish that turns out to be a no-op, is success.
+func (e *experienceConfig) Delete(ctx context.Context, id string) error {
+	universeID, repo, err := splitConfigID(id)
+	if err != nil {
+		return err
+	}
+	if err := e.refusePendingDraft(ctx, universeID, repo); err != nil {
+		return err
+	}
+	pub, err := e.cc.GetPublished(ctx, universeID, repo)
+	if err != nil {
+		return err
+	}
+	changes := map[string]json.RawMessage{}
+	for k := range pub.Entries {
+		if !isBranchKey(k) {
+			changes[k] = nil // delete (its conditional branches go with it)
+		}
+	}
+	if len(changes) == 0 {
+		return nil // nothing to remove
+	}
+	_, err = e.publishChanges(ctx, universeID, repo, changes, pub, "Immediate")
+	return err
+}
+
+// refusePendingDraft errors when the repository has an unpublished draft, so
+// Baseplate never publishes someone else's pending edits along with its own.
+func (e *experienceConfig) refusePendingDraft(ctx context.Context, universeID, repo string) error {
+	draft, err := e.cc.GetDraft(ctx, universeID, repo)
+	if err != nil {
+		return err
+	}
+	if draft != nil {
+		return fmt.Errorf("roblox_experience_config: universe %s repository %s has unpublished draft changes (keys: %s); publish or discard them (Creator Hub, or DELETE …/draft) before applying, so Baseplate doesn't overwrite someone else's pending edits",
+			universeID, repo, keyList(draft.Entries))
+	}
+	return nil
+}
 
 // write stages desired as the full repository (preserving conditional rules and
 // the branches of kept keys) and publishes it.
@@ -159,13 +200,8 @@ func (e *experienceConfig) write(ctx context.Context, universeID, repo string, d
 		return nil, fmt.Errorf("roblox_experience_config: deployment_strategy must be \"Immediate\" or \"GradualRollout\", got %q", strategy)
 	}
 
-	draft, err := e.cc.GetDraft(ctx, universeID, repo)
-	if err != nil {
+	if err := e.refusePendingDraft(ctx, universeID, repo); err != nil {
 		return nil, err
-	}
-	if draft != nil {
-		return nil, fmt.Errorf("roblox_experience_config: universe %s repository %s has unpublished draft changes (keys: %s); publish or discard them (Creator Hub, or DELETE …/draft) before applying, so Baseplate doesn't overwrite someone else's pending edits",
-			universeID, repo, keyList(draft.Entries))
 	}
 
 	pub, err := e.cc.GetPublished(ctx, universeID, repo)
@@ -199,32 +235,9 @@ func (e *experienceConfig) write(ctx context.Context, universeID, repo string, d
 			changes[k] = nil // delete
 		}
 	}
-	hash, err := e.stage(ctx, universeID, repo, changes, pub)
+	version, err := e.publishChanges(ctx, universeID, repo, changes, pub, strategy)
 	if err != nil {
 		return nil, err
-	}
-	version, err := e.cc.Publish(ctx, universeID, repo, hash, configPublishMessage, strategy)
-	switch {
-	case opencloud.IsEmptyDraft(err):
-		// Nothing changed remotely (e.g. drift already reverted). Don't leave the
-		// no-op draft behind — it would block the next apply.
-		if derr := e.cc.DiscardDraft(ctx, universeID, repo, hash); derr != nil {
-			return nil, fmt.Errorf("roblox_experience_config: discarding no-op draft: %w", derr)
-		}
-		version = pub.Version
-	case err != nil:
-		if derr := e.cc.DiscardDraft(ctx, universeID, repo, hash); derr != nil {
-			return nil, fmt.Errorf("roblox_experience_config: publish failed: %w (and discarding the staged draft also failed: %v)", err, derr)
-		}
-		return nil, fmt.Errorf("roblox_experience_config: publish failed (staged draft discarded): %w", err)
-	}
-
-	if strategy == "Immediate" && version > pub.Version {
-		if after, ok := e.awaitVersion(ctx, universeID, repo, version); ok {
-			if lost := lostPreserved(pub, after, changes); lost != "" {
-				return nil, fmt.Errorf("roblox_experience_config: universe %s repository %s: Roblox published version %d WITHOUT %s, which Baseplate did not ask to remove; restore version %d from the config's version history in Creator Hub (or POST …/revisions/{id}/restore)", universeID, repo, version, lost, pub.Version)
-			}
-		}
 	}
 
 	out := provider.Attributes{
@@ -237,6 +250,70 @@ func (e *experienceConfig) write(ctx context.Context, universeID, repo string, d
 		out["deployment_strategy"] = v
 	}
 	return out, nil
+}
+
+// publishChanges stages changes (verified by stage), publishes them and, for an
+// Immediate publish, waits for the new version and checks nothing Baseplate
+// preserves went missing. A no-op publish (EmptyDraft) is success: the draft is
+// discarded and the current version returned.
+func (e *experienceConfig) publishChanges(ctx context.Context, universeID, repo string, changes map[string]json.RawMessage, pub opencloud.ConfigValues, strategy string) (int64, error) {
+	hash, err := e.stage(ctx, universeID, repo, changes, pub)
+	if err != nil {
+		return 0, err
+	}
+	version, err := e.cc.Publish(ctx, universeID, repo, hash, configPublishMessage, strategy)
+	// Observed live: the hash returned by the PATCH can already be stale when we
+	// publish ("The provided draft hash does not match the current draft."). Re-read
+	// the draft, re-verify it is still exactly what we staged, and publish with its
+	// current hash.
+	for attempt := 0; opencloud.IsDraftHashMismatch(err) && attempt < stageAttempts; attempt++ {
+		e.sleep(time.Duration(attempt+1) * time.Second)
+		draft, derr := e.cc.GetDraft(ctx, universeID, repo)
+		if derr != nil {
+			return 0, fmt.Errorf("roblox_experience_config: re-reading the staged draft: %w", derr)
+		}
+		if problem := unintendedChanges(draft, changes, pub); problem != "" {
+			_ = e.cc.DiscardDraft(ctx, universeID, repo, "")
+			return 0, fmt.Errorf("roblox_experience_config: universe %s repository %s: the staged draft changed under Baseplate and now %s; it was discarded and nothing was published — retry shortly", universeID, repo, problem)
+		}
+		hash = draft.Hash
+		version, err = e.cc.Publish(ctx, universeID, repo, hash, configPublishMessage, strategy)
+	}
+	switch {
+	case opencloud.IsEmptyDraft(err):
+		// Nothing changed remotely (e.g. drift already reverted). Don't leave the
+		// no-op draft behind — it would block the next apply.
+		if derr := e.discard(ctx, universeID, repo, hash); derr != nil {
+			return 0, fmt.Errorf("roblox_experience_config: discarding no-op draft: %w", derr)
+		}
+		version = pub.Version
+	case err != nil:
+		if derr := e.discard(ctx, universeID, repo, hash); derr != nil {
+			return 0, fmt.Errorf("roblox_experience_config: publish failed: %w (and discarding the staged draft also failed: %v)", err, derr)
+		}
+		return 0, fmt.Errorf("roblox_experience_config: publish failed (staged draft discarded): %w", err)
+	}
+
+	if strategy == "Immediate" && version > pub.Version {
+		if after, ok := e.awaitVersion(ctx, universeID, repo, version); ok {
+			if lost := lostPreserved(pub, after, changes); lost != "" {
+				return 0, fmt.Errorf("roblox_experience_config: universe %s repository %s: Roblox published version %d WITHOUT %s, which Baseplate did not ask to remove; restore version %d from the config's version history in Creator Hub (or POST …/revisions/{id}/restore)", universeID, repo, version, lost, pub.Version)
+			}
+		}
+	}
+
+	return version, nil
+}
+
+// discard resets the draft Baseplate just staged. The hash can already be stale
+// (see publishChanges); the draft is ours (refusePendingDraft ran first), so on
+// a hash mismatch it is discarded without the concurrency check.
+func (e *experienceConfig) discard(ctx context.Context, universeID, repo, hash string) error {
+	err := e.cc.DiscardDraft(ctx, universeID, repo, hash)
+	if opencloud.IsDraftHashMismatch(err) {
+		err = e.cc.DiscardDraft(ctx, universeID, repo, "")
+	}
+	return err
 }
 
 // stageAttempts bounds how often a draft that came out wrong is discarded and
@@ -270,7 +347,7 @@ func (e *experienceConfig) stage(ctx context.Context, universeID, repo string, c
 		if problem == "" {
 			return hash, nil
 		}
-		if derr := e.cc.DiscardDraft(ctx, universeID, repo, hash); derr != nil {
+		if derr := e.discard(ctx, universeID, repo, hash); derr != nil {
 			return "", fmt.Errorf("roblox_experience_config: the staged draft %s, and discarding it failed: %v", problem, derr)
 		}
 	}

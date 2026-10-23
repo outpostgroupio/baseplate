@@ -33,7 +33,8 @@ const liveCfgRule = `{"rules":{"bpc1":{"tokens":[{"operand":{"attributeReference
 //  4. adopts it with an import block + apply (removing the undeclared key while
 //     preserving the rule and the kept key's branch), and converges,
 //  5. updates (change/add/remove keys, nested objects), and converges,
-//  6. destroys — which must leave the live config untouched (unmanage only).
+//  6. destroys — which must remove every plain key (publishing) while keeping
+//     the conditional rule.
 //
 // SKIPPED unless BASEPLATE_LIVE=1 and ROBLOX_API_KEY + BASEPLATE_TEST_UNIVERSE are
 // set (the key needs universe:read + universe:write). Publishes are Immediate.
@@ -191,8 +192,7 @@ func TestLiveExperienceConfigLifecycle(t *testing.T) {
 		t.Fatal("conditional branch lost on update")
 	}
 
-	// 6. Destroy only unmanages: the published config must be unchanged.
-	before := got.Version
+	// 6. Destroy removes every plain key and publishes; conditional rules stay.
 	pl, err = plan.Build(ctx, p, s, nil)
 	if err != nil {
 		t.Fatalf("destroy plan: %v", err)
@@ -207,10 +207,13 @@ func TestLiveExperienceConfigLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after.Version != before || string(after.Entries["bp_new"]) != `"added"` {
-		t.Fatalf("destroy must not touch the live config (version %d -> %d)", before, after.Version)
+	if len(after.Entries) != 0 {
+		t.Fatalf("destroy must leave no plain keys (or their branches), got %v", rawKeys(after.Entries))
 	}
-	t.Log("live experience config lifecycle OK: refused unsafe create, imported (removed undeclared, kept rule+branch), converged, updated, converged, destroy left config live")
+	if !strings.Contains(string(after.ConditionalRules), "bpc1") {
+		t.Fatalf("destroy must leave conditional rules alone, got %s", after.ConditionalRules)
+	}
+	t.Log("live experience config lifecycle OK: refused unsafe create, imported (removed undeclared, kept rule+branch), converged, updated, converged, destroy removed every plain key and kept the rule")
 }
 
 func assertConverged(t *testing.T, ctx context.Context, p provider.Provider, s *state.State, desired []plan.DesiredResource, when string) {
