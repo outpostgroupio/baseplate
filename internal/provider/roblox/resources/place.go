@@ -2,8 +2,6 @@ package resources
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
@@ -58,16 +56,16 @@ func (p *place) Computed() []string {
 func (p *place) Dependencies(provider.Attributes) []provider.Ref { return nil }
 
 // Triggers forces a re-publish when the file content or version_type changes.
+// A missing file still reports version_type, with the content_hash unavailable
+// (plan keeps the recorded hash and warns).
 func (p *place) Triggers(desired provider.Attributes) (map[string]cty.Value, error) {
-	data, err := os.ReadFile(desired["file"].AsString())
+	out := map[string]cty.Value{"version_type": cty.StringVal(versionTypeOr(desired))}
+	sum, err := hashFile("roblox_place", "file", desired["file"].AsString())
 	if err != nil {
-		return nil, fmt.Errorf("roblox_place: reading file: %w", err)
+		return out, err
 	}
-	sum := sha256.Sum256(data)
-	return map[string]cty.Value{
-		"content_hash": cty.StringVal(hex.EncodeToString(sum[:])),
-		"version_type": cty.StringVal(versionTypeOr(desired)),
-	}, nil
+	out["content_hash"] = cty.StringVal(sum)
+	return out, nil
 }
 
 func (p *place) Create(ctx context.Context, desired provider.Attributes) (string, provider.Attributes, error) {

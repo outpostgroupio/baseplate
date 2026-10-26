@@ -55,6 +55,18 @@ type Change struct {
 	DependsOn []string
 	Refs      map[string]provider.Ref
 	Sensitive []string
+	// Replace names the attributes and/or triggers whose change forces this
+	// replace (Action == ActionReplace); see provider.Replacer.
+	Replace []string
+	// AbandonsOld is set on a replace whose old object is left in place (only
+	// dropped from state) rather than deleted; see provider.Replacer.
+	AbandonsOld bool
+	// BackfillTriggers names triggers with no value recorded in state that
+	// plan adopted as a baseline instead of diffing; apply records them.
+	BackfillTriggers []string
+	// Warning, when set, is a plan warning about this change (e.g. a trigger
+	// input that is missing, so changes to it can't be detected).
+	Warning string
 }
 
 type Plan struct {
@@ -73,6 +85,11 @@ type Plan struct {
 	// apply persists them even when nothing else changes. --target doesn't
 	// filter them (they're state-only and idempotent).
 	Moves []Move
+
+	// desired and pending carry Build's inputs to ResolveImports, which
+	// re-plans dependents of import targets (see replanDependents).
+	desired map[string]DesiredResource
+	pending map[string]bool
 }
 
 func (p *Plan) HasChanges() bool {
@@ -125,7 +142,12 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 		return nil, err
 	}
 
-	pl := &Plan{PreventDestroy: protectedBlocks(desired)}
+	pl := &Plan{PreventDestroy: protectedBlocks(desired), desired: byAddr}
+	// newID marks the addresses this plan gives a new remote object (create or
+	// replace). Their outputs, the id above all, aren't known until apply, so a
+	// dependent that references one is planned against an unknown value.
+	newID := map[string]bool{}
+	pl.pending = newID
 	for _, addr := range order {
 		if r, isDelete := deletes[addr]; isDelete {
 			pl.Changes = append(pl.Changes, Change{
@@ -143,6 +165,7 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 		}
 		st, inState := s.Find(addr)
 		if !inState {
+			newID[addr] = true
 			pl.Changes = append(pl.Changes, Change{
 				Address: addr, Type: d.Type, Name: d.Name, Key: d.Key, Action: provider.ActionCreate, Desired: d.Attributes, DependsOn: d.DependsOn, Refs: d.Refs,
 				Sensitive: sensitiveAttrs(resources[d.Type]),
@@ -151,6 +174,7 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 		}
 		actual, err := resources[d.Type].Read(ctx, st.ID)
 		if errors.Is(err, provider.ErrNotFound) {
+			newID[addr] = true
 			pl.Changes = append(pl.Changes, Change{
 				Address: addr, Type: d.Type, Name: d.Name, Key: d.Key, Action: provider.ActionCreate, Desired: d.Attributes, DependsOn: d.DependsOn, Refs: d.Refs,
 				Sensitive: sensitiveAttrs(resources[d.Type]),
@@ -160,28 +184,14 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 		if err != nil {
 			return nil, err
 		}
-		// Resolve references from existing state so a referenced attribute
-		// (e.g. an id) diffs against its real resolved value, not null — this
-		// keeps re-plans convergent after apply.
-		effectiveDesired, err := normalize(resources[d.Type], addr, mergeRefsFromState(d, s))
+		c, err := planInState(resources[d.Type], d, st, actual, s, newID, nil)
 		if err != nil {
 			return nil, err
 		}
-		diffs := diffAttrs(actual, effectiveDesired, resources[d.Type].Computed())
-		td, err := triggerDiffs(resources[d.Type], effectiveDesired, st)
-		if err != nil {
-			return nil, err
+		if c.Action == provider.ActionReplace {
+			newID[addr] = true
 		}
-		diffs = append(diffs, td...)
-		action := provider.ActionNoop
-		if len(diffs) > 0 {
-			action = provider.ActionUpdate
-		}
-		pl.Changes = append(pl.Changes, Change{
-			Address: addr, Type: d.Type, Name: d.Name, Key: d.Key, ID: st.ID, Action: action,
-			Desired: d.Attributes, Actual: actual, AttrDiffs: diffs, DependsOn: d.DependsOn, Refs: d.Refs,
-			Sensitive: sensitiveAttrs(resources[d.Type]),
-		})
+		pl.Changes = append(pl.Changes, c)
 	}
 	// deletes must run in reverse dependency order; re-sort delete block.
 	reorderDeletes(pl)
@@ -207,6 +217,13 @@ func checkMixedKeys(desired []DesiredResource) error {
 // from already-applied state, so the diff compares against real resolved values
 // (keeping re-plans convergent). Unresolvable refs are left absent.
 func mergeRefsFromState(d DesiredResource, s *state.State) provider.Attributes {
+	return mergeRefs(d, s, nil)
+}
+
+// mergeRefs is mergeRefsFromState plus importIDs: the id an import target
+// will have once adopted (it isn't in state yet), so a reference to its id
+// resolves to a known value.
+func mergeRefs(d DesiredResource, s *state.State, importIDs map[string]string) provider.Attributes {
 	out := make(provider.Attributes, len(d.Attributes)+len(d.Refs))
 	for k, v := range d.Attributes {
 		out[k] = v
@@ -214,6 +231,9 @@ func mergeRefsFromState(d DesiredResource, s *state.State) provider.Attributes {
 	for attr, ref := range d.Refs {
 		target, ok := s.Find(ref.Address)
 		if !ok {
+			if id, imported := importIDs[ref.Address]; imported && ref.Attr == "id" {
+				out[attr] = cty.StringVal(id)
+			}
 			continue
 		}
 		if ref.Attr == "id" {
@@ -278,35 +298,6 @@ func sameJSON(a, b cty.Value) bool {
 		return false
 	}
 	return string(aj) == string(bj)
-}
-
-// triggerDiffs compares a Triggerable resource's config-computed triggers against
-// the triggers recorded in state. Each changed key becomes an AttrDiff that forces
-// an Update, even when no declared attribute differs (e.g. a place whose file
-// content changed). Resources that are not Triggerable yield no diffs.
-func triggerDiffs(res provider.Resource, desired provider.Attributes, st *state.Resource) ([]AttrDiff, error) {
-	t, ok := res.(provider.Triggerable)
-	if !ok {
-		return nil, nil
-	}
-	want, err := t.Triggers(desired)
-	if err != nil {
-		return nil, err
-	}
-	have := decodeAttrs(st.Triggers)
-	names := make([]string, 0, len(want))
-	for k := range want {
-		names = append(names, k)
-	}
-	sort.Strings(names)
-	var diffs []AttrDiff
-	for _, k := range names {
-		o := valOr(have, k)
-		if !o.RawEquals(want[k]) {
-			diffs = append(diffs, AttrDiff{Name: k, Old: o, New: want[k]})
-		}
-	}
-	return diffs, nil
 }
 
 func valOr(a provider.Attributes, k string) cty.Value {

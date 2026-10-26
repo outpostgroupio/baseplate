@@ -3,8 +3,10 @@ package resources
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zclconf/go-cty/cty"
@@ -14,21 +16,31 @@ import (
 )
 
 type fakeAsset struct {
-	created   opencloud.AssetCreate
-	gotFile   []byte
-	store     map[string]opencloud.Asset
-	getErr    error
-	deleteErr error
+	created opencloud.AssetCreate
+	gotFile []byte
+	// content records UpdateContent calls (asset id -> uploaded bytes).
+	content map[string][]byte
+	updates int
+	// contentErr makes UpdateContent fail (a rejected in-place update).
+	contentErr error
+	// contentKeepsOldMeta makes UpdateContent ignore the request's metadata.
+	contentKeepsOldMeta bool
+	creates             int
+	store               map[string]opencloud.Asset
+	getErr              error
+	deleteErr           error
 }
 
 func (f *fakeAsset) CreateAndAwait(_ context.Context, req opencloud.AssetCreate, _, _ string, data []byte) (opencloud.Asset, error) {
 	f.created = req
 	f.gotFile = data
-	a := opencloud.Asset{ID: "555", DisplayName: req.DisplayName, Description: req.Description, AssetType: req.AssetType}
+	id := fmt.Sprint(555 + f.creates)
+	f.creates++
+	a := opencloud.Asset{ID: id, DisplayName: req.DisplayName, Description: req.Description, AssetType: req.AssetType}
 	if f.store == nil {
 		f.store = map[string]opencloud.Asset{}
 	}
-	f.store["555"] = a
+	f.store[id] = a
 	return a, nil
 }
 func (f *fakeAsset) Get(_ context.Context, id string) (opencloud.Asset, error) {
@@ -38,6 +50,24 @@ func (f *fakeAsset) Get(_ context.Context, id string) (opencloud.Asset, error) {
 	return f.store[id], nil
 }
 func (f *fakeAsset) Update(_ context.Context, a opencloud.Asset) (opencloud.Asset, error) {
+	f.updates++
+	f.store[a.ID] = a
+	return a, nil
+}
+func (f *fakeAsset) UpdateContent(_ context.Context, a opencloud.Asset, _, _ string, data []byte) (opencloud.Asset, error) {
+	if f.contentErr != nil {
+		return opencloud.Asset{}, f.contentErr
+	}
+	if f.content == nil {
+		f.content = map[string][]byte{}
+	}
+	f.content[a.ID] = data
+	if f.contentKeepsOldMeta {
+		// Live behaviour: a content update right after a metadata update
+		// keeps the earlier metadata, ignoring the request's.
+		old := f.store[a.ID]
+		a.DisplayName, a.Description = old.DisplayName, old.Description
+	}
 	f.store[a.ID] = a
 	return a, nil
 }
@@ -138,5 +168,266 @@ func TestAssetAudioTypeInferredFromExtension(t *testing.T) {
 	}
 	if got := contentType(path); got != "audio/ogg" {
 		t.Fatalf("content type = %q", got)
+	}
+}
+
+func writeFile(t *testing.T, name, body string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestAssetContentHashTrigger(t *testing.T) {
+	fp := writeFile(t, "gem.png", "v1")
+	r := Asset(&fakeAsset{}).(provider.Triggerable)
+	t1, err := r.Triggers(provider.Attributes{"file": cty.StringVal(fp)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fp, []byte("v2"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t2, err := r.Triggers(provider.Attributes{"file": cty.StringVal(fp)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if t1["content_hash"].RawEquals(t2["content_hash"]) {
+		t.Fatal("content_hash must change when the file content changes")
+	}
+	// Same bytes at another path: same hash (a rename alone does nothing).
+	other := writeFile(t, "moved.png", "v2")
+	t3, _ := r.Triggers(provider.Attributes{"file": cty.StringVal(other)})
+	if !t2["content_hash"].RawEquals(t3["content_hash"]) {
+		t.Fatal("content_hash must depend on content only, not the path")
+	}
+}
+
+func TestAssetRequiresReplace(t *testing.T) {
+	r := Asset(&fakeAsset{}).(provider.Replacer)
+	img := provider.Attributes{"asset_type": cty.StringVal("Image")}
+	model := provider.Attributes{"asset_type": cty.StringVal("Model")}
+	cases := []struct {
+		name            string
+		desired, actual provider.Attributes
+		content         bool // content_hash forces replacement
+	}{
+		{"image", provider.Attributes{"file": cty.StringVal("a.png")}, img, false},
+		{"decal", provider.Attributes{"file": cty.StringVal("a.png"), "asset_type": cty.StringVal("Decal")}, provider.Attributes{"asset_type": cty.StringVal("Decal")}, true},
+		{"audio", provider.Attributes{"file": cty.StringVal("a.ogg")}, provider.Attributes{"asset_type": cty.StringVal("Audio")}, true},
+		{"model", provider.Attributes{"file": cty.StringVal("a.fbx"), "asset_type": cty.StringVal("Model")}, model, false},
+		{"model by extension", provider.Attributes{"file": cty.StringVal("a.rbxmx")}, model, false},
+		// The CURRENT type decides: an Image whose config now says Model is an
+		// Image remotely, which can't take content.
+		{"image becoming model", provider.Attributes{"file": cty.StringVal("a.fbx")}, img, false},
+		{"decal becoming image", provider.Attributes{"file": cty.StringVal("a.png")}, provider.Attributes{"asset_type": cty.StringVal("Decal")}, true},
+		{"video", provider.Attributes{"file": cty.StringVal("a.mp4"), "asset_type": cty.StringVal("Video")}, provider.Attributes{"asset_type": cty.StringVal("Video")}, true},
+		{"model becoming image", provider.Attributes{"file": cty.StringVal("a.png")}, model, false},
+		{"no actual type, image file", provider.Attributes{"file": cty.StringVal("a.png")}, provider.Attributes{}, false},
+		{"no actual type, audio file", provider.Attributes{"file": cty.StringVal("a.ogg")}, provider.Attributes{}, true},
+	}
+	for _, c := range cases {
+		got := map[string]bool{}
+		for _, k := range r.RequiresReplace(c.desired, c.actual) {
+			got[k] = true
+		}
+		if !got["asset_type"] {
+			t.Errorf("%s: asset_type must always force replacement (Roblox can't change a type)", c.name)
+		}
+		if got["content_hash"] != c.content {
+			t.Errorf("%s: content_hash forcing = %v, want %v", c.name, got["content_hash"], c.content)
+		}
+	}
+	if !Asset(&fakeAsset{}).(provider.Replacer).ReplaceAbandons() {
+		t.Fatal("a replaced asset must be left in place, not archived")
+	}
+}
+
+func TestAssetNormalizeFillsDefaultType(t *testing.T) {
+	n := Asset(&fakeAsset{}).(provider.Normalizer)
+	for file, want := range map[string]string{"a.png": "Image", "a.fbx": "Model", "a.ogg": "Audio"} {
+		in := provider.Attributes{"file": cty.StringVal(file)}
+		out, err := n.Normalize(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out["asset_type"].AsString() != want {
+			t.Errorf("%s: asset_type = %v, want %s", file, out["asset_type"], want)
+		}
+		if _, mutated := in["asset_type"]; mutated {
+			t.Fatal("Normalize must not mutate its input")
+		}
+	}
+	out, _ := n.Normalize(provider.Attributes{"file": cty.StringVal("a.png"), "asset_type": cty.StringVal("Decal")})
+	if out["asset_type"].AsString() != "Decal" {
+		t.Fatal("a declared asset_type must be kept")
+	}
+}
+
+func TestAssetTriggersMissingFileIsUnavailable(t *testing.T) {
+	_, err := Asset(&fakeAsset{}).(provider.Triggerable).Triggers(provider.Attributes{
+		"file": cty.StringVal(filepath.Join(t.TempDir(), "gone.png"))})
+	var unavailable *provider.TriggerUnavailableError
+	if !errors.As(err, &unavailable) {
+		t.Fatalf("a missing file must be a TriggerUnavailableError, got %v", err)
+	}
+}
+
+func modelAttrs(fp string) provider.Attributes {
+	return provider.Attributes{
+		"file": cty.StringVal(fp), "display_name": cty.StringVal("Tree"),
+		"description": cty.StringVal("a tree"), "asset_type": cty.StringVal("Model"),
+	}
+}
+
+func TestAssetModelMetadataEditDoesNotReupload(t *testing.T) {
+	fp := writeFile(t, "tree.fbx", "FBXDATA")
+	sum, _ := fileHash(fp)
+	f := &fakeAsset{store: map[string]opencloud.Asset{"9": {ID: "9"}}}
+	u := Asset(f).(provider.TriggerAwareUpdater)
+	if _, err := u.UpdateWithTriggers(context.Background(), "9", modelAttrs(fp),
+		map[string]cty.Value{"content_hash": cty.StringVal(sum)}); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.content) != 0 || f.updates != 1 {
+		t.Fatalf("unchanged content must not be re-uploaded (content=%v updates=%d)", f.content, f.updates)
+	}
+	if _, err := u.UpdateWithTriggers(context.Background(), "9", modelAttrs(fp),
+		map[string]cty.Value{"content_hash": cty.StringVal("old")}); err != nil {
+		t.Fatal(err)
+	}
+	if string(f.content["9"]) != "FBXDATA" {
+		t.Fatal("changed content must be uploaded in place")
+	}
+}
+
+func TestAssetModelUpdateWithMissingFileIsMetadataOnly(t *testing.T) {
+	f := &fakeAsset{store: map[string]opencloud.Asset{"9": {ID: "9"}}}
+	if _, err := Asset(f).(provider.TriggerAwareUpdater).UpdateWithTriggers(context.Background(), "9",
+		modelAttrs(filepath.Join(t.TempDir(), "gone.fbx")), map[string]cty.Value{"content_hash": cty.StringVal("x")}); err != nil {
+		t.Fatal(err)
+	}
+	if f.updates != 1 || len(f.content) != 0 {
+		t.Fatalf("missing file: want a metadata-only update (updates=%d content=%v)", f.updates, f.content)
+	}
+}
+
+func TestAssetModelUpdateUploadsContentInPlace(t *testing.T) {
+	fp := writeFile(t, "tree.fbx", "FBXDATA")
+	f := &fakeAsset{store: map[string]opencloud.Asset{"9": {ID: "9"}}}
+	_, err := Asset(f).Update(context.Background(), "9", provider.Attributes{
+		"file":         cty.StringVal(fp),
+		"display_name": cty.StringVal("Tree"),
+		"description":  cty.StringVal("a tree"),
+		"asset_type":   cty.StringVal("Model"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(f.content["9"]) != "FBXDATA" {
+		t.Fatalf("a Model update must upload the file content in place, got %q", f.content["9"])
+	}
+	if f.updates != 0 {
+		t.Fatal("a Model update must go through UpdateContent, not the metadata-only Update")
+	}
+	if got := f.store["9"]; got.DisplayName != "Tree" || got.AssetType != "Model" {
+		t.Fatalf("metadata not sent with content: %+v", got)
+	}
+}
+
+// Images take new content in place, like Models: same id, new version, and
+// only when the content changed.
+func TestAssetImageContentUpdateInPlace(t *testing.T) {
+	fp := writeFile(t, "gem.png", "PNG")
+	sum, _ := fileHash(fp)
+	attrs := provider.Attributes{"file": cty.StringVal(fp), "display_name": cty.StringVal("Gem"), "description": cty.StringVal("x")}
+	f := &fakeAsset{store: map[string]opencloud.Asset{"9": {ID: "9"}}}
+	u := Asset(f).(provider.TriggerAwareUpdater)
+	if _, err := u.UpdateWithTriggers(context.Background(), "9", attrs, map[string]cty.Value{"content_hash": cty.StringVal(sum)}); err != nil {
+		t.Fatal(err)
+	}
+	if f.updates != 1 || len(f.content) != 0 {
+		t.Fatalf("unchanged content: want metadata-only (updates=%d content=%v)", f.updates, f.content)
+	}
+	if _, err := u.UpdateWithTriggers(context.Background(), "9", attrs, map[string]cty.Value{"content_hash": cty.StringVal("old")}); err != nil {
+		t.Fatal(err)
+	}
+	if string(f.content["9"]) != "PNG" || f.store["9"].AssetType != "Image" {
+		t.Fatalf("changed content must be uploaded in place as an Image: %q %+v", f.content["9"], f.store["9"])
+	}
+}
+
+// Decal/Audio content changes are replaced by plan, so their Update is always
+// metadata-only.
+func TestAssetDecalUpdateIsMetadataOnly(t *testing.T) {
+	fp := writeFile(t, "gem.png", "PNG")
+	f := &fakeAsset{store: map[string]opencloud.Asset{"9": {ID: "9"}}}
+	if _, err := Asset(f).Update(context.Background(), "9", provider.Attributes{
+		"file": cty.StringVal(fp), "display_name": cty.StringVal("Gem"),
+		"description": cty.StringVal("x"), "asset_type": cty.StringVal("Decal"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if f.updates != 1 || len(f.content) != 0 {
+		t.Fatalf("a Decal update must be metadata-only (updates=%d, content=%v)", f.updates, f.content)
+	}
+}
+
+// If Roblox stops accepting in-place content updates for a type, apply fails
+// with an error that says so and that Baseplate needs updating; it never falls
+// back silently.
+func TestAssetRejectedInPlaceUpdateIsActionable(t *testing.T) {
+	fp := writeFile(t, "gem.png", "PNG")
+	f := &fakeAsset{store: map[string]opencloud.Asset{"9": {ID: "9"}},
+		contentErr: &opencloud.APIError{Status: 400, Message: "Updating Image is not supported yet"}}
+	_, err := Asset(f).(provider.TriggerAwareUpdater).UpdateWithTriggers(context.Background(), "9", provider.Attributes{
+		"file": cty.StringVal(fp), "display_name": cty.StringVal("Gem"), "description": cty.StringVal("x"),
+	}, map[string]cty.Value{"content_hash": cty.StringVal("old")})
+	if err == nil {
+		t.Fatal("a rejected in-place update must fail")
+	}
+	for _, want := range []string{`roblox_asset "Gem" (id 9)`, "Image", "Updating Image is not supported yet", "Baseplate needs updating"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q is missing %q", err, want)
+		}
+	}
+	if f.updates != 0 {
+		t.Fatal("no metadata-only fallback")
+	}
+}
+
+func TestAssetModelContentTypes(t *testing.T) {
+	for ext, want := range map[string]string{
+		".fbx": "model/fbx", ".gltf": "model/gltf+json", ".glb": "model/gltf-binary",
+		".rbxm": "model/x-rbxm", ".rbxmx": "model/x-rbxm",
+	} {
+		if got := contentType("m" + ext); got != want {
+			t.Errorf("contentType(%s) = %q, want %q", ext, got, want)
+		}
+		if got := defaultAssetType("m" + ext); got != "Model" {
+			t.Errorf("defaultAssetType(%s) = %q, want Model", ext, got)
+		}
+	}
+}
+
+// Live (2026-10-26): an Image content update sent within seconds of a metadata
+// update kept the earlier name/description. Update must read back and re-send
+// the metadata when it didn't stick.
+func TestAssetContentUpdateReassertsMetadata(t *testing.T) {
+	fp := writeFile(t, "gem.png", "PNG")
+	f := &fakeAsset{store: map[string]opencloud.Asset{"9": {ID: "9", DisplayName: "Old", Description: "old"}}, contentKeepsOldMeta: true}
+	_, err := Asset(f).(provider.TriggerAwareUpdater).UpdateWithTriggers(context.Background(), "9", provider.Attributes{
+		"file": cty.StringVal(fp), "display_name": cty.StringVal("New"), "description": cty.StringVal("new"),
+	}, map[string]cty.Value{"content_hash": cty.StringVal("old")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store["9"]; got.DisplayName != "New" || got.Description != "new" {
+		t.Fatalf("metadata must be re-sent when the content update drops it, got %+v", got)
+	}
+	if f.updates != 1 {
+		t.Fatalf("want one metadata re-send, got %d", f.updates)
 	}
 }

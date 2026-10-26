@@ -82,9 +82,8 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   flat decode. No DELETE surface → `destroy` sets `enabled=false` and unmanages, same pattern as
   `roblox_game_pass`/`roblox_developer_product`. Live lifecycle verified end-to-end (create→
   converge→update name+disable→converge→icon change via the `content_hash` Trigger→converge→
-  disable+unmanage destroy) in `internal/provider/roblox/live_badge_test.go`. Deferred: `Update` is
-  stateless w.r.t. prior triggers, so a name-only edit still re-uploads/re-moderates the icon (see
-  the slice-8 deferral note in the Roadmap section below — a general engine fix, not badge-specific).
+  disable+unmanage destroy) in `internal/provider/roblox/live_badge_test.go`. A name-only edit no
+  longer re-uploads the icon (fixed by `provider.TriggerAwareUpdater`, in the replace slice).
   See `docs/superpowers/specs/2026-07-13-baseplate-phase2-badge-design.md`.
 - **`roblox_experience_event` (experience / virtual events) — SHIPPED, proven live:** live-ops
   events on the EXPERIMENTAL `virtual-events/v3` API (create on the universe collection; read/PATCH/
@@ -166,26 +165,46 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   `plan.DesiredResource.PreventDestroy` (+ `Config.PreventDestroy` for blocks with no desired
   instance); `Plan.CheckPreventDestroy` runs on the post-`--target` plan in `plan`/`apply`/`destroy`
   (destroy now loads the config, when it exists, to learn the setting). Config-only, never in state,
-  so removing the block lifts the protection (Terraform parity). The engine has no replace action,
-  so deletes are the only path guarded. **Deferred:** `ignore_changes`, `create_before_destroy`,
+  so removing the block lifts the protection (Terraform parity). Deletes and (since the replace
+  slice below) replaces are guarded. **Deferred:** `ignore_changes`, `create_before_destroy`,
   `replace_triggered_by`, `precondition`/`postcondition`.
-- **`roblox_experience_config` COMPLETE (Experience Config / `ConfigService`, BETA API), proven
-  live:** first resource with a **map-valued attribute** — `entries` is a native-HCL map
-  (`DynamicPseudoType`, so mixed bool/number/string/object values keep their types; `map(any)`
-  would unify them to string). Writes are `PATCH draft` → `publish` (not `draft:overwrite`, which
-  deletes any rule/branch it isn't sent). The resource is authoritative for base keys but **never
-  touches conditional rules or the conditional branches of kept keys**. Safety rails: refuses when a
-  draft is pending; the first create refuses if live keys aren't declared (import first); `destroy`
-  (Terraform-aligned) removes every plain key and publishes, leaving conditional rules alone — no
-  DELETE API exists, so it reuses apply's PATCH-null path and checks; protect production config
-  with `lifecycle { prevent_destroy = true }` (see `docs/config-reference.md#lifecycle`).
-  New `opencloud.ExperienceConfigClient`. Engine fixes for structural attrs: diff treats identical
-  JSON encodings as equal (map vs object, list vs tuple), plan renders objects as JSON, config
-  rejects references nested in a map (`IsWhollyKnown`), `configgen.zeroValue` handles non-primitive
-  types, resource docs render `any`; `parseAPIError` falls back to the raw body when there's no
-  `{code,message}`. Live lifecycle verified (refused unsafe create → import adopt removing an
-  undeclared key while keeping a rule + branch → converge → update → converge → destroy removed every
-  plain key and kept the rule). See the CLAUDE.md "spec gotchas" for the live-verified wire behaviour.
+- **Replace (`-/+`, Terraform's "forces replacement") + `roblox_asset` content/type changes (GitHub
+  #2 item 2, 2026-10-26), proven live:** new optional capability `provider.Replacer`
+  (`RequiresReplace(desired, actual) []string`: attribute and/or trigger names; it sees the remote
+  object so the current asset type decides whether content goes in place; `ReplaceAbandons() bool`:
+  leave the old object in place instead of deleting it) and `provider.ActionReplace`. Plan renders
+  `-/+ addr (replace)`, `name: old => new  # forces replacement`, and a line saying whether the old
+  object is destroyed or left in place; a replace counts as one add, plus one destroy unless
+  abandoned (JSON: `action: "replace"`, `forces_replacement`, `old_id`, `abandons_old`,
+  `summary.replace`). Apply is **create-before-destroy**: triggers computed first (no orphan if they
+  fail), create, commit the new id, then delete the old object or (abandon) just drop it; a failed
+  create leaves the current object untouched, a failed delete leaves the old object unmanaged and
+  says so. Dependents: references to anything getting a new id (replace, drift re-create, import then
+  replace) plan as unknown, so dependents update `(known after apply)` in the same apply, even when
+  the reference sits in a Computed attr; after import blocks resolve, dependents of an import target
+  adopted as-is are re-planned against the imported id. `prevent_destroy` blocks a replace;
+  `import {}` + forcing attribute = import then replace. Missing baselines: a replace-forcing trigger
+  with no value in state is adopted (flagged on the Change, backfilled by apply). Missing inputs:
+  `provider.TriggerUnavailableError` (asset/place/badge on a missing file) keeps the recorded value
+  for an in-state resource and warns; a create still fails. New `provider.TriggerAwareUpdater` (see
+  the slice-8 deferral, now closed). `roblox_asset`: `content_hash` trigger; `asset_type` always
+  forces replacement (a `Normalizer` fills the inferred default, so `.png` -> `.fbx` replaces too);
+  content changes are in-place updates (same id) when the asset's current type is in
+  `contentInPlace` = {Image, Model} (Image works live despite the docs; Decal is rejected live, so it
+  replaces, as do Audio/Video); replaces abandon the old asset (never
+  archive: live servers still load the old id); Model content via `AssetClient.UpdateContent` only
+  when the hash changed. Live (`TestLiveAssetLifecycle`): PNG change -> in-place update, same id ->
+  converge; `asset_type` Image -> Decal -> replace, new id, old asset still readable -> converge;
+  import with a different local file -> no changes. **Follow-ups:** no
+  destroy-before-create mode (natural-key ids would need one); no "deposed" tracking, so an old object
+  whose delete failed is orphaned rather than retried; **`lifecycle { replace_triggered_by = [...] }`**
+  (Terraform-compatible, any resource) is the planned general way to force a replace, deliberately
+  instead of a per-resource setting; if Roblox stops accepting Image content updates, apply errors
+  saying Baseplate needs updating (move the type out of `contentInPlace`); the planned apply-time
+  asset type-mismatch error is superseded for plans (a mismatch now plans a replace). Missing
+  trigger baselines are adopted for every trigger, not only replace-forcing ones. Known Roblox race:
+  an Image content PATCH within ~3s of a separate metadata PATCH can keep the earlier metadata
+  (CLAUDE.md); self-heals on the next apply.
 - Next: **Phase 2** remaining slices (see Roadmap below).
 
 Read `docs/superpowers/specs/2026-07-03-baseplate-phase1-roblox-provider-design.md` for the
@@ -255,15 +274,10 @@ Phase 1 design + rationale, and `docs/superpowers/plans/` for the executed task-
     attr today, `secret.value`, is Required); `roblox_asset` "one-of" `creator_user_id`/
     `creator_group_id` is omitted from generated config (a `# TODO`-worthy gap the generic emitter
     can't flag — a future `GenerateHints()` capability could).
-  - **From slice 8 (`roblox_badge`) — trigger-aware Update (own engine slice, general/reusable):**
-    `Update(ctx, id, desired)` is stateless — it never receives the prior triggers — so a resource
-    that backs an upload with a `content_hash` Trigger *and* also has normal diffable attrs (badge:
-    icon trigger + name/description/enabled) can't tell which fired, and must re-run the upload on
-    *every* Update (badge re-uploads/re-moderates its icon even on a name-only edit; no correctness
-    impact, just churn). Fix: an optional capability that passes the old triggers map into `Update`
-    so the upload fires only when its trigger actually changed. Deliberately NOT folded into the
-    badge slice — it's a general engine capability. (`roblox_place` doesn't hit this because it is
-    all-computed: the trigger is its *only* change signal.)
+  - ~~**From slice 8 (`roblox_badge`) — trigger-aware Update**~~ DONE in the replace slice: the
+    optional `provider.TriggerAwareUpdater` (`UpdateWithTriggers(ctx, id, desired, prior)`) gets the
+    triggers recorded before the update; `roblox_badge` re-uploads its icon and `roblox_asset` (Model)
+    re-sends its content only when the `content_hash` changed.
   - **`roblox_experience_event` follow-ups:** re-add `categories` if Roblox fixes
     `InvalidCategories` (re-probe: every value/rank/`[]` was rejected on 2026-10-23, and a create
     with categories still created the event, so never send them on create until that's fixed);
@@ -405,8 +419,9 @@ calls was removed, renamed or newly deprecated since the June spec. Corrections 
 - **Badges:** all badge endpoints are now marked EXPERIMENTAL; the create icon (`files`) is now
   optional (Roblox applies a default) — `icon_file` could become optional after a live probe.
 - **Assets:** `PATCH /assets/v1/assets/{id}` is **multipart + `updateMask` and returns an
-  Operation**; content updates are **Model-only** (Image/Decal/Audio/Video can't take new
-  content), so a stable-id in-place image update isn't possible. Audio create accepts
+  Operation**; content updates are documented as **Model-only** (Image/Decal/Audio/Video can't
+  take new content), so `roblox_asset` replaces non-Models on a content change. Live, an Image
+  took a content PATCH anyway (2026-10-26, see CLAUDE.md); undocumented, so not relied on. Audio create accepts
   mp3/ogg/wav/flac (≤7 min, ≤20 MB; 10 or 100 uploads/month by ID-verification). No Assets-API
   field exposes a Decal's underlying image id, but `toolbox-service/v2/assets/{decalId}`
   (`creator-store-product:read`) returns `asset.textureId`, including for the key owner's own
