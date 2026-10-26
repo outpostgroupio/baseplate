@@ -66,6 +66,10 @@ internal/provider/roblox      roblox.New(apiKey) assembles resources; CLI swaps 
 swappable detail. `.id` is reserved for Baseplate's state id; no resource declares a config
 `id`. Create-only inputs (e.g. asset `file`/creator, product `universe_id`/`icon_file`) are in a
 resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
+Output-only attributes (e.g. asset `texture_id`) implement `provider.Outputter` (and sit in
+`Computed()`); apply records them on a no-op and keeps a recorded value when Read omits one.
+Non-fatal problems go through `provider.Warn(ctx, msg)` (the CLI prints them as warnings), never
+a failed plan.
 
 ## Roblox spec gotchas (learned; verify against vendored specs before assuming)
 - Universe `displayName`/`description`/`visibility`/`ageRating` are **read-only** on the v2 API
@@ -97,10 +101,12 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
   Operation → poll `/v1/operations/{id}`. Base `https://apis.roblox.com/assets`.
   - `assetId` comes back as a JSON **string**, not the int64 the spec declares (Roblox serializes
     64-bit ids as strings — decode as `string`). Verified live.
-  - **Image/Decal (and Model) assets are NOT archivable** (`:archive` → 400 "not an archivable
+  - **Image and Model assets are NOT archivable** (`:archive` → 400 "not an archivable
     asset type"; Model verified live 2026-10-26), so there's no Open Cloud delete path;
     `roblox_asset` destroy unmanages-in-place (drops from state, leaves the asset), like a dev
-    product that can't be hard-deleted. Verified live.
+    product that can't be hard-deleted. Verified live. **A Decal IS archivable** (corrects an
+    older note): `roblox_asset` destroy of a Decal left it `"state":"Archived"` (2026-10-26), and
+    `POST /assets/v1/assets/{id}:restore` brought it back (`Active`, same id, texture intact).
   - **Content updates** (`PATCH …/assets/{id}` multipart with a `fileContent` part plus the
     `request` part; `updateMask=displayName,description` still applies the metadata in the same
     call) → Operation, and a **new version under the same id**. Docs say Model-only (the guide even
@@ -129,8 +135,14 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
     (the decal is untouched). Decal → texture id over an API key:
     `GET /toolbox-service/v2/assets/{decalId}` (BETA, scope `creator-store-product:read`) returns
     `asset.textureId` (a JSON number), and this works for the key owner's own **private**,
-    non-Creator-Store decal. It 404s without a key, and 404s for an Image id. Not tried yet: a
-    group-owned decal, or another creator's private decal. Plan only diffs *declared* attributes,
+    non-Creator-Store decal. It 404s without a key, and 404s for an Image id. It also **404s a
+    freshly uploaded decal** for a while (seconds after upload: 404; about a minute later: 200,
+    verified live 2026-10-26), and for an archived one. The 200 body is
+    `{"asset":{"id":N,"textureId":N,"assetTypeId":13,...},"creator":{...},"voting":{...},...}`
+    (ids as JSON numbers). `roblox_asset.texture_id` uses it for Decals (an Image's is its own
+    id); a failed lookup only warns. Not tried yet: a group-owned decal, another creator's
+    private decal, or a key without the scope (the missing-scope response is assumed to be the
+    gateway's `403 Scope not authorized.`). Plan only diffs *declared* attributes,
     so importing a decal id with `asset_type` omitted shows no diff. With
     `asset_type = "Image"` declared it plans `Decal => Image`, which `Update` can't apply.
     Neither `asset-delivery-api/v1/assetId/{id}` (scope `legacy-asset:manage`) nor Luau Execution

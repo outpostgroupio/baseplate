@@ -16,7 +16,7 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   type-preserving state marshal (`Marshal(v, cty.DynamicPseudoType)` — the write side previously
   emitted bare JSON that every `DynamicPseudoType` read silently dropped); gated live
   `roblox_asset` test, **proven live**. Live-discovered + fixed: `assetId` is a wire **string**
-  (not int64); Image/Decal assets are **not archivable** → `asset.Delete` unmanages-in-place.
+  (not int64); Image/Decal assets are **not archivable** → `asset.Delete` unmanages-in-place (correction, 2026-10-26: a Decal archive succeeds live; Image and Model don't).
   See `docs/superpowers/specs/2026-07-03-baseplate-phase2-robustness-design.md`.
 - **Phase 2 slice 2 COMPLETE (`roblox_place` + Triggers), proven live:** new reusable engine
   capability `provider.Triggerable` (config-computed values persisted in state that force an Update
@@ -205,6 +205,28 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   trigger baselines are adopted for every trigger, not only replace-forcing ones. Known Roblox race:
   an Image content PATCH within ~3s of a separate metadata PATCH can keep the earlier metadata
   (CLAUDE.md); self-heals on the next apply.
+- **`roblox_asset.texture_id` (GitHub #2 item 1, 2026-10-26), proven live:** a computed output, the
+  id for `rbxassetid://`: an Image's own id, or for a Decal the Image behind it via
+  `opencloud.TextureClient.DecalTextureID` (`GET /toolbox-service/v2/assets/{id}` →
+  `asset.textureId`, optional scope `creator-store-product:read`; one extra GET per Decal per
+  Read/Create/Update, none for Images); unset for Model/Audio/Video. Two new engine pieces:
+  **`provider.Outputter`** (`Outputs() map[string]cty.Type`: output-only attributes, also in
+  `Computed()`, rendered in the resource reference with the `computed` kind via
+  `ResourceDoc.Outputs`); apply records a Read-reported output that state lacks on a **no-op**
+  (pre-existing state and late lookups get it without a change), keeps the recorded value when a
+  Read/Update omits it (an output is fixed for the id), and a reference to an unset output errors
+  saying so. **`provider.Warn(ctx, msg)`**: a context-carried, deduplicating warnings collector
+  (`provider.WithWarnings`) the CLI installs for plan/apply/destroy/import; plan lists them with its
+  own warnings (`Plan.ProviderWarnings`, text + `result.warnings`), apply prints apply-time ones
+  after `Apply complete.` and in `apply --json`/`import --json`. A failed Decal lookup never fails
+  plan/apply: missing scope (403 mentioning "scope") warns once and skips the remaining Decals in
+  the run; 404 (a new decal for ~1 min after upload, verified live; or not visible to the key) and
+  other errors warn per decal. Live (`TestLiveAssetTextureID`, can reuse existing ids via
+  `BASEPLATE_TEST_IMAGE_ID`/`BASEPLATE_TEST_DECAL_ID`): Image `texture_id == id`; Decal → a
+  different id whose asset is `Image`; converges. **Follow-ups:** group-owned decals unverified; the
+  missing-scope response is unverified (the test key has the scope); plan-time reference resolution
+  still reads non-`id` outputs from state only (a dependent of an asset whose state predates
+  `texture_id` sees it after the next apply).
 - Next: **Phase 2** remaining slices (see Roadmap below).
 
 Read `docs/superpowers/specs/2026-07-03-baseplate-phase1-roblox-provider-design.md` for the
@@ -507,11 +529,9 @@ thumbnail/notification candidates). The genuinely new items we chose to adopt:
   - **`roblox_asset` with Decals (issue #2 item 1):** this is mostly a docs problem. Upload as
     `Image` (the default) and the `id` is already the texture id. To adopt from a Decal pipeline,
     import the texture ids (`docs/how-to/many-assets.md`). Both are verified live (2026-10-26).
-    Optional follow-ups:
-    (a) a computed `texture_id` on `asset_type = "Decal"` instances, read from
-    `GET /toolbox-service/v2/assets/{id}` → `asset.textureId` (BETA, scope
-    `creator-store-product:read`, so make the scope optional and leave the attribute unset on 403).
-    Group-owned decals haven't been probed yet, so do that first. This needs no Luau Execution.
+    Follow-ups:
+    (a) **DONE (2026-10-26):** the computed `texture_id` output (see Status above). Still open:
+    probe a group-owned decal (needs a group-owned key or a group the test user can upload to).
     (b) An apply-time guard: in `Update`, GET the asset and fail with a clear error when the remote
     `assetType` differs from the declared `asset_type` (for example a decal id imported by
     mistake), instead of a diff that never converges. A Luau-execution fallback

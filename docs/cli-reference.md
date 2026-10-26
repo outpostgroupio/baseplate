@@ -155,6 +155,10 @@ with an example `moved` block that keeps the existing object instead.
 When a `for_each` resource declares zero instances while state still holds some, it warns that all
 of them will be destroyed. `--json` lists both under `result.warnings`. See
 [managing many assets](how-to/many-assets.md#renaming-or-moving-a-file).
+Resources can add warnings of their own, about something that didn't stop the plan (for example a
+`roblox_asset` Decal whose `texture_id` lookup failed). They're printed and listed the same way.
+`apply` prints those reported while it runs after `Apply complete.`, and `apply --json` and
+`import --json` list them under `result.warnings`.
 
 `--generate-config=FILE` writes resource blocks for `import {}` blocks whose target isn't declared.
 It doesn't support `for_each` targets; declare those by hand.
@@ -299,6 +303,7 @@ roblox_asset.sprites["ui/gem.png"]
     asset_type   = Image
     description  = Game sprite
     display_name = sprite/ui/gem
+    texture_id   = 1234567890
 ```
 
 `--json` returns the inventory sorted by address. `key` is present only for `for_each` instances,
@@ -318,7 +323,7 @@ and `attributes` are plain JSON values. Sensitive attributes are never included.
         "name": "sprites",
         "key": "ui/gem.png",
         "id": "1234567890",
-        "attributes": { "asset_type": "Image", "display_name": "sprite/ui/gem" }
+        "attributes": { "asset_type": "Image", "display_name": "sprite/ui/gem", "texture_id": "1234567890" }
       }
     ]
   }

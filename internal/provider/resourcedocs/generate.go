@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/hashicorp/hcl/v2/hcldec"
+	"github.com/zclconf/go-cty/cty"
 
 	"github.com/outpostgroupio/baseplate/internal/provider"
 )
@@ -23,7 +24,9 @@ const preamble = "# Resource reference\n\n" +
 	"- **diffable** — a normal managed attribute; a config change plans an update.\n" +
 	"- **sensitive** — redacted from all plan output and never written to state.\n" +
 	"- **trigger** — not diffed directly; a change is detected via a hash/marker and forces an update\n" +
-	"  (or a replace, where the resource notes say so: see `-/+` in the CLI reference).\n\n" +
+	"  (or a replace, where the resource notes say so: see `-/+` in the CLI reference).\n" +
+	"- **computed** — an output Baseplate sets from Roblox; you can't set it in config. Reference it like\n" +
+	"  `id` (`type.name.attr`, resolved at apply time); `baseplate show --json` lists it.\n\n" +
 	"Every resource also has an implicit `id` (Baseplate's state id) — you never set it in config.\n"
 
 // Generate renders the full resource-reference markdown for the provider's
@@ -103,6 +106,28 @@ func renderResource(r provider.Resource) (string, error) {
 		}
 	}
 
+	// Computed outputs (provider.Outputter) and their descriptions must match.
+	var outTypes map[string]cty.Type
+	if o, ok := r.(provider.Outputter); ok {
+		outTypes = o.Outputs()
+	}
+	outputs := make([]string, 0, len(outTypes))
+	for name := range outTypes {
+		if _, ok := rd.Outputs[name]; !ok {
+			return "", fmt.Errorf("output %q has no Doc().Outputs entry", name)
+		}
+		if _, ok := spec[name]; ok {
+			return "", fmt.Errorf("output %q is also a DecodeSpec attribute", name)
+		}
+		outputs = append(outputs, name)
+	}
+	sort.Strings(outputs)
+	for k := range rd.Outputs {
+		if _, ok := outTypes[k]; !ok {
+			return "", fmt.Errorf("Doc().Outputs has key %q which is not an output (provider.Outputter)", k)
+		}
+	}
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "## `%s`\n\n", r.Type())
 	if rd.Summary != "" {
@@ -116,6 +141,9 @@ func renderResource(r provider.Resource) (string, error) {
 		}
 		kind := attrKind(as.Required, computed[name], sensitive[name], trigger[name])
 		fmt.Fprintf(&b, "| `%s` | %s | %s | %s |\n", name, attrTypeName(as.Type), kind, rd.Attributes[name])
+	}
+	for _, o := range outputs {
+		fmt.Fprintf(&b, "| `%s` | %s | computed | %s |\n", o, attrTypeName(outTypes[o]), rd.Outputs[o])
 	}
 	if rd.Notes != "" {
 		fmt.Fprintf(&b, "\n%s\n", rd.Notes)

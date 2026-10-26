@@ -169,6 +169,7 @@ func (p *Plan) Warnings() []string {
 			out = append(out, c.Warning)
 		}
 	}
+	out = append(out, p.ProviderWarnings...)
 	return out
 }
 

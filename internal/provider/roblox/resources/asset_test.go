@@ -29,6 +29,19 @@ type fakeAsset struct {
 	store               map[string]opencloud.Asset
 	getErr              error
 	deleteErr           error
+	// textureErr makes DecalTextureID fail; textureCalls counts its calls.
+	textureErr   error
+	textureCalls int
+}
+
+// DecalTextureID implements opencloud.TextureClient: a decal's texture is
+// "tex-<decal id>".
+func (f *fakeAsset) DecalTextureID(_ context.Context, id string) (string, error) {
+	f.textureCalls++
+	if f.textureErr != nil {
+		return "", f.textureErr
+	}
+	return "tex-" + id, nil
 }
 
 func (f *fakeAsset) CreateAndAwait(_ context.Context, req opencloud.AssetCreate, _, _ string, data []byte) (opencloud.Asset, error) {
@@ -81,14 +94,14 @@ func (f *fakeAsset) Delete(_ context.Context, id string) error {
 
 func TestAssetDeleteUnmanagesNonArchivable(t *testing.T) {
 	r := Asset(&fakeAsset{deleteErr: &opencloud.APIError{
-		Status: 400, Message: "Asset 1 is not an archivable asset type."}})
+		Status: 400, Message: "Asset 1 is not an archivable asset type."}}, nil)
 	if err := r.Delete(context.Background(), "1"); err != nil {
 		t.Fatalf("destroy of a non-archivable asset must succeed (unmanage), got %v", err)
 	}
 }
 
 func TestAssetDeletePropagatesOtherErrors(t *testing.T) {
-	r := Asset(&fakeAsset{deleteErr: &opencloud.APIError{Status: 500, Message: "boom"}})
+	r := Asset(&fakeAsset{deleteErr: &opencloud.APIError{Status: 500, Message: "boom"}}, nil)
 	if err := r.Delete(context.Background(), "1"); err == nil {
 		t.Fatal("a delete error unrelated to archivability must propagate")
 	}
@@ -101,7 +114,7 @@ func TestAssetCreateReadsFileAndUploads(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := &fakeAsset{}
-	r := Asset(f)
+	r := Asset(f, f)
 
 	id, attrs, err := r.Create(context.Background(), provider.Attributes{
 		"file":            cty.StringVal(fp),
@@ -130,7 +143,7 @@ func TestAssetCreateRejectsMissingCreator(t *testing.T) {
 	dir := t.TempDir()
 	fp := filepath.Join(dir, "x.png")
 	os.WriteFile(fp, []byte("x"), 0o600)
-	r := Asset(&fakeAsset{})
+	r := Asset(&fakeAsset{}, nil)
 	_, _, err := r.Create(context.Background(), provider.Attributes{
 		"file":         cty.StringVal(fp),
 		"display_name": cty.StringVal("x"),
@@ -142,7 +155,7 @@ func TestAssetCreateRejectsMissingCreator(t *testing.T) {
 }
 
 func TestAssetReadMapsNotFound(t *testing.T) {
-	r := Asset(&fakeAsset{getErr: &opencloud.APIError{Status: 404}})
+	r := Asset(&fakeAsset{getErr: &opencloud.APIError{Status: 404}}, nil)
 	if _, err := r.Read(context.Background(), "555"); !errors.Is(err, provider.ErrNotFound) {
 		t.Fatalf("want provider.ErrNotFound, got %v", err)
 	}
@@ -154,7 +167,7 @@ func TestAssetAudioTypeInferredFromExtension(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := &fakeAsset{}
-	_, attrs, err := Asset(f).Create(context.Background(), provider.Attributes{
+	_, attrs, err := Asset(f, f).Create(context.Background(), provider.Attributes{
 		"file":            cty.StringVal(path),
 		"display_name":    cty.StringVal("Click"),
 		"description":     cty.StringVal("UI click"),
@@ -182,7 +195,7 @@ func writeFile(t *testing.T, name, body string) string {
 
 func TestAssetContentHashTrigger(t *testing.T) {
 	fp := writeFile(t, "gem.png", "v1")
-	r := Asset(&fakeAsset{}).(provider.Triggerable)
+	r := Asset(&fakeAsset{}, nil).(provider.Triggerable)
 	t1, err := r.Triggers(provider.Attributes{"file": cty.StringVal(fp)})
 	if err != nil {
 		t.Fatal(err)
@@ -206,7 +219,7 @@ func TestAssetContentHashTrigger(t *testing.T) {
 }
 
 func TestAssetRequiresReplace(t *testing.T) {
-	r := Asset(&fakeAsset{}).(provider.Replacer)
+	r := Asset(&fakeAsset{}, nil).(provider.Replacer)
 	img := provider.Attributes{"asset_type": cty.StringVal("Image")}
 	model := provider.Attributes{"asset_type": cty.StringVal("Model")}
 	cases := []struct {
@@ -240,13 +253,13 @@ func TestAssetRequiresReplace(t *testing.T) {
 			t.Errorf("%s: content_hash forcing = %v, want %v", c.name, got["content_hash"], c.content)
 		}
 	}
-	if !Asset(&fakeAsset{}).(provider.Replacer).ReplaceAbandons() {
+	if !Asset(&fakeAsset{}, nil).(provider.Replacer).ReplaceAbandons() {
 		t.Fatal("a replaced asset must be left in place, not archived")
 	}
 }
 
 func TestAssetNormalizeFillsDefaultType(t *testing.T) {
-	n := Asset(&fakeAsset{}).(provider.Normalizer)
+	n := Asset(&fakeAsset{}, nil).(provider.Normalizer)
 	for file, want := range map[string]string{"a.png": "Image", "a.fbx": "Model", "a.ogg": "Audio"} {
 		in := provider.Attributes{"file": cty.StringVal(file)}
 		out, err := n.Normalize(in)
@@ -267,7 +280,7 @@ func TestAssetNormalizeFillsDefaultType(t *testing.T) {
 }
 
 func TestAssetTriggersMissingFileIsUnavailable(t *testing.T) {
-	_, err := Asset(&fakeAsset{}).(provider.Triggerable).Triggers(provider.Attributes{
+	_, err := Asset(&fakeAsset{}, nil).(provider.Triggerable).Triggers(provider.Attributes{
 		"file": cty.StringVal(filepath.Join(t.TempDir(), "gone.png"))})
 	var unavailable *provider.TriggerUnavailableError
 	if !errors.As(err, &unavailable) {
@@ -286,7 +299,7 @@ func TestAssetModelMetadataEditDoesNotReupload(t *testing.T) {
 	fp := writeFile(t, "tree.fbx", "FBXDATA")
 	sum, _ := fileHash(fp)
 	f := &fakeAsset{store: map[string]opencloud.Asset{"9": {ID: "9"}}}
-	u := Asset(f).(provider.TriggerAwareUpdater)
+	u := Asset(f, f).(provider.TriggerAwareUpdater)
 	if _, err := u.UpdateWithTriggers(context.Background(), "9", modelAttrs(fp),
 		map[string]cty.Value{"content_hash": cty.StringVal(sum)}); err != nil {
 		t.Fatal(err)
@@ -305,7 +318,7 @@ func TestAssetModelMetadataEditDoesNotReupload(t *testing.T) {
 
 func TestAssetModelUpdateWithMissingFileIsMetadataOnly(t *testing.T) {
 	f := &fakeAsset{store: map[string]opencloud.Asset{"9": {ID: "9"}}}
-	if _, err := Asset(f).(provider.TriggerAwareUpdater).UpdateWithTriggers(context.Background(), "9",
+	if _, err := Asset(f, f).(provider.TriggerAwareUpdater).UpdateWithTriggers(context.Background(), "9",
 		modelAttrs(filepath.Join(t.TempDir(), "gone.fbx")), map[string]cty.Value{"content_hash": cty.StringVal("x")}); err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +330,7 @@ func TestAssetModelUpdateWithMissingFileIsMetadataOnly(t *testing.T) {
 func TestAssetModelUpdateUploadsContentInPlace(t *testing.T) {
 	fp := writeFile(t, "tree.fbx", "FBXDATA")
 	f := &fakeAsset{store: map[string]opencloud.Asset{"9": {ID: "9"}}}
-	_, err := Asset(f).Update(context.Background(), "9", provider.Attributes{
+	_, err := Asset(f, f).Update(context.Background(), "9", provider.Attributes{
 		"file":         cty.StringVal(fp),
 		"display_name": cty.StringVal("Tree"),
 		"description":  cty.StringVal("a tree"),
@@ -344,7 +357,7 @@ func TestAssetImageContentUpdateInPlace(t *testing.T) {
 	sum, _ := fileHash(fp)
 	attrs := provider.Attributes{"file": cty.StringVal(fp), "display_name": cty.StringVal("Gem"), "description": cty.StringVal("x")}
 	f := &fakeAsset{store: map[string]opencloud.Asset{"9": {ID: "9"}}}
-	u := Asset(f).(provider.TriggerAwareUpdater)
+	u := Asset(f, f).(provider.TriggerAwareUpdater)
 	if _, err := u.UpdateWithTriggers(context.Background(), "9", attrs, map[string]cty.Value{"content_hash": cty.StringVal(sum)}); err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +377,7 @@ func TestAssetImageContentUpdateInPlace(t *testing.T) {
 func TestAssetDecalUpdateIsMetadataOnly(t *testing.T) {
 	fp := writeFile(t, "gem.png", "PNG")
 	f := &fakeAsset{store: map[string]opencloud.Asset{"9": {ID: "9"}}}
-	if _, err := Asset(f).Update(context.Background(), "9", provider.Attributes{
+	if _, err := Asset(f, f).Update(context.Background(), "9", provider.Attributes{
 		"file": cty.StringVal(fp), "display_name": cty.StringVal("Gem"),
 		"description": cty.StringVal("x"), "asset_type": cty.StringVal("Decal"),
 	}); err != nil {
@@ -382,7 +395,7 @@ func TestAssetRejectedInPlaceUpdateIsActionable(t *testing.T) {
 	fp := writeFile(t, "gem.png", "PNG")
 	f := &fakeAsset{store: map[string]opencloud.Asset{"9": {ID: "9"}},
 		contentErr: &opencloud.APIError{Status: 400, Message: "Updating Image is not supported yet"}}
-	_, err := Asset(f).(provider.TriggerAwareUpdater).UpdateWithTriggers(context.Background(), "9", provider.Attributes{
+	_, err := Asset(f, f).(provider.TriggerAwareUpdater).UpdateWithTriggers(context.Background(), "9", provider.Attributes{
 		"file": cty.StringVal(fp), "display_name": cty.StringVal("Gem"), "description": cty.StringVal("x"),
 	}, map[string]cty.Value{"content_hash": cty.StringVal("old")})
 	if err == nil {
@@ -418,7 +431,7 @@ func TestAssetModelContentTypes(t *testing.T) {
 func TestAssetContentUpdateReassertsMetadata(t *testing.T) {
 	fp := writeFile(t, "gem.png", "PNG")
 	f := &fakeAsset{store: map[string]opencloud.Asset{"9": {ID: "9", DisplayName: "Old", Description: "old"}}, contentKeepsOldMeta: true}
-	_, err := Asset(f).(provider.TriggerAwareUpdater).UpdateWithTriggers(context.Background(), "9", provider.Attributes{
+	_, err := Asset(f, f).(provider.TriggerAwareUpdater).UpdateWithTriggers(context.Background(), "9", provider.Attributes{
 		"file": cty.StringVal(fp), "display_name": cty.StringVal("New"), "description": cty.StringVal("new"),
 	}, map[string]cty.Value{"content_hash": cty.StringVal("old")})
 	if err != nil {

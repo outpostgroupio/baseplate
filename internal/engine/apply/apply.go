@@ -40,7 +40,7 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 			if err := plan.ImportCollision(s, c.Type, c.Address, c.ImportID); err != nil {
 				return err
 			}
-			desired, err := resolveRefs(c, outputs)
+			desired, err := resolveRefs(c, outputs, resources)
 			if err != nil {
 				return err
 			}
@@ -66,21 +66,27 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 		}
 		switch c.Action {
 		case provider.ActionNoop:
+			st, ok := s.Find(c.Address)
 			if c.ID != "" {
-				outputs[c.Address] = withID(c.Actual, c.ID)
+				actual := c.Actual
+				if ok {
+					actual = keepOutputs(r, actual, st)
+				}
+				outputs[c.Address] = withID(actual, c.ID)
 			}
 			// Nothing changed remotely, but the dependency edges may have (e.g. a
-			// for_each dependency lost an instance), and a trigger may have no
+			// for_each dependency lost an instance), a trigger may have no
 			// recorded baseline yet (state written before the resource had it;
-			// plan skips such replace-forcing triggers). Refresh both so state
-			// never keeps an edge to something that's gone and the next content
-			// change is detected; write only on a real change so a converged
-			// apply doesn't churn the serial.
-			st, ok := s.Find(c.Address)
+			// plan skips such replace-forcing triggers), and Read may report a
+			// computed output that state doesn't have yet (provider.Outputter).
+			// Refresh them so state never keeps an edge to something that's
+			// gone, the next content change is detected and outputs are
+			// recorded; write only on a real change so a converged apply
+			// doesn't churn the serial.
 			if !ok {
 				continue
 			}
-			changed := false
+			changed := recordOutputs(r, c.Actual, st)
 			if !sameSet(st.Dependencies, c.DependsOn) {
 				st.Dependencies = c.DependsOn
 				changed = true
@@ -96,7 +102,7 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 			}
 			continue
 		case provider.ActionCreate:
-			desired, err := resolveRefs(c, outputs)
+			desired, err := resolveRefs(c, outputs, resources)
 			if err != nil {
 				return err
 			}
@@ -115,7 +121,7 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 				return err
 			}
 		case provider.ActionUpdate:
-			desired, err := resolveRefs(c, outputs)
+			desired, err := resolveRefs(c, outputs, resources)
 			if err != nil {
 				return err
 			}
@@ -131,12 +137,15 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 			if err != nil {
 				return err
 			}
+			if st, ok := s.Find(c.Address); ok {
+				out = keepOutputs(r, out, st)
+			}
 			outputs[c.Address] = withID(out, c.ID)
 			if err := commit(b, s, stateResource(c, c.ID, out, trigs)); err != nil {
 				return err
 			}
 		case provider.ActionReplace:
-			if err := replace(ctx, r, b, s, c, outputs); err != nil {
+			if err := replace(ctx, r, b, s, c, outputs, resources); err != nil {
 				return err
 			}
 		case provider.ActionDelete:
@@ -165,8 +174,8 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 //
 // Resources whose ids are natural keys (two objects can't coexist) would need
 // destroy-before-create; none implements provider.Replacer today.
-func replace(ctx context.Context, r provider.Resource, b backend.Backend, s *state.State, c plan.Change, outputs map[string]provider.Attributes) error {
-	desired, err := resolveRefs(c, outputs)
+func replace(ctx context.Context, r provider.Resource, b backend.Backend, s *state.State, c plan.Change, outputs map[string]provider.Attributes, resources map[string]provider.Resource) error {
+	desired, err := resolveRefs(c, outputs, resources)
 	if err != nil {
 		return err
 	}
@@ -234,7 +243,7 @@ func triggersKeeping(r provider.Resource, desired provider.Attributes, prior map
 // overwrites a recorded value: a differing value is a real change, which plan
 // turns into an update or replace.
 func backfillTriggers(r provider.Resource, c plan.Change, outputs map[string]provider.Attributes, st *state.Resource) bool {
-	desired, err := resolveRefs(c, outputs)
+	desired, err := resolveRefs(c, outputs, nil)
 	if err != nil {
 		return false
 	}
@@ -273,7 +282,7 @@ func decodeRaw(m map[string]json.RawMessage) map[string]cty.Value {
 
 // resolveRefs returns the change's desired attributes with referenced attributes
 // filled in from already-applied outputs, in dependency order.
-func resolveRefs(c plan.Change, outputs map[string]provider.Attributes) (provider.Attributes, error) {
+func resolveRefs(c plan.Change, outputs map[string]provider.Attributes, resources map[string]provider.Resource) (provider.Attributes, error) {
 	desired := make(provider.Attributes, len(c.Desired)+len(c.Refs))
 	for k, v := range c.Desired {
 		desired[k] = v
@@ -285,11 +294,91 @@ func resolveRefs(c plan.Change, outputs map[string]provider.Attributes) (provide
 		}
 		v, ok := out[ref.Attr]
 		if !ok {
+			if isOutput(resources, ref) {
+				return nil, fmt.Errorf("%s: references %s.%s, which is not set: the provider couldn't determine it for this object, or it doesn't apply to it (see the warnings, and the resource reference for when it is set)", c.Address, ref.Address, ref.Attr)
+			}
 			return nil, fmt.Errorf("%s: referenced attribute %s.%s not found in applied output", c.Address, ref.Address, ref.Attr)
 		}
 		desired[attr] = v
 	}
 	return desired, nil
+}
+
+// isOutput reports whether ref names a computed output (provider.Outputter)
+// of the referenced resource's type.
+func isOutput(resources map[string]provider.Resource, ref provider.Ref) bool {
+	typ, _, _, _, err := addr.Parse(ref.Address)
+	if err != nil {
+		return false
+	}
+	o, ok := resources[typ].(provider.Outputter)
+	if !ok {
+		return false
+	}
+	_, ok = o.Outputs()[ref.Attr]
+	return ok
+}
+
+// keepOutputs returns attrs with any computed output (provider.Outputter)
+// that attrs lacks but st records filled in from st. An output is fixed for
+// the object's id, so a lookup that failed this time doesn't lose it.
+func keepOutputs(r provider.Resource, attrs provider.Attributes, st *state.Resource) provider.Attributes {
+	o, ok := r.(provider.Outputter)
+	if !ok {
+		return attrs
+	}
+	var out provider.Attributes
+	for k := range o.Outputs() {
+		if _, has := attrs[k]; has {
+			continue
+		}
+		raw, recorded := st.Attributes[k]
+		if !recorded {
+			continue
+		}
+		v, err := ctyjson.Unmarshal(raw, cty.DynamicPseudoType)
+		if err != nil {
+			continue
+		}
+		if out == nil {
+			out = make(provider.Attributes, len(attrs)+1)
+			for ak, av := range attrs {
+				out[ak] = av
+			}
+		}
+		out[k] = v
+	}
+	if out == nil {
+		return attrs
+	}
+	return out
+}
+
+// recordOutputs writes the computed outputs (provider.Outputter) that actual
+// reports into st where they differ from what st records, and reports whether
+// it changed anything. An output actual lacks is left as recorded.
+func recordOutputs(r provider.Resource, actual provider.Attributes, st *state.Resource) bool {
+	o, ok := r.(provider.Outputter)
+	if !ok {
+		return false
+	}
+	changed := false
+	for k := range o.Outputs() {
+		v, has := actual[k]
+		if !has || !v.IsKnown() {
+			continue
+		}
+		enc := encodeValues(provider.Attributes{k: v})[k]
+		if enc == nil || string(enc) == string(st.Attributes[k]) {
+			continue
+		}
+		if st.Attributes == nil {
+			st.Attributes = map[string]json.RawMessage{}
+		}
+		st.Attributes[k] = enc
+		changed = true
+	}
+	return changed
 }
 
 func withID(a provider.Attributes, id string) provider.Attributes {

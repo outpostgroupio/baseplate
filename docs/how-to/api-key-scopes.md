@@ -14,7 +14,7 @@ during `apply`/`destroy`, so grant both sides.
 | `roblox_experience` | `universe:write` (plus `legacy-universe:manage` if you set `public`) |
 | `roblox_place` | `universe-places:write` |
 | `roblox_place_config` | `universe.place:read`, `universe.place:write` |
-| `roblox_asset` | `asset:read`, `asset:write` |
+| `roblox_asset` | `asset:read`, `asset:write` (plus, optionally, `creator-store-product:read` for Decal `texture_id`s) |
 | `roblox_developer_product` | `developer-product:read`, `developer-product:write` |
 | `roblox_game_pass` | `game-pass:read`, `game-pass:write` |
 | `roblox_badge` | `legacy-universe.badge:manage-and-spend-robux`, `legacy-universe.badge:write`, `legacy-badge:manage` |
@@ -58,6 +58,12 @@ A few are easy to miss because they don't match the "obvious" name:
   dedicated "config" scope). `plan` needs `universe:read` (reads the published config and checks for
   a pending draft); `apply` and `destroy` need `universe:write` (draft + publish). Without view
   access the API answers `403 "User does not have View permission for universe …"`.
+- **`creator-store-product:read`** is optional, and only `roblox_asset` uses it: it's how
+  Baseplate finds a **Decal**'s `texture_id` (the Image asset behind the decal), through
+  toolbox-service. Despite the name, it works for your own private decals, not only Creator Store
+  items. Image assets don't need it, since an Image's `texture_id` is its own `id`. Without the
+  scope, plan and apply still succeed; Decals just have no `texture_id`, and Baseplate prints a
+  warning naming the scope.
 
 ## Scopes for commands
 

@@ -85,6 +85,11 @@ type Plan struct {
 	// apply persists them even when nothing else changes. --target doesn't
 	// filter them (they're state-only and idempotent).
 	Moves []Move
+	// ProviderWarnings are the non-fatal diagnostics resources reported while
+	// the plan was built (provider.Warn, e.g. a computed output whose lookup
+	// failed). Set by the caller from its provider.Warnings collector;
+	// Warnings lists them after the plan's own.
+	ProviderWarnings []string
 
 	// desired and pending carry Build's inputs to ResolveImports, which
 	// re-plans dependents of import targets (see replanDependents).

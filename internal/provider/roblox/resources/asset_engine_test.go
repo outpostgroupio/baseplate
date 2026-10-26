@@ -34,7 +34,7 @@ type assetHarness struct {
 
 func newAssetHarness(t *testing.T) *assetHarness {
 	f := &fakeAsset{}
-	return &assetHarness{t: t, ctx: context.Background(), f: f, p: assetOnly{Asset(f)}, s: state.New(),
+	return &assetHarness{t: t, ctx: context.Background(), f: f, p: assetOnly{Asset(f, f)}, s: state.New(),
 		b: backend.NewLocal(filepath.Join(t.TempDir(), "s.bpstate"))}
 }
 

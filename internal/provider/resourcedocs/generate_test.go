@@ -137,3 +137,38 @@ func TestGenerateErrorsOnStaleDocKey(t *testing.T) {
 		t.Fatalf("want error naming the stale doc key, got %v", err)
 	}
 }
+
+// outRes is fakeRes plus computed outputs (provider.Outputter).
+type outRes struct {
+	fakeRes
+	outs map[string]cty.Type
+}
+
+func (o *outRes) Outputs() map[string]cty.Type { return o.outs }
+
+func TestGenerateRendersOutputs(t *testing.T) {
+	r := &outRes{fakeRes: fakeRes{typ: "roblox_o", spec: specWith("name"), computed: []string{"id", "tex"},
+		doc: provider.ResourceDoc{Attributes: map[string]string{"name": "N."}, Outputs: map[string]string{"tex": "The texture."}}},
+		outs: map[string]cty.Type{"tex": cty.String}}
+	out, err := resourcedocs.Generate(fakeProv{res: map[string]provider.Resource{"roblox_o": r}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "| `tex` | string | computed | The texture. |") {
+		t.Fatalf("missing output row:\n%s", out)
+	}
+}
+
+func TestGenerateErrorsOnOutputDocMismatch(t *testing.T) {
+	undocumented := &outRes{fakeRes: fakeRes{typ: "roblox_o", spec: specWith("name"),
+		doc: provider.ResourceDoc{Attributes: map[string]string{"name": "N."}}},
+		outs: map[string]cty.Type{"tex": cty.String}}
+	if _, err := resourcedocs.Generate(fakeProv{res: map[string]provider.Resource{"roblox_o": undocumented}}); err == nil || !strings.Contains(err.Error(), "tex") {
+		t.Fatalf("want an error for an undocumented output, got %v", err)
+	}
+	stale := &fakeRes{typ: "roblox_s", spec: specWith("name"),
+		doc: provider.ResourceDoc{Attributes: map[string]string{"name": "N."}, Outputs: map[string]string{"gone": "x"}}}
+	if _, err := resourcedocs.Generate(fakeProv{res: map[string]provider.Resource{"roblox_s": stale}}); err == nil || !strings.Contains(err.Error(), "gone") {
+		t.Fatalf("want an error for a stale Outputs key, got %v", err)
+	}
+}
