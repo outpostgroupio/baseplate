@@ -61,6 +61,15 @@ fails) when the key lacks them. Set `BASEPLATE_TEST_EVENT_THUMBNAIL` to an image
 asset id the key's owner can use to also exercise thumbnails (set on create,
 cleared on update). Run it alone with `-run LiveExperienceEvent`.
 
+`TestLiveAssetTextureID` (`roblox_asset.texture_id`, run alone with
+`-run LiveAssetTextureID`) uploads one Image and one Decal, checks that the Image's
+`texture_id` is its id and that the Decal's is a different asset of type Image, and
+converges. It needs the **`creator-store-product:read`** scope for the Decal lookup. A new
+decal takes about a minute to become resolvable, so the test re-applies (no-op) for up to
+three minutes. To avoid two more uploads, set `BASEPLATE_TEST_IMAGE_ID` and
+`BASEPLATE_TEST_DECAL_ID` to existing assets owned by the key's user: the test then imports
+them instead and destroys nothing.
+
 `TestLiveAnalyticsAlertLifecycle` (`roblox_analytics_alert`, run alone with
 `-run LiveAnalyticsAlert`) needs the **`universe.analytics.alert:read`** +
 **`universe.analytics.alert:write`** scopes. It creates a never-firing
