@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zclconf/go-cty/cty"
@@ -18,12 +19,16 @@ type fakeAsset struct {
 	created opencloud.AssetCreate
 	gotFile []byte
 	// content records UpdateContent calls (asset id -> uploaded bytes).
-	content   map[string][]byte
-	updates   int
-	creates   int
-	store     map[string]opencloud.Asset
-	getErr    error
-	deleteErr error
+	content map[string][]byte
+	updates int
+	// contentErr makes UpdateContent fail (a rejected in-place update).
+	contentErr error
+	// contentKeepsOldMeta makes UpdateContent ignore the request's metadata.
+	contentKeepsOldMeta bool
+	creates             int
+	store               map[string]opencloud.Asset
+	getErr              error
+	deleteErr           error
 }
 
 func (f *fakeAsset) CreateAndAwait(_ context.Context, req opencloud.AssetCreate, _, _ string, data []byte) (opencloud.Asset, error) {
@@ -50,10 +55,19 @@ func (f *fakeAsset) Update(_ context.Context, a opencloud.Asset) (opencloud.Asse
 	return a, nil
 }
 func (f *fakeAsset) UpdateContent(_ context.Context, a opencloud.Asset, _, _ string, data []byte) (opencloud.Asset, error) {
+	if f.contentErr != nil {
+		return opencloud.Asset{}, f.contentErr
+	}
 	if f.content == nil {
 		f.content = map[string][]byte{}
 	}
 	f.content[a.ID] = data
+	if f.contentKeepsOldMeta {
+		// Live behaviour: a content update right after a metadata update
+		// keeps the earlier metadata, ignoring the request's.
+		old := f.store[a.ID]
+		a.DisplayName, a.Description = old.DisplayName, old.Description
+	}
 	f.store[a.ID] = a
 	return a, nil
 }
@@ -200,16 +214,19 @@ func TestAssetRequiresReplace(t *testing.T) {
 		desired, actual provider.Attributes
 		content         bool // content_hash forces replacement
 	}{
-		{"image", provider.Attributes{"file": cty.StringVal("a.png")}, img, true},
+		{"image", provider.Attributes{"file": cty.StringVal("a.png")}, img, false},
 		{"decal", provider.Attributes{"file": cty.StringVal("a.png"), "asset_type": cty.StringVal("Decal")}, provider.Attributes{"asset_type": cty.StringVal("Decal")}, true},
 		{"audio", provider.Attributes{"file": cty.StringVal("a.ogg")}, provider.Attributes{"asset_type": cty.StringVal("Audio")}, true},
 		{"model", provider.Attributes{"file": cty.StringVal("a.fbx"), "asset_type": cty.StringVal("Model")}, model, false},
 		{"model by extension", provider.Attributes{"file": cty.StringVal("a.rbxmx")}, model, false},
 		// The CURRENT type decides: an Image whose config now says Model is an
 		// Image remotely, which can't take content.
-		{"image becoming model", provider.Attributes{"file": cty.StringVal("a.fbx")}, img, true},
+		{"image becoming model", provider.Attributes{"file": cty.StringVal("a.fbx")}, img, false},
+		{"decal becoming image", provider.Attributes{"file": cty.StringVal("a.png")}, provider.Attributes{"asset_type": cty.StringVal("Decal")}, true},
+		{"video", provider.Attributes{"file": cty.StringVal("a.mp4"), "asset_type": cty.StringVal("Video")}, provider.Attributes{"asset_type": cty.StringVal("Video")}, true},
 		{"model becoming image", provider.Attributes{"file": cty.StringVal("a.png")}, model, false},
-		{"no actual type", provider.Attributes{"file": cty.StringVal("a.png")}, provider.Attributes{}, true},
+		{"no actual type, image file", provider.Attributes{"file": cty.StringVal("a.png")}, provider.Attributes{}, false},
+		{"no actual type, audio file", provider.Attributes{"file": cty.StringVal("a.ogg")}, provider.Attributes{}, true},
 	}
 	for _, c := range cases {
 		got := map[string]bool{}
@@ -320,18 +337,64 @@ func TestAssetModelUpdateUploadsContentInPlace(t *testing.T) {
 	}
 }
 
-func TestAssetImageUpdateIsMetadataOnly(t *testing.T) {
+// Images take new content in place, like Models: same id, new version, and
+// only when the content changed.
+func TestAssetImageContentUpdateInPlace(t *testing.T) {
+	fp := writeFile(t, "gem.png", "PNG")
+	sum, _ := fileHash(fp)
+	attrs := provider.Attributes{"file": cty.StringVal(fp), "display_name": cty.StringVal("Gem"), "description": cty.StringVal("x")}
+	f := &fakeAsset{store: map[string]opencloud.Asset{"9": {ID: "9"}}}
+	u := Asset(f).(provider.TriggerAwareUpdater)
+	if _, err := u.UpdateWithTriggers(context.Background(), "9", attrs, map[string]cty.Value{"content_hash": cty.StringVal(sum)}); err != nil {
+		t.Fatal(err)
+	}
+	if f.updates != 1 || len(f.content) != 0 {
+		t.Fatalf("unchanged content: want metadata-only (updates=%d content=%v)", f.updates, f.content)
+	}
+	if _, err := u.UpdateWithTriggers(context.Background(), "9", attrs, map[string]cty.Value{"content_hash": cty.StringVal("old")}); err != nil {
+		t.Fatal(err)
+	}
+	if string(f.content["9"]) != "PNG" || f.store["9"].AssetType != "Image" {
+		t.Fatalf("changed content must be uploaded in place as an Image: %q %+v", f.content["9"], f.store["9"])
+	}
+}
+
+// Decal/Audio content changes are replaced by plan, so their Update is always
+// metadata-only.
+func TestAssetDecalUpdateIsMetadataOnly(t *testing.T) {
 	fp := writeFile(t, "gem.png", "PNG")
 	f := &fakeAsset{store: map[string]opencloud.Asset{"9": {ID: "9"}}}
 	if _, err := Asset(f).Update(context.Background(), "9", provider.Attributes{
-		"file":         cty.StringVal(fp),
-		"display_name": cty.StringVal("Gem"),
-		"description":  cty.StringVal("x"),
+		"file": cty.StringVal(fp), "display_name": cty.StringVal("Gem"),
+		"description": cty.StringVal("x"), "asset_type": cty.StringVal("Decal"),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if f.updates != 1 || len(f.content) != 0 {
-		t.Fatalf("an Image update must be metadata-only (updates=%d, content=%v)", f.updates, f.content)
+		t.Fatalf("a Decal update must be metadata-only (updates=%d, content=%v)", f.updates, f.content)
+	}
+}
+
+// If Roblox stops accepting in-place content updates for a type, apply fails
+// with an error that says so and that Baseplate needs updating; it never falls
+// back silently.
+func TestAssetRejectedInPlaceUpdateIsActionable(t *testing.T) {
+	fp := writeFile(t, "gem.png", "PNG")
+	f := &fakeAsset{store: map[string]opencloud.Asset{"9": {ID: "9"}},
+		contentErr: &opencloud.APIError{Status: 400, Message: "Updating Image is not supported yet"}}
+	_, err := Asset(f).(provider.TriggerAwareUpdater).UpdateWithTriggers(context.Background(), "9", provider.Attributes{
+		"file": cty.StringVal(fp), "display_name": cty.StringVal("Gem"), "description": cty.StringVal("x"),
+	}, map[string]cty.Value{"content_hash": cty.StringVal("old")})
+	if err == nil {
+		t.Fatal("a rejected in-place update must fail")
+	}
+	for _, want := range []string{`roblox_asset "Gem" (id 9)`, "Image", "Updating Image is not supported yet", "Baseplate needs updating"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q is missing %q", err, want)
+		}
+	}
+	if f.updates != 0 {
+		t.Fatal("no metadata-only fallback")
 	}
 }
 
@@ -346,5 +409,25 @@ func TestAssetModelContentTypes(t *testing.T) {
 		if got := defaultAssetType("m" + ext); got != "Model" {
 			t.Errorf("defaultAssetType(%s) = %q, want Model", ext, got)
 		}
+	}
+}
+
+// Live (2026-10-26): an Image content update sent within seconds of a metadata
+// update kept the earlier name/description. Update must read back and re-send
+// the metadata when it didn't stick.
+func TestAssetContentUpdateReassertsMetadata(t *testing.T) {
+	fp := writeFile(t, "gem.png", "PNG")
+	f := &fakeAsset{store: map[string]opencloud.Asset{"9": {ID: "9", DisplayName: "Old", Description: "old"}}, contentKeepsOldMeta: true}
+	_, err := Asset(f).(provider.TriggerAwareUpdater).UpdateWithTriggers(context.Background(), "9", provider.Attributes{
+		"file": cty.StringVal(fp), "display_name": cty.StringVal("New"), "description": cty.StringVal("new"),
+	}, map[string]cty.Value{"content_hash": cty.StringVal("old")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store["9"]; got.DisplayName != "New" || got.Description != "new" {
+		t.Fatalf("metadata must be re-sent when the content update drops it, got %+v", got)
+	}
+	if f.updates != 1 {
+		t.Fatalf("want one metadata re-send, got %d", f.updates)
 	}
 }

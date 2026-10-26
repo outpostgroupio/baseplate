@@ -26,14 +26,14 @@ func (a *asset) Doc() provider.ResourceDoc {
 	return provider.ResourceDoc{
 		Summary: "Uploads a user- or group-owned image, decal, audio or model asset.",
 		Attributes: map[string]string{
-			"file":             "Path to the file to upload: `.png`/`.jpg`/`.bmp`/`.tga` for images and decals, `.mp3`/`.ogg`/`.wav`/`.flac` for audio, `.fbx`/`.gltf`/`.glb`/`.rbxm`/`.rbxmx` for models. A change to the file's content is detected by hash: a Model takes the new content in place (same id); any other type is replaced (a new upload with a new id; the old asset is left in place).",
+			"file":             "Path to the file to upload: `.png`/`.jpg`/`.bmp`/`.tga` for images and decals, `.mp3`/`.ogg`/`.wav`/`.flac` for audio, `.fbx`/`.gltf`/`.glb`/`.rbxm`/`.rbxmx` for models. A change to the file's content is detected by hash: an Image or Model takes the new content in place (same id); a Decal, Audio or Video asset is replaced (a new upload with a new id; the old asset is left in place).",
 			"display_name":     "Asset name.",
 			"description":      "Asset description.",
 			"asset_type":       "Asset type: `Image`, `Decal`, `Audio` or `Model`. Defaults to `Audio` for audio files, `Model` for model files and `Image` otherwise. Changing it (including the default, by changing the file's extension) replaces the asset, because Roblox can't change an existing asset's type. Use `Image` for anything the game shows in an `ImageLabel` or `Decal`.",
 			"creator_user_id":  "Owning user id (set exactly one of creator_user_id/creator_group_id).",
 			"creator_group_id": "Owning group id (set exactly one of creator_user_id/creator_group_id).",
 		},
-		Notes:        "The `id` output is the `assetId` (a numeric string). For an `Image` asset (the default for image files) that id is the texture id: use it directly as `rbxassetid://<id>` in `ImageLabel.Image` or `Decal.Texture`. A `Decal` asset's id is not a texture id. Each Decal wraps a separate Image asset that Roblox creates alongside it, owned by the same creator. To adopt assets from a Decal-based uploader, import those underlying image ids, not the decal ids (see the many-assets how-to). When the content of `file` changes (its `content_hash` trigger), plan shows `-/+ (replace)` for an Image, Decal or Audio asset: apply uploads a new asset, which gets a new id, and drops the old one from state. The old asset is **left in place** (never archived, even for Audio), because live servers keep using its id until the place is republished. Open Cloud only takes new content for an existing Model asset, so a Model is updated in place instead and keeps its id (each content update is a new asset version; a metadata-only edit doesn't re-send the content). A change to `asset_type` also replaces. If `file` is missing on the machine running `plan` (e.g. CI without the source images), an asset already in state keeps its recorded hash and plan warns that content changes can't be detected; creating an asset still needs the file. Renaming or moving the file without changing its bytes does nothing. References to the asset's `id` and `baseplate show --json` pick up the new id in the same apply. An imported asset records the current file's hash as its baseline, so adopting existing assets never re-uploads them; the same goes for assets created by Baseplate versions without the hash, on their next apply. `lifecycle { prevent_destroy = true }` blocks a replace. Audio is limited to 7 minutes and 20 MB, and Roblox caps audio uploads per month (10, or 100 for ID-verified accounts). Image, Decal and Model assets are not archivable, so `destroy` unmanages the asset in place (drops it from state, leaves it uploaded).",
+		Notes:        "The `id` output is the `assetId` (a numeric string). For an `Image` asset (the default for image files) that id is the texture id: use it directly as `rbxassetid://<id>` in `ImageLabel.Image` or `Decal.Texture`. A `Decal` asset's id is not a texture id. Each Decal wraps a separate Image asset that Roblox creates alongside it, owned by the same creator. To adopt assets from a Decal-based uploader, import those underlying image ids, not the decal ids (see the many-assets how-to). When the content of `file` changes (its `content_hash` trigger), an `Image` or `Model` asset is updated in place: apply uploads the file as a new version of the same asset, so the id doesn't change (Roblox documents content updates for Models only, but Images accept them too, verified live; a metadata-only edit doesn't re-send the content). A `Decal`, `Audio` or `Video` asset can't take new content (Roblox rejects a Decal content update as not supported yet, verified live), so plan shows `-/+ (replace)`: apply uploads a new asset, which gets a new id, and drops the old one from state. The old asset is **left in place** (never archived, even for Audio), because live servers keep using its id until the place is republished. A change to `asset_type` always replaces. Forcing a replace for a type that updates in place is a planned general feature (`lifecycle { replace_triggered_by = [...] }`), not a per-resource setting. If `file` is missing on the machine running `plan` (e.g. CI without the source images), an asset already in state keeps its recorded hash and plan warns that content changes can't be detected; creating an asset still needs the file. Renaming or moving the file without changing its bytes does nothing. References to the asset's `id` and `baseplate show --json` pick up the new id in the same apply. An imported asset records the current file's hash as its baseline, so adopting existing assets never re-uploads them; the same goes for assets created by Baseplate versions without the hash, on their next apply. `lifecycle { prevent_destroy = true }` blocks a replace. Audio is limited to 7 minutes and 20 MB, and Roblox caps audio uploads per month (10, or 100 for ID-verified accounts). Image, Decal and Model assets are not archivable, so `destroy` unmanages the asset in place (drops it from state, leaves it uploaded).",
 		Scopes:       []string{"asset:read", "asset:write"},
 		TriggerAttrs: []string{"file"},
 	}
@@ -53,9 +53,11 @@ func (a *asset) DecodeSpec() hcldec.Spec {
 // contentInPlace lists the asset types whose content Open Cloud updates in
 // place (a new version under the same id). Any other type is replaced on a
 // content change (a new upload with a new id). Open Cloud documents content
-// updates for Models only; an Image took one live too (see CLAUDE.md), so
-// adding "Image" here is the switch to stable-id image updates.
-var contentInPlace = map[string]bool{"Model": true}
+// updates for Models only, but Images accepted them live (2026-10-26, see
+// CLAUDE.md). Decals are rejected ("Updating Decal is not supported yet",
+// verified live); Audio and Video are documented as not updatable (not probed:
+// audio uploads are capped).
+var contentInPlace = map[string]bool{"Image": true, "Model": true}
 
 var (
 	_ provider.Replacer            = (*asset)(nil)
@@ -228,9 +230,24 @@ func (a *asset) UpdateWithTriggers(ctx context.Context, id string, desired provi
 			}
 			meta.AssetType = typ
 			if _, err := a.ac.UpdateContent(ctx, meta, filepath.Base(path), contentType(path), data); err != nil {
+				var apiErr *opencloud.APIError
+				if errors.As(err, &apiErr) && (apiErr.Status == 400 || apiErr.Status == 422) {
+					return nil, fmt.Errorf("roblox_asset %q (id %s): Roblox rejected the in-place content update for a %s asset (%w). Baseplate updates %s content in place because Roblox accepted it when this version was released; Roblox appears to no longer allow it, so Baseplate needs updating to replace %s assets instead. The asset is unchanged",
+						meta.DisplayName, id, typ, err, typ, typ)
+				}
 				return nil, err
 			}
-			return a.stateAttrs(desired), nil
+			// Live (2026-10-26): a content update sent within seconds of a
+			// metadata update keeps the earlier name/description, ignoring
+			// the request's. Read back and re-send the metadata if so.
+			got, err := a.ac.Get(ctx, id)
+			if err != nil {
+				return nil, err
+			}
+			if got.DisplayName == meta.DisplayName && got.Description == meta.Description {
+				return a.stateAttrs(desired), nil
+			}
+			meta.AssetType = ""
 		}
 	}
 	if _, err := a.ac.Update(ctx, meta); err != nil {

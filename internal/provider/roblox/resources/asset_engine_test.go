@@ -2,6 +2,7 @@ package resources
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -123,6 +124,51 @@ func TestAssetPlanWithMissingFileWarns(t *testing.T) {
 	}
 	if w := strings.Join(pl.Warnings(), "\n"); !strings.Contains(w, "roblox_asset.x: file \""+missing+"\" not found; content changes can't be detected") {
 		t.Fatalf("warning = %q", w)
+	}
+}
+
+// State from before content_hash existed has no hash. For an Image (content
+// updates in place, so the trigger doesn't force a replace) that must still
+// not plan a re-upload of every asset: the current hash is adopted.
+func TestAssetMissingHashBaselineDoesNotReupload(t *testing.T) {
+	h := newAssetHarness(t)
+	fp := writeFile(t, "a.png", "png")
+	h.apply(h.plan(assetDesired(fp)))
+	st, _ := h.s.Find("roblox_asset.x")
+	st.Triggers = nil
+	pl := h.plan(assetDesired(fp))
+	if pl.HasChanges() {
+		t.Fatalf("a missing baseline must not plan an update:\n%s", pl.RenderText(false))
+	}
+	h.apply(pl)
+	if len(h.f.content) != 0 {
+		t.Fatal("nothing may be uploaded")
+	}
+	if st, _ := h.s.Find("roblox_asset.x"); st.Triggers["content_hash"] == nil {
+		t.Fatal("apply must record the baseline")
+	}
+}
+
+// An Image content change keeps the id (in-place update), and converges.
+func TestAssetImageContentChangeKeepsID(t *testing.T) {
+	h := newAssetHarness(t)
+	fp := writeFile(t, "a.png", "v1")
+	h.apply(h.plan(assetDesired(fp)))
+	before, _ := h.s.Find("roblox_asset.x")
+	id := before.ID
+	if err := os.WriteFile(fp, []byte("v2"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pl := h.plan(assetDesired(fp))
+	if c := pl.Changes[0]; c.Action != provider.ActionUpdate {
+		t.Fatalf("an Image content change must be an in-place update, got %s", c.Action)
+	}
+	h.apply(pl)
+	if after, _ := h.s.Find("roblox_asset.x"); after.ID != id || string(h.f.content[id]) != "v2" {
+		t.Fatalf("id %s -> %s, content %q", id, after.ID, h.f.content[id])
+	}
+	if again := h.plan(assetDesired(fp)); again.HasChanges() {
+		t.Fatalf("must converge:\n%s", again.RenderText(false))
 	}
 }
 
