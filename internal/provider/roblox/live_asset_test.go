@@ -168,6 +168,12 @@ func TestLiveAssetLifecycle(t *testing.T) {
 		t.Fatalf("replace must produce a new asset id, still %s", oldID)
 	}
 	t.Logf("replaced asset %s -> %s", oldID, newRes.ID)
+	if !pl5.Changes[0].AbandonsOld {
+		t.Fatal("a roblox_asset replace must leave the old asset in place")
+	}
+	if _, err := p.Resources()["roblox_asset"].Read(ctx, oldID); err != nil {
+		t.Fatalf("the old asset must still exist after the replace: %v", err)
+	}
 	pl6, err := plan.Build(ctx, p, s, desired)
 	if err != nil {
 		t.Fatalf("post-replace re-plan: %v", err)

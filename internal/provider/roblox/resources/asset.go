@@ -2,8 +2,7 @@ package resources
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,14 +26,14 @@ func (a *asset) Doc() provider.ResourceDoc {
 	return provider.ResourceDoc{
 		Summary: "Uploads a user- or group-owned image, decal, audio or model asset.",
 		Attributes: map[string]string{
-			"file":             "Path to the file to upload: `.png`/`.jpg`/`.bmp`/`.tga` for images and decals, `.mp3`/`.ogg`/`.wav`/`.flac` for audio, `.fbx`/`.gltf`/`.glb`/`.rbxm`/`.rbxmx` for models. A change to the file's content is detected by hash: a Model takes the new content in place (same id); any other type is replaced (a new upload with a new id).",
+			"file":             "Path to the file to upload: `.png`/`.jpg`/`.bmp`/`.tga` for images and decals, `.mp3`/`.ogg`/`.wav`/`.flac` for audio, `.fbx`/`.gltf`/`.glb`/`.rbxm`/`.rbxmx` for models. A change to the file's content is detected by hash: a Model takes the new content in place (same id); any other type is replaced (a new upload with a new id; the old asset is left in place).",
 			"display_name":     "Asset name.",
 			"description":      "Asset description.",
-			"asset_type":       "Asset type: `Image`, `Decal`, `Audio` or `Model`. Defaults to `Audio` for audio files, `Model` for model files and `Image` otherwise. Use `Image` for anything the game shows in an `ImageLabel` or `Decal`. Roblox can't change an existing asset's type.",
+			"asset_type":       "Asset type: `Image`, `Decal`, `Audio` or `Model`. Defaults to `Audio` for audio files, `Model` for model files and `Image` otherwise. Changing it (including the default, by changing the file's extension) replaces the asset, because Roblox can't change an existing asset's type. Use `Image` for anything the game shows in an `ImageLabel` or `Decal`.",
 			"creator_user_id":  "Owning user id (set exactly one of creator_user_id/creator_group_id).",
 			"creator_group_id": "Owning group id (set exactly one of creator_user_id/creator_group_id).",
 		},
-		Notes:        "The `id` output is the `assetId` (a numeric string). For an `Image` asset (the default for image files) that id is the texture id: use it directly as `rbxassetid://<id>` in `ImageLabel.Image` or `Decal.Texture`. A `Decal` asset's id is not a texture id. Each Decal wraps a separate Image asset that Roblox creates alongside it, owned by the same creator. To adopt assets from a Decal-based uploader, import those underlying image ids, not the decal ids (see the many-assets how-to). When the content of `file` changes (its `content_hash` trigger), plan shows `-/+ (replace)` for an Image, Decal or Audio asset: apply uploads a new asset, which gets a new id, and then drops the old one (unmanaged, as on destroy). Open Cloud only takes new content for an existing Model asset, so a Model is updated in place instead and keeps its id (each content update is a new asset version; metadata edits to a Model re-send its content too). Renaming or moving the file without changing its bytes does nothing. References to the asset's `id` and `baseplate show --json` pick up the new id in the same apply. An imported asset records the current file's hash as its baseline, so adopting existing assets never re-uploads them; the same goes for assets created by Baseplate versions without the hash, on their next apply. `lifecycle { prevent_destroy = true }` blocks a replace. Audio is limited to 7 minutes and 20 MB, and Roblox caps audio uploads per month (10, or 100 for ID-verified accounts). Image, Decal and Model assets are not archivable, so `destroy` (and the old object of a replace) unmanages the asset in place (drops it from state, leaves it uploaded).",
+		Notes:        "The `id` output is the `assetId` (a numeric string). For an `Image` asset (the default for image files) that id is the texture id: use it directly as `rbxassetid://<id>` in `ImageLabel.Image` or `Decal.Texture`. A `Decal` asset's id is not a texture id. Each Decal wraps a separate Image asset that Roblox creates alongside it, owned by the same creator. To adopt assets from a Decal-based uploader, import those underlying image ids, not the decal ids (see the many-assets how-to). When the content of `file` changes (its `content_hash` trigger), plan shows `-/+ (replace)` for an Image, Decal or Audio asset: apply uploads a new asset, which gets a new id, and drops the old one from state. The old asset is **left in place** (never archived, even for Audio), because live servers keep using its id until the place is republished. Open Cloud only takes new content for an existing Model asset, so a Model is updated in place instead and keeps its id (each content update is a new asset version; a metadata-only edit doesn't re-send the content). A change to `asset_type` also replaces. If `file` is missing on the machine running `plan` (e.g. CI without the source images), an asset already in state keeps its recorded hash and plan warns that content changes can't be detected; creating an asset still needs the file. Renaming or moving the file without changing its bytes does nothing. References to the asset's `id` and `baseplate show --json` pick up the new id in the same apply. An imported asset records the current file's hash as its baseline, so adopting existing assets never re-uploads them; the same goes for assets created by Baseplate versions without the hash, on their next apply. `lifecycle { prevent_destroy = true }` blocks a replace. Audio is limited to 7 minutes and 20 MB, and Roblox caps audio uploads per month (10, or 100 for ID-verified accounts). Image, Decal and Model assets are not archivable, so `destroy` unmanages the asset in place (drops it from state, leaves it uploaded).",
 		Scopes:       []string{"asset:read", "asset:write"},
 		TriggerAttrs: []string{"file"},
 	}
@@ -51,40 +50,98 @@ func (a *asset) DecodeSpec() hcldec.Spec {
 	}
 }
 
+// contentInPlace lists the asset types whose content Open Cloud updates in
+// place (a new version under the same id). Any other type is replaced on a
+// content change (a new upload with a new id). Open Cloud documents content
+// updates for Models only; an Image took one live too (see CLAUDE.md), so
+// adding "Image" here is the switch to stable-id image updates.
+var contentInPlace = map[string]bool{"Model": true}
+
+var (
+	_ provider.Replacer            = (*asset)(nil)
+	_ provider.Triggerable         = (*asset)(nil)
+	_ provider.TriggerAwareUpdater = (*asset)(nil)
+	_ provider.Normalizer          = (*asset)(nil)
+)
+
 // Triggers records a hash of the file's content, so a content change is
 // detected (the API can't read content back). See RequiresReplace for what a
-// change does.
+// change does. A missing file is reported as unavailable, so plan for an asset
+// already in state warns instead of failing (e.g. CI without the images).
 func (a *asset) Triggers(desired provider.Attributes) (map[string]cty.Value, error) {
 	v, ok := desired["file"]
 	if !ok || v.IsNull() || !v.IsKnown() {
 		return nil, nil
 	}
-	data, err := os.ReadFile(v.AsString())
+	sum, err := fileHash(v.AsString())
 	if err != nil {
-		return nil, fmt.Errorf("roblox_asset: reading file %q: %w", v.AsString(), err)
+		return nil, err
 	}
-	sum := sha256.Sum256(data)
-	return map[string]cty.Value{"content_hash": cty.StringVal(hex.EncodeToString(sum[:]))}, nil
+	return map[string]cty.Value{"content_hash": cty.StringVal(sum)}, nil
 }
 
-// RequiresReplace makes a content change a replace for every asset type except
-// Model: Open Cloud accepts new content (a new version under the same id) only
-// for Models, so any other type needs a fresh upload with a new id.
-func (a *asset) RequiresReplace(desired provider.Attributes) []string {
-	if a.isModel(desired) {
-		return nil
-	}
-	return []string{"content_hash"}
-}
+// fileHash hashes an asset's file (see hashFile).
+func fileHash(path string) (string, error) { return hashFile("roblox_asset", "file", path) }
 
-// isModel reports whether desired describes a Model asset (declared, or the
-// default for a model file).
-func (a *asset) isModel(desired provider.Attributes) bool {
+// Normalize fills in an omitted asset_type with the default for the file
+// (Audio, Model or Image), so the type is always compared with the remote
+// asset's: changing the file from .png to .fbx changes the type, which forces
+// a replace.
+func (a *asset) Normalize(desired provider.Attributes) (provider.Attributes, error) {
 	if v, ok := desired["asset_type"]; ok && !v.IsNull() {
-		return v.IsKnown() && v.AsString() == "Model"
+		return desired, nil
 	}
 	f, ok := desired["file"]
-	return ok && !f.IsNull() && f.IsKnown() && defaultAssetType(f.AsString()) == "Model"
+	if !ok || f.IsNull() || !f.IsKnown() {
+		return desired, nil
+	}
+	out := make(provider.Attributes, len(desired)+1)
+	for k, v := range desired {
+		out[k] = v
+	}
+	out["asset_type"] = cty.StringVal(defaultAssetType(f.AsString()))
+	return out, nil
+}
+
+// RequiresReplace: Roblox can't change an existing asset's type, so a type
+// change always replaces. A content change replaces unless the asset's CURRENT
+// type takes content in place (contentInPlace); the current type decides,
+// because the content update is applied to the existing asset.
+func (a *asset) RequiresReplace(desired, actual provider.Attributes) []string {
+	keys := []string{"asset_type"}
+	if !contentInPlace[currentType(desired, actual)] {
+		keys = append(keys, "content_hash")
+	}
+	return keys
+}
+
+// ReplaceAbandons: the old asset is left in place on a replace, never archived.
+// Live servers keep loading rbxassetid://<old id> until the place is
+// republished with the new id, so the old asset must stay available.
+func (a *asset) ReplaceAbandons() bool { return true }
+
+// currentType is the remote asset's type as Read reports it, falling back to
+// the desired type when Read didn't report one.
+func currentType(desired, actual provider.Attributes) string {
+	if v, ok := actual["asset_type"]; ok && !v.IsNull() && v.IsKnown() && v.Type() == cty.String {
+		return v.AsString()
+	}
+	return desiredType(desired)
+}
+
+// desiredType is the declared asset_type, or the default for the file.
+func desiredType(desired provider.Attributes) string {
+	if v, ok := desired["asset_type"]; ok && !v.IsNull() {
+		if v.IsKnown() {
+			return v.AsString()
+		}
+		return ""
+	}
+	f, ok := desired["file"]
+	if !ok || f.IsNull() || !f.IsKnown() {
+		return ""
+	}
+	return defaultAssetType(f.AsString())
 }
 
 // Computed lists attributes excluded from the desired-vs-actual diff: the state
@@ -138,27 +195,43 @@ func (a *asset) Read(ctx context.Context, id string) (provider.Attributes, error
 	return out, nil
 }
 
-// Update changes the metadata. For a Model it also uploads the file, since a
-// content change reaches Update (only non-Models are replaced for it) and
-// Update isn't told which trigger fired; a metadata-only edit therefore
-// re-sends unchanged content as a new version.
+// Update is UpdateWithTriggers without knowledge of the prior content hash,
+// so an asset type that takes content in place re-sends the file.
 func (a *asset) Update(ctx context.Context, id string, desired provider.Attributes) (provider.Attributes, error) {
+	return a.UpdateWithTriggers(ctx, id, desired, nil)
+}
+
+// UpdateWithTriggers changes the metadata and, for a type that takes content
+// in place (contentInPlace), uploads the file only when its content_hash
+// differs from the one recorded before this update (prior), so a metadata-only
+// edit doesn't create a new version. A type change or, for other types, a
+// content change never reaches Update: plan replaces those. A missing file
+// means the content can't have been checked, so only the metadata is sent.
+func (a *asset) UpdateWithTriggers(ctx context.Context, id string, desired provider.Attributes, prior map[string]cty.Value) (provider.Attributes, error) {
+	typ := desiredType(desired)
 	meta := opencloud.Asset{
 		ID:          id,
 		DisplayName: desired["display_name"].AsString(),
 		Description: desired["description"].AsString(),
 	}
-	if a.isModel(desired) {
+	if contentInPlace[typ] {
 		path := desired["file"].AsString()
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("roblox_asset: reading file %q: %w", path, err)
-		}
-		meta.AssetType = "Model"
-		if _, err := a.ac.UpdateContent(ctx, meta, filepath.Base(path), contentType(path), data); err != nil {
+		sum, err := fileHash(path)
+		var unavailable *provider.TriggerUnavailableError
+		if err != nil && !errors.As(err, &unavailable) {
 			return nil, err
 		}
-		return a.stateAttrs(desired), nil
+		if err == nil && contentChanged(prior, sum) {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return nil, fmt.Errorf("roblox_asset: reading file %q: %w", path, err)
+			}
+			meta.AssetType = typ
+			if _, err := a.ac.UpdateContent(ctx, meta, filepath.Base(path), contentType(path), data); err != nil {
+				return nil, err
+			}
+			return a.stateAttrs(desired), nil
+		}
 	}
 	if _, err := a.ac.Update(ctx, meta); err != nil {
 		return nil, err

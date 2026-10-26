@@ -2,8 +2,7 @@ package resources
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,7 +37,7 @@ func (b *badge) Doc() provider.ResourceDoc {
 			"expected_cost":  "Robux cost you accept for creating the badge (default `0`). Creation is free in practice; a non-zero value opts into a paid badge.",
 			"payment_source": "Funding source when `expected_cost` > 0: `user` (default) or `group`.",
 		},
-		Notes:        "Badges can't be hard-deleted, so `destroy` sets `enabled = false` and unmanages the badge. The icon is reconciled via a content-hash trigger; any update re-uploads the icon. Reads use the public badge endpoint on `badges.roblox.com` (writes use Open Cloud on `apis.roblox.com`).",
+		Notes:        "Badges can't be hard-deleted, so `destroy` sets `enabled = false` and unmanages the badge. The icon is reconciled via a content-hash trigger and re-uploaded only when its content changes. Reads use the public badge endpoint on `badges.roblox.com` (writes use Open Cloud on `apis.roblox.com`).",
 		Scopes:       []string{"legacy-universe.badge:manage-and-spend-robux", "legacy-universe.badge:write", "legacy-badge:manage"},
 		TriggerAttrs: []string{"icon_file"},
 		ExampleFile:  "examples/badge.bp.hcl",
@@ -70,12 +69,11 @@ func (b *badge) Dependencies(provider.Attributes) []provider.Ref { return nil }
 // Triggers forces an Update (icon re-upload) when the icon file content changes.
 // icon_file is Required, so it is always present (mirrors roblox_place's file).
 func (b *badge) Triggers(desired provider.Attributes) (map[string]cty.Value, error) {
-	data, err := os.ReadFile(desired["icon_file"].AsString())
+	sum, err := hashFile("roblox_badge", "icon_file", desired["icon_file"].AsString())
 	if err != nil {
-		return nil, fmt.Errorf("roblox_badge: reading icon_file: %w", err)
+		return nil, err
 	}
-	sum := sha256.Sum256(data)
-	return map[string]cty.Value{"content_hash": cty.StringVal(hex.EncodeToString(sum[:]))}, nil
+	return map[string]cty.Value{"content_hash": cty.StringVal(sum)}, nil
 }
 
 func (b *badge) Create(ctx context.Context, desired provider.Attributes) (string, provider.Attributes, error) {
@@ -121,7 +119,17 @@ func (b *badge) Read(ctx context.Context, id string) (provider.Attributes, error
 	}, nil
 }
 
+// Update is UpdateWithTriggers without the prior icon hash, so it re-uploads
+// the icon.
 func (b *badge) Update(ctx context.Context, id string, desired provider.Attributes) (provider.Attributes, error) {
+	return b.UpdateWithTriggers(ctx, id, desired, nil)
+}
+
+// UpdateWithTriggers updates name/description/enabled and re-uploads the icon
+// only when its content_hash differs from the one recorded before this update
+// (prior), so a name-only edit doesn't re-upload (and re-moderate) the icon. A
+// missing icon file skips the upload: its content can't have been checked.
+func (b *badge) UpdateWithTriggers(ctx context.Context, id string, desired provider.Attributes, prior map[string]cty.Value) (provider.Attributes, error) {
 	uid, bid, ok := splitBadgeID(id)
 	if !ok {
 		return nil, fmt.Errorf("roblox_badge: invalid id %q", id)
@@ -133,10 +141,15 @@ func (b *badge) Update(ctx context.Context, id string, desired provider.Attribut
 	}); err != nil {
 		return nil, err
 	}
-	// Re-upload the icon on every Update (icon_file is Required, always present).
-	// Update can't tell whether the name or the icon triggered it, so the icon is
-	// re-uploaded even on a name-only edit — the accepted over-upload (Option A).
 	path := desired["icon_file"].AsString()
+	sum, err := hashFile("roblox_badge", "icon_file", path)
+	var unavailable *provider.TriggerUnavailableError
+	if errors.As(err, &unavailable) || (err == nil && !contentChanged(prior, sum)) {
+		return b.stateAttrs(uid, desired), nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("roblox_badge: reading icon_file %q: %w", path, err)
