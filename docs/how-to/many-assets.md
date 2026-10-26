@@ -224,11 +224,11 @@ $ baseplate apply --target roblox_asset.sprites                       # every sp
 $ baseplate apply --target 'roblox_asset.sprites["units/warship.png"]' # just one
 ```
 
-## Renaming or moving a file replaces the asset
+## Renaming or moving a file
 
 The key **is** the address. Moving `ui/gem.png` to `icons/gem.png` changes the address from
-`roblox_asset.sprites["ui/gem.png"]` to `roblox_asset.sprites["icons/gem.png"]`, so the plan
-destroys the old instance and creates a new one:
+`roblox_asset.sprites["ui/gem.png"]` to `roblox_asset.sprites["icons/gem.png"]`. On its own, that
+makes the plan destroy the old instance and create a new one:
 
 - `roblox_asset` destroy only **unmanages** the old asset (image assets can't be archived), so
   nothing breaks on the platform;
@@ -240,14 +240,80 @@ destroys the old instance and creates a new one:
 ```console
 Warning: roblox_asset.sprites: this plan destroys 1 instance(s) and creates 1. Each created instance
 is a new remote object with a new id (for roblox_asset, a new upload), so if a for_each key was
-renamed the object is replaced, not moved. moved {} blocks, which will rename an instance in place,
-are planned.
+renamed the object is replaced, not moved. To keep the existing object and its id, declare the
+rename with a moved block, e.g. moved { from = roblox_asset.sprites["ui/gem.png"]  to =
+roblox_asset.sprites["icons/gem.png"] } (moved blocks also take for_each, to move many keys at once).
 ```
 
-Until `moved {}` blocks land, a rename can't keep the old id: Baseplate refuses to import an id that
-another address in state already manages, because two addresses managing one object would let a
-later destroy of one delete the object the other still uses. If the new id matters, keep the old
-key (for example by keeping the file where it is) until `moved {}` is available.
+### Keeping the asset with a `moved` block
+
+A [`moved` block](../config-reference.md#moved) records the rename. Baseplate renames the state
+entry before planning, so the asset keeps its id and nothing is uploaded:
+
+```hcl
+moved {
+  from = roblox_asset.sprites["ui/gem.png"]
+  to   = roblox_asset.sprites["icons/gem.png"]
+}
+```
+
+```console
+$ baseplate plan
+~ roblox_asset.sprites["ui/gem.png"] has moved to roblox_asset.sprites["icons/gem.png"]
+
+Plan: 0 to import, 0 to add, 0 to change, 0 to destroy, 1 to move.
+```
+
+If `display_name` is derived from the key, the plan also shows an update for the new name. That's a
+metadata update, not an upload.
+
+### Moving a whole directory
+
+A `moved` block takes `for_each` (a Baseplate extension; Terraform doesn't allow it), so one block
+can move every renamed file. Keep the renames in a JSON file of `old key => new key`:
+
+```hcl
+locals {
+  sprite_renames = jsondecode(file("${path.config}/sprite-renames.json"))
+}
+
+moved {
+  for_each = local.sprite_renames
+  from     = roblox_asset.sprites[each.key]
+  to       = roblox_asset.sprites[each.value]
+}
+```
+
+Git already knows which files were renamed, so the map can be generated. This lists the renames
+under `assets/sprites` between `origin/main` and the working tree, strips the directory prefix (the
+keys are relative to the `fileset` directory) and writes the JSON with `jq`:
+
+```sh
+git diff --name-status -M --diff-filter=R origin/main -- assets/sprites \
+  | awk -F'\t' '{ sub("^assets/sprites/", "", $2); sub("^assets/sprites/", "", $3); print $2 "\t" $3 }' \
+  | jq -Rn '[inputs | split("\t") | {(.[0]): .[1]}] | add // {}' > sprite-renames.json
+```
+
+```json
+{
+  "ui/coin.png": "icons/coin.png",
+  "ui/gem.png": "icons/gem.png"
+}
+```
+
+Move the files with `git mv` (or `git add -A` after moving them), since `git diff` doesn't see
+untracked files. Review the JSON before committing it, since Git's rename detection is a
+similarity guess. A file that
+was renamed and heavily edited may show up as a delete and an add instead.
+
+Moves are idempotent: once applied, the old key isn't in state and the new one is, so the block does
+nothing. Keep the entries until every environment's state has been applied, then empty the file
+(`{}`) or delete the block. A map can also chain renames (`a => b` and `b => c`): Baseplate applies
+them in order.
+
+If both the old and the new key are already in state (for example, an earlier apply re-uploaded the
+file under its new key), the move is an error. Baseplate can't tell which asset should keep the
+address.
 
 ## An empty `for_each` destroys everything
 

@@ -101,11 +101,26 @@ Plan: 0 to import, 1 to add, 0 to change, 0 to destroy.
 (e.g. a secret's `value`) are redacted in both formats. Each change has an `address` and, for a
 `for_each` instance, its `key`.
 
+[`moved` blocks](config-reference.md#moved) are applied to the state read by `plan` (in memory
+only; `plan` never writes state) before the diff. Each move is listed before the changes, and the
+footer counts them when there are any:
+
+```console
+$ baseplate plan
+~ roblox_asset.sprites["ui/old.png"] has moved to roblox_asset.sprites["ui/new.png"]
+
+Plan: 0 to import, 0 to add, 0 to change, 0 to destroy, 1 to move.
+```
+
+In `--json`, the result has a `moves` array (`[{"from": "...", "to": "..."}]`, omitted when empty)
+and `summary.move`. A plan whose only change is a move exits `2`. `--target` doesn't filter moves.
+
 When one resource both destroys and creates instances in the same plan (what a renamed `for_each`
-key looks like), `plan` prints a `Warning:` that the created instances are new objects with new ids.
+key looks like), `plan` prints a `Warning:` that the created instances are new objects with new ids,
+with an example `moved` block that keeps the existing object instead.
 When a `for_each` resource declares zero instances while state still holds some, it warns that all
 of them will be destroyed. `--json` lists both under `result.warnings`. See
-[managing many assets](how-to/many-assets.md#renaming-or-moving-a-file-replaces-the-asset).
+[managing many assets](how-to/many-assets.md#renaming-or-moving-a-file).
 
 `--generate-config=FILE` writes resource blocks for `import {}` blocks whose target isn't declared.
 It doesn't support `for_each` targets; declare those by hand.
@@ -113,8 +128,9 @@ It doesn't support `for_each` targets; declare those by hand.
 ### `apply`
 
 Reconcile resources to the config, creating/updating as needed and writing state. Takes an advisory
-lock on the state file for the duration, so a concurrent `apply` can't clobber it. Resolves
-`import {}` blocks (adopt + reconcile in one pass) before applying.
+lock on the state file for the duration, so a concurrent `apply` can't clobber it. Applies `moved {}`
+blocks to state first (written even if nothing else changes), then resolves `import {}` blocks
+(adopt + reconcile in one pass) before applying. `--json` adds a `moves` array like `plan`'s.
 
 ```console
 $ baseplate apply

@@ -1,7 +1,7 @@
 # Config reference
 
 A Baseplate config is an HCL file (default `baseplate.bp.hcl`). This page covers the language:
-blocks, `for_each`, `lifecycle`, references, `locals` and functions. The attributes of each `roblox_*` resource
+blocks, `for_each`, `moved`, `lifecycle`, references, `locals` and functions. The attributes of each `roblox_*` resource
 are in the [resource reference](resource-reference.md).
 
 ## Blocks
@@ -11,6 +11,7 @@ are in the [resource reference](resource-reference.md).
 | `provider "roblox" { ... }` | Provider settings, e.g. `api_key = env("ROBLOX_API_KEY")`. |
 | `resource "<type>" "<name>" { ... }` | A resource Baseplate manages. `type.name` must be unique. |
 | `import { to = ..., id = ... }` | Adopt an existing remote resource into state on the next `apply`. See [importing](how-to/importing-existing-resources.md). |
+| `moved { from = ..., to = ... }` | Record that a resource or instance changed address, so state follows it instead of destroying and re-creating it. See [`moved`](#moved). |
 | `locals { ... }` | Named values computed once at load time. |
 | `backend "http" { ... }` | Remote state. See [remote state](how-to/remote-state.md). |
 
@@ -38,7 +39,8 @@ resource "roblox_asset" "icons" {
   `for_each for X is empty; all N instances will be destroyed.`
 - `each.key` and `each.value` exist only inside a block that sets `for_each`.
 - A resource is either singular or `for_each`. Adding or removing `for_each` changes every address,
-  which plans a delete plus a create.
+  which plans a delete plus a create unless a [`moved`](#moved) block says where the existing object
+  went.
 
 ### Instance addresses
 
@@ -48,8 +50,9 @@ prints and the form `--target`, `import` and `show` accept. A resource without `
 the address `type.name`.
 
 Renaming a key (for example, moving a file whose path is the key) changes the address, so the old
-instance is destroyed and a new one created. `plan` prints a warning when that happens; see
-[managing many assets](how-to/many-assets.md#renaming-or-moving-a-file-replaces-the-asset).
+instance is destroyed and a new one created, unless a [`moved`](#moved) block records the rename.
+`plan` prints a warning when a resource both destroys and creates instances; see
+[managing many assets](how-to/many-assets.md#renaming-or-moving-a-file).
 
 ### `for_each` on `import` blocks
 
@@ -68,6 +71,107 @@ Every expanded `to` must be a declared instance. Two imports can't target the sa
 the same id, and an id that another address in state already manages is refused.
 `id` may be a string or a number. `plan --generate-config` doesn't support `for_each` resources;
 declare those resource blocks by hand.
+
+## `moved`
+
+A `moved` block tells Baseplate that something in state now lives at a different address. Before
+planning, Baseplate renames the state entry, keeping its remote id, so the plan updates (or leaves
+alone) the existing object instead of destroying it and creating a new one. For `roblox_asset`, that
+means no re-upload and no new asset id. It works like Terraform's `moved` blocks.
+
+```hcl
+# Rename one for_each instance (a file moved from ui/ to icons/).
+moved {
+  from = roblox_asset.sprites["ui/gem.png"]
+  to   = roblox_asset.sprites["icons/gem.png"]
+}
+
+# Adopt for_each: the existing singular resource becomes one instance.
+moved {
+  from = roblox_asset.icon
+  to   = roblox_asset.icons["ui/gem.png"]
+}
+
+# Rename a whole resource block: every instance moves, keys kept.
+moved {
+  from = roblox_asset.sprites
+  to   = roblox_asset.images
+}
+```
+
+| `from` → `to` | Meaning |
+|---|---|
+| `type.a["x"]` → `type.a["y"]` | One instance gets a new key. |
+| `type.a` → `type.b["k"]` | The singular resource becomes an instance (adopting `for_each`). |
+| `type.a["k"]` → `type.b` | An instance becomes a singular resource (dropping `for_each`). |
+| `type.a` → `type.b` | The whole resource is renamed. Every instance moves and keeps its key. |
+
+### `for_each` on `moved` blocks
+
+**Baseplate extension:** Terraform doesn't allow `for_each` on `moved` blocks. Baseplate does,
+so a whole directory of renamed files can move in one block. `each.key` and `each.value` can be
+used in the index of `from` and `to`, and the rules for the `for_each` value are the same as for
+resources:
+
+```hcl
+locals {
+  # old key => new key
+  renames = {
+    "ui/gem.png"  = "icons/gem.png"
+    "ui/coin.png" = "icons/coin.png"
+  }
+}
+
+moved {
+  for_each = local.renames
+  from     = roblox_asset.sprites[each.key]
+  to       = roblox_asset.sprites[each.value]
+}
+```
+
+The map can come from a file, e.g. `jsondecode(file("${path.config}/asset-renames.json"))`. See
+[managing many assets](how-to/many-assets.md#renaming-or-moving-a-file) for a way to generate it.
+
+### How moves are applied
+
+- **Moves only change state.** Nothing is called on Roblox. After the move, the resource is planned
+  at its new address like any other: a no-op if nothing else changed, an update if its attributes
+  differ.
+- **`plan` doesn't write state.** It shows the moves (`~ X has moved to Y`) and counts them
+  (`…, 1 to move.`; `summary.move` and a `moves` list in `--json`). Moves are changes, so `plan`
+  exits `2`.
+- **`apply` writes the moves to state**, under the state lock, even when nothing else changes.
+  `destroy` applies them too, so `prevent_destroy` is checked against the new address.
+- **Idempotent.** If `from` isn't in state and `to` is, the move already happened and the block does
+  nothing. Keep the block until every state that needs it (every environment) has been applied,
+  then you can delete it.
+- **Neither in state:** nothing to do. This matches Terraform: the block may be older than the
+  state, or the resource may never have been created.
+- **Both in state:** an error. Baseplate can't tell which object should end up at `to`.
+  (Terraform skips the move with a warning; Baseplate stops, because keeping both is how an asset
+  ends up re-uploaded.)
+- **Chains** (`a` → `b` and `b` → `c`) are resolved in order whatever order the blocks are written
+  in, and `plan` shows the result as one move (`a` → `c`). A cycle (`a` → `b`, `b` → `a`) is an
+  error.
+- **`to` doesn't have to be declared.** As in Terraform, the move still happens and the plan then
+  destroys the object at its new address.
+- **`--target` doesn't filter moves.** They are applied in full even when the target names another
+  resource. Terraform instead refuses a targeted plan that doesn't cover every moved address;
+  Baseplate's `--target` takes a single address, so that rule would make most targeted runs
+  impossible, and a move is a state-only rename that is safe to apply on its own.
+- Dependencies recorded in state follow the move, on the moved resource and on everything that
+  depends on it.
+- `import` blocks are resolved after moves. An `import` whose `to` is a move's destination is
+  already satisfied once the move has happened.
+
+Load-time errors:
+
+- `from` and `to` must be resource addresses (`type.name`, `type.name["key"]` or
+  `type.name[expr]`), of a known type. A move can't change the type
+  (`roblox_asset` → `roblox_badge`), and `from` and `to` can't be the same address.
+- `from` must no longer be declared. If `from` is still in the config, the block is rejected:
+  change the config so the resource is declared at `to` instead. This matches Terraform.
+- Two blocks can't move the same `from`, or move two things to the same `to`.
 
 ## `lifecycle`
 
