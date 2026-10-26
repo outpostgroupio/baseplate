@@ -37,7 +37,7 @@ func New(apiKey string) (*Provider, error) {
 	badges := opencloud.New(apiKey, badgesBase)
 	return &Provider{resources: map[string]provider.Resource{
 		"roblox_experience":        resources.Experience(opencloud.NewUniverseClient(root)),
-		"roblox_asset":             resources.Asset(opencloud.NewAssetClient(assets)),
+		"roblox_asset":             resources.Asset(opencloud.NewAssetClient(assets), opencloud.NewTextureClient(root)),
 		"roblox_developer_product": resources.DeveloperProduct(opencloud.NewDeveloperProductClient(root)),
 		"roblox_game_pass":         resources.GamePass(opencloud.NewGamePassClient(root)),
 		"roblox_badge":             resources.Badge(opencloud.NewBadgeClient(root, badges)),
@@ -59,7 +59,7 @@ func (p *Provider) Resources() map[string]provider.Resource { return p.resources
 func SchemaProvider() *Provider {
 	return &Provider{resources: map[string]provider.Resource{
 		"roblox_experience":        resources.Experience(nil),
-		"roblox_asset":             resources.Asset(nil),
+		"roblox_asset":             resources.Asset(nil, nil),
 		"roblox_developer_product": resources.DeveloperProduct(nil),
 		"roblox_place":             resources.Place(nil),
 		"roblox_place_config":      resources.PlaceConfig(nil),

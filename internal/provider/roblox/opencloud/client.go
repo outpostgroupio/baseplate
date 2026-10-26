@@ -61,7 +61,7 @@ func IsNotFound(err error) bool {
 }
 
 // IsNotArchivable reports whether err is a Roblox API 400 that rejected an
-// archive because the asset's type cannot be archived (e.g. Image/Decal). Such
+// archive because the asset's type cannot be archived (e.g. Image or Model). Such
 // assets have no Open Cloud delete path, so destroy unmanages them in place.
 // The substring match is brittle but fails closed (an unrelated 400 propagates,
 // so we never silently orphan-and-succeed on a different error).
