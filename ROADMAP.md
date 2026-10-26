@@ -390,8 +390,9 @@ calls was removed, renamed or newly deprecated since the June spec. Corrections 
   Operation**; content updates are **Model-only** (Image/Decal/Audio/Video can't take new
   content), so a stable-id in-place image update isn't possible. Audio create accepts
   mp3/ogg/wav/flac (≤7 min, ≤20 MB; 10 or 100 uploads/month by ID-verification). No Assets-API
-  field exposes a Decal's underlying image id (only `toolbox-service/v2` returns `textureId`, for
-  Creator Store assets).
+  field exposes a Decal's underlying image id, but `toolbox-service/v2/assets/{decalId}`
+  (`creator-store-product:read`) returns `asset.textureId`, including for the key owner's own
+  private, non-Creator-Store decal (verified live 2026-10-26; see CLAUDE.md).
 - **Thumbnails:** new `thumbnail-personalization-api/v1/universes/{u}/thumbnails`, but its
   `universe.thumbnail:write` scope is first-party-OAuth-only → still not usable with an API key.
 - Still not viable: subscription products, collaborators/permissions (legacy-develop exposes only
@@ -470,6 +471,19 @@ thumbnail/notification candidates). The genuinely new items we chose to adopt:
     safely, expose it as a documented "you must accept managed pricing in the dashboard first"
     attribute, and translate that 400 into an actionable error. See the slice-7 spec's
     "Managed-pricing live findings" section.
+  - **`roblox_asset` with Decals (issue #2 item 1):** this is mostly a docs problem. Upload as
+    `Image` (the default) and the `id` is already the texture id. To adopt from a Decal pipeline,
+    import the texture ids (`docs/how-to/many-assets.md`). Both are verified live (2026-10-26).
+    Optional follow-ups:
+    (a) a computed `texture_id` on `asset_type = "Decal"` instances, read from
+    `GET /toolbox-service/v2/assets/{id}` → `asset.textureId` (BETA, scope
+    `creator-store-product:read`, so make the scope optional and leave the attribute unset on 403).
+    Group-owned decals haven't been probed yet, so do that first. This needs no Luau Execution.
+    (b) An apply-time guard: in `Update`, GET the asset and fail with a clear error when the remote
+    `assetType` differs from the declared `asset_type` (for example a decal id imported by
+    mistake), instead of a diff that never converges. A Luau-execution fallback
+    (`universe.place.luau-execution-session:write`, 5 tasks/min per key owner) isn't needed while
+    the toolbox route works.
 - **DX / observability:** a `--debug` flag (or `BASEPLATE_DEBUG`) that dumps raw Open Cloud
   requests/responses, **redacting the api-key and sealed/sensitive values**. Small, high
   troubleshooting value; folds into the Phase 3 DX hardening.
@@ -485,6 +499,6 @@ thumbnail/notification candidates). The genuinely new items we chose to adopt:
 
 **Considered but not adopted** (recorded so they aren't re-litigated): stateless-by-listing
 reconciliation, rollback / plan history, Luau-authored programmable config (competes with the
-locked HCL decision), JSON-schema/LSP config autocomplete, decal→texture id resolution, Rojo build
+locked HCL decision), JSON-schema/LSP config autocomplete, Rojo build
 integration, lockfile version pinning, and a quarantined legacy cookie/CSRF adapter (a deliberate
 non-goal — Baseplate stays Open-Cloud-only).

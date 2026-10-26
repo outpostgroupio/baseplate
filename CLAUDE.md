@@ -100,6 +100,22 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
   - **Image/Decal assets are NOT archivable** (`:archive` → 400 "not an archivable asset type"),
     so there's no Open Cloud delete path; `roblox_asset` destroy unmanages-in-place (drops from
     state, leaves the asset), like a dev product that can't be hard-deleted. Verified live.
+  - **Decal vs Image (verified live 2026-10-26):** uploading `assetType: Decal` also creates a
+    separate **Image** asset (its own id, owned by the same creator, and it copies the decal's
+    name and description). That image id is the texture id (`Decal.Texture` / `ImageLabel.Image`).
+    An `assetType: Image` upload creates only the image. Economy `AssetTypeId` is 1 for Image and
+    13 for Decal. The auto-created image is a normal asset: `GET /assets/v1/assets/{id}` returns
+    `assetType: "Image"`, and `baseplate import` adopts it, renames it via PATCH and converges
+    (the decal is untouched). Decal → texture id over an API key:
+    `GET /toolbox-service/v2/assets/{decalId}` (BETA, scope `creator-store-product:read`) returns
+    `asset.textureId` (a JSON number), and this works for the key owner's own **private**,
+    non-Creator-Store decal. It 404s without a key, and 404s for an Image id. Not tried yet: a
+    group-owned decal, or another creator's private decal. Plan only diffs *declared* attributes,
+    so importing a decal id with `asset_type` omitted shows no diff. With
+    `asset_type = "Image"` declared it plans `Decal => Image`, which `Update` can't apply.
+    Neither `asset-delivery-api/v1/assetId/{id}` (scope `legacy-asset:manage`) nor Luau Execution
+    (`universe.place.luau-execution-session:write`, STABLE, 5 tasks/min) is granted to the test
+    key, so headless render checks (`InsertService:LoadAsset`, `PreloadAsync`) haven't run.
 - Developer products: create/update are **multipart form fields** (`name`, `price`, `isForSale`,
   `imageFile`, ...). The icon is a **direct file upload** (`imageFile`), NOT an assetId
   reference. Can't hard-delete → destroy sets `isForSale=false`. Base `https://apis.roblox.com`.

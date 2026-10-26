@@ -28,11 +28,11 @@ func (a *asset) Doc() provider.ResourceDoc {
 			"file":             "Path to the file to upload: `.png`/`.jpg`/`.bmp`/`.tga` for images and decals, `.mp3`/`.ogg`/`.wav`/`.flac` for audio.",
 			"display_name":     "Asset name.",
 			"description":      "Asset description.",
-			"asset_type":       "Asset type: `Image`, `Decal` or `Audio`. Defaults to `Audio` for audio files and `Image` otherwise.",
+			"asset_type":       "Asset type: `Image`, `Decal` or `Audio`. Defaults to `Audio` for audio files and `Image` otherwise. Use `Image` for anything the game shows in an `ImageLabel` or `Decal`. Roblox can't change an existing asset's type.",
 			"creator_user_id":  "Owning user id (set exactly one of creator_user_id/creator_group_id).",
 			"creator_group_id": "Owning group id (set exactly one of creator_user_id/creator_group_id).",
 		},
-		Notes:  "The `id` output is the `assetId` (a numeric string). Changing `file` doesn't re-upload: Open Cloud only accepts new content for Model assets, so a changed image or sound needs a new resource (and gets a new id). Audio is limited to 7 minutes and 20 MB, and Roblox caps audio uploads per month (10, or 100 for ID-verified accounts). Image/decal assets are not archivable, so `destroy` unmanages the asset in place (drops it from state, leaves it uploaded).",
+		Notes:  "The `id` output is the `assetId` (a numeric string). For an `Image` asset (the default for image files) that id is the texture id: use it directly as `rbxassetid://<id>` in `ImageLabel.Image` or `Decal.Texture`. A `Decal` asset's id is not a texture id. Each Decal wraps a separate Image asset that Roblox creates alongside it, owned by the same creator. To adopt assets from a Decal-based uploader, import those underlying image ids, not the decal ids (see the many-assets how-to). Changing `file` doesn't re-upload: Open Cloud only accepts new content for Model assets, so a changed image or sound needs a new resource (and gets a new id). Audio is limited to 7 minutes and 20 MB, and Roblox caps audio uploads per month (10, or 100 for ID-verified accounts). Image/decal assets are not archivable, so `destroy` unmanages the asset in place (drops it from state, leaves it uploaded).",
 		Scopes: []string{"asset:read", "asset:write"},
 	}
 }
