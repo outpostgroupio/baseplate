@@ -85,6 +85,7 @@ var rootSchema = &hcl.BodySchema{
 		{Type: "resource", LabelNames: []string{"type", "name"}},
 		{Type: "import"},
 		{Type: "locals"},
+		{Type: "moved"},
 		{Type: "backend", LabelNames: []string{"type"}},
 	},
 }
@@ -128,6 +129,9 @@ type Config struct {
 	// lifecycle.prevent_destroy = true, sorted. It includes for_each blocks
 	// with zero instances, which still protect the instances left in state.
 	PreventDestroy []string
+	// Moved lists the expanded moved {} blocks (one per for_each instance), in
+	// declaration order. plan.ApplyMoves applies them to state before planning.
+	Moved []plan.MovedBlock
 }
 
 // Load is LoadConfig for callers that only need the provider config, the
@@ -228,6 +232,8 @@ func LoadConfig(path string, p provider.Provider) (*Config, error) {
 	var pc ProviderConfig
 	var out []plan.DesiredResource
 	var imports []plan.ImportBlock
+	var moved []plan.MovedBlock
+	var movedAt []hcl.Range // the declaring block of each moved entry
 	importSeen := map[string]bool{}
 	for _, b := range content.Blocks {
 		switch b.Type {
@@ -282,11 +288,23 @@ func LoadConfig(path string, p provider.Provider) (*Config, error) {
 				importSeen[imp.Address] = true
 			}
 			imports = append(imports, imps...)
+		case "moved":
+			ms, err := l.expandMoved(b, ctx, resTypes)
+			if err != nil {
+				return nil, err
+			}
+			moved = append(moved, ms...)
+			for range ms {
+				movedAt = append(movedAt, b.DefRange)
+			}
 		}
+	}
+	if err := l.checkMovedSet(moved, movedAt); err != nil {
+		return nil, err
 	}
 	sort.Strings(empty)
 	sort.Strings(protected)
-	return &Config{Provider: pc, Resources: out, Imports: imports, EmptyForEach: empty, PreventDestroy: protected}, nil
+	return &Config{Provider: pc, Resources: out, Imports: imports, EmptyForEach: empty, PreventDestroy: protected, Moved: moved}, nil
 }
 
 // decodeInstance decodes one resource instance (the whole resource, for a
@@ -399,47 +417,9 @@ func (l *loader) expandImport(b *hcl.Block, ctx *hcl.EvalContext) ([]plan.Import
 // target needn't be declared (plan --generate-config handles undeclared ones),
 // but when it is, its for_each-ness must match the address shape.
 func (l *loader) importTarget(expr hcl.Expression, ctx *hcl.EvalContext) (string, error) {
-	bad := fmt.Errorf(`%s: import `+"`to`"+` must be a resource address like type.name or type.name["key"]`, l.path)
-	var typ, name, key string
-	var hasKey bool
-	switch e := expr.(type) {
-	case *hclsyntax.ScopeTraversalExpr:
-		tr := e.Traversal
-		n, ok := traversalIndexName(tr, 1)
-		if !ok || len(tr) > 3 {
-			return "", bad
-		}
-		typ, name = tr.RootName(), n
-		if len(tr) == 3 {
-			idx, ok := tr[2].(hcl.TraverseIndex)
-			if !ok {
-				return "", bad
-			}
-			if idx.Key.Type() != cty.String {
-				return "", fmt.Errorf("%s: import `to`: instance key must be a string", l.path)
-			}
-			key, hasKey = idx.Key.AsString(), true
-		}
-	case *hclsyntax.IndexExpr:
-		st, ok := e.Collection.(*hclsyntax.ScopeTraversalExpr)
-		if !ok || len(st.Traversal) != 2 {
-			return "", bad
-		}
-		n, ok := traversalIndexName(st.Traversal, 1)
-		if !ok {
-			return "", bad
-		}
-		typ, name = st.Traversal.RootName(), n
-		k, err := l.evalKey(e.Key, ctx, "import `to`")
-		if err != nil {
-			return "", err
-		}
-		key, hasKey = k, true
-	default:
-		return "", bad
-	}
-	if hasKey && key == "" {
-		return "", fmt.Errorf("%s: import `to`: instance key must not be empty", l.path)
+	typ, name, key, hasKey, err := l.addressExpr(expr, ctx, "import `to`")
+	if err != nil {
+		return "", err
 	}
 	if decl := l.resources[typ][name]; decl != nil {
 		base := typ + "." + name
@@ -451,6 +431,54 @@ func (l *loader) importTarget(expr hcl.Expression, ctx *hcl.EvalContext) (string
 		}
 	}
 	return addr.Format(typ, name, key), nil
+}
+
+// addressExpr reads a resource address written as an expression: type.name,
+// type.name["key"], or type.name[expr] with expr evaluated in ctx (e.g.
+// [each.key]). The address itself is never evaluated, so it needn't be
+// declared. what prefixes errors (e.g. "import `to`").
+func (l *loader) addressExpr(expr hcl.Expression, ctx *hcl.EvalContext, what string) (typ, name, key string, hasKey bool, err error) {
+	bad := fmt.Errorf(`%s: %s must be a resource address like type.name or type.name["key"]`, l.path, what)
+	switch e := expr.(type) {
+	case *hclsyntax.ScopeTraversalExpr:
+		tr := e.Traversal
+		n, ok := traversalIndexName(tr, 1)
+		if !ok || len(tr) > 3 {
+			return "", "", "", false, bad
+		}
+		typ, name = tr.RootName(), n
+		if len(tr) == 3 {
+			idx, ok := tr[2].(hcl.TraverseIndex)
+			if !ok {
+				return "", "", "", false, bad
+			}
+			if idx.Key.Type() != cty.String {
+				return "", "", "", false, fmt.Errorf("%s: %s: instance key must be a string", l.path, what)
+			}
+			key, hasKey = idx.Key.AsString(), true
+		}
+	case *hclsyntax.IndexExpr:
+		st, ok := e.Collection.(*hclsyntax.ScopeTraversalExpr)
+		if !ok || len(st.Traversal) != 2 {
+			return "", "", "", false, bad
+		}
+		n, ok := traversalIndexName(st.Traversal, 1)
+		if !ok {
+			return "", "", "", false, bad
+		}
+		typ, name = st.Traversal.RootName(), n
+		k, err := l.evalKey(e.Key, ctx, what)
+		if err != nil {
+			return "", "", "", false, err
+		}
+		key, hasKey = k, true
+	default:
+		return "", "", "", false, bad
+	}
+	if hasKey && key == "" {
+		return "", "", "", false, fmt.Errorf("%s: %s: instance key must not be empty", l.path, what)
+	}
+	return typ, name, key, hasKey, nil
 }
 
 // evalForEach evaluates a for_each expression and returns its instance keys

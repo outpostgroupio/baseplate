@@ -73,7 +73,8 @@ func TestWarningsFlagKeyRename(t *testing.T) {
 	if len(ws) != 1 {
 		t.Fatalf("want one rename warning, got %v", ws)
 	}
-	for _, want := range []string{"mock_thing.set:", "destroys 1 instance(s) and creates 1", "new id", "moved {}"} {
+	for _, want := range []string{"mock_thing.set:", "destroys 1 instance(s) and creates 1", "new id",
+		`moved { from = mock_thing.set["ui/gem.png"]  to = mock_thing.set["icons/gem.png"] }`, "for_each"} {
 		if !strings.Contains(ws[0], want) {
 			t.Fatalf("warning missing %q:\n%s", want, ws[0])
 		}

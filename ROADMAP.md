@@ -139,9 +139,27 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   malformed is an error); `baseplate show [address] [--json]` (state inventory, no lock/network);
   a plan warning when one resource both destroys and creates instances (key rename);
   `--generate-config` refuses `for_each` imports. Docs: `docs/how-to/many-assets.md`,
-  `docs/config-reference.md`. **Deferred to slice B:** `moved {}` blocks (state-only rename,
-  including singular → keyed adoption). Later, if wanted: `output {}` blocks, repeatable
-  `--target`, `--generate-config` for keyed imports.
+  `docs/config-reference.md`. Slice B (`moved {}`) is done, below. Later, if wanted: `output {}`
+  blocks, repeatable `--target`, `--generate-config` for keyed imports.
+- **`moved {}` blocks, with `for_each` (GitHub #2, slice B, 2026-10-26):** a state-only rename
+  applied before planning, so a renamed `for_each` key (a moved asset file) keeps its remote object
+  and id instead of a destroy + re-upload. `internal/config/moved.go` expands blocks (incl.
+  `for_each`, a Baseplate extension over Terraform) into `plan.MovedBlock{From,To}`;
+  `plan.ApplyMoves` renames state in memory (instance moves, singular ↔ keyed, whole-resource
+  renames that keep keys), orders chains (cycle = error), collapses a chain into one reported move
+  and rewrites recorded `Dependencies`. Idempotent (to-only = done); neither in state = no-op
+  (Terraform parity); both in state = **error** (Terraform warns and skips). Load errors: type
+  change, from == to, `from` still declared (Terraform parity), duplicate from/to. `Plan.Moves`:
+  rendered as `~ X has moved to Y`, `, N to move` in the footer (only when N > 0), `summary.move` +
+  `moves` in `--json`; counts for exit 2. `plan` never writes state; `apply.Apply` persists moves
+  first (even a move-only plan). `destroy` applies moves too, so `prevent_destroy` is checked at the
+  new address. **`--target` doesn't filter moves** (Terraform instead errors when targets don't
+  cover every moved address; Baseplate's single `--target` makes that unworkable). The rename
+  warning now suggests a concrete `moved` block. The `import` CLI command applies moves first too (under the lock; persisted with the import).
+  A whole-resource move next to an instance move out of (or into) the same resource is a load
+  error naming both blocks.
+  Docs: `docs/config-reference.md#moved`, `docs/how-to/many-assets.md` (generating the rename map
+  from `git diff -M`).
 - **`lifecycle { prevent_destroy = true }` (2026-10-23):** Terraform-compatible. `internal/config`
   strips the `lifecycle` block as a meta-argument (like `for_each`); the value must be a literal
   bool; every other lifecycle argument/block is rejected as not supported. Carried on
