@@ -109,9 +109,9 @@ the old object: some resources destroy it, others leave it in place and only sto
 republished:
 
 ```console
--/+ roblox_asset.icon (replace)
-    display_name = Icon
-    file = assets/icon.png
+-/+ roblox_asset.click (replace)
+    display_name = Click
+    file = assets/click.ogg
     content_hash: 6843b53e… => abeeb0b9…  # forces replacement
     # old object (id 1234567890) is left in place, no longer managed
 
@@ -126,8 +126,9 @@ its id to state, then handles the old one, so a failed upload leaves the current
 Resources that reference the replaced one are planned with `(known after apply)` values and updated
 in the same apply. `lifecycle { prevent_destroy = true }` blocks a replace. An `import {}` whose
 declared attributes force a replace shows `will be imported (id …), then replaced`. Today only
-`roblox_asset` replaces: when an image, decal or audio file's content changes, or when its
-`asset_type` changes.
+`roblox_asset` replaces: when a decal, audio or video file's content changes (images and models are
+updated in place, keeping their id), or when its `asset_type` changes. Forcing a replace on demand
+will come with a general `lifecycle { replace_triggered_by = [...] }`.
 
 When a file a resource hashes (an asset's `file`, a place's `file`, a badge's `icon_file`) is
 missing on the machine running `plan`, for example in CI without the source files, a resource

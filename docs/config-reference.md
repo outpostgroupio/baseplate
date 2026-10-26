@@ -202,7 +202,7 @@ Error: Instance cannot be destroyed: roblox_experience.prod has lifecycle.preven
 
 - It covers every path that deletes: `baseplate destroy`, `plan`/`apply` when a `for_each` key
   is removed (or `for_each` becomes empty) while the block itself is still in the config, and a
-  **replace** (`-/+`, e.g. a `roblox_asset` whose image changed), which destroys the current object
+  **replace** (`-/+`, e.g. a `roblox_asset` whose sound or `asset_type` changed), which destroys the current object
   after creating its successor (or, for `roblox_asset`, leaves it in place but stops managing it).
   `plan`, `apply` and `destroy` all fail before anything changes, with exit code `1`.
 - With `for_each`, the setting applies to every instance.
@@ -217,7 +217,8 @@ Error: Instance cannot be destroyed: roblox_experience.prod has lifecycle.preven
   protected.
 - It only guards Baseplate's own plans. It doesn't stop anyone deleting the resource on Roblox.
 - Terraform's other lifecycle arguments (`ignore_changes`, `create_before_destroy`,
-  `replace_triggered_by`) and the `precondition`/`postcondition` blocks aren't supported yet and
+  `replace_triggered_by`, which is planned as the general way to force a replace) and the
+  `precondition`/`postcondition` blocks aren't supported yet and
   are rejected at load time, as is a second `lifecycle` block.
 
 See [protecting production](how-to/github-actions.md#protecting-production).

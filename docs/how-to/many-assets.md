@@ -102,8 +102,8 @@ Adopting **does not re-upload**. An asset's owner is create-only, and the import
 each `file`'s current content as its baseline instead of comparing it with what was uploaded (the
 API can't read content back), so after the import the only possible differences are metadata
 (`display_name`, `description`), which `apply` updates in place. Ids may be strings or numbers in
-the JSON. From then on, editing a file replaces its asset (see
-[below](#changing-a-files-content-replaces-the-asset)).
+the JSON. From then on, editing a file updates its asset (see
+[below](#changing-a-files-content)).
 
 The same holds for assets created by a Baseplate version from before content changes were tracked:
 their state has no hash, so the first `apply` records the current file's hash and uploads nothing.
@@ -230,36 +230,53 @@ $ baseplate apply --target roblox_asset.sprites                       # every sp
 $ baseplate apply --target 'roblox_asset.sprites["units/warship.png"]' # just one
 ```
 
-## Changing a file's content replaces the asset
+## Changing a file's content
 
-Baseplate hashes each asset's `file` (the `content_hash` trigger). When you edit an image or sound,
-the next plan replaces that asset:
+Baseplate hashes each asset's `file` (the `content_hash` trigger). When you edit an **image** (or a
+model), the next plan updates that asset in place, and its **id stays the same**:
 
 ```console
 $ baseplate plan
--/+ roblox_asset.sprites["ui/gem.png"] (replace)
+~ roblox_asset.sprites["ui/gem.png"] (update)
     display_name = ui/gem.png
     ...
-    content_hash: 6843b53e… => abeeb0b9…  # forces replacement
 
+Plan: 0 to import, 0 to add, 1 to change, 0 to destroy.
+```
+
+`apply` uploads the file as a new version of the same asset, so `rbxassetid://<id>` keeps working
+and the generated Luau module doesn't change. Roblox documents content updates for Models only, but
+Images accept them too (verified live). Editing only an asset's name or description doesn't
+re-upload its content.
+
+**Decal, Audio and Video** assets can't take new content (Roblox rejects a Decal content update as
+not supported yet; Audio and Video are documented as not updatable), so for them a content change
+replaces the asset:
+
+```console
+$ baseplate plan
+-/+ roblox_asset.sounds["ui/click.ogg"] (replace)
+    display_name = ui/click.ogg
+    ...
+    content_hash: 6843b53e… => abeeb0b9…  # forces replacement
     # old object (id 1234567890) is left in place, no longer managed
 
 Plan: 0 to import, 1 to add, 0 to change, 0 to destroy.
 ```
 
-Open Cloud can't put new content into an existing Image, Decal or Audio asset, so `apply` uploads
-a new asset and records its **new id** in state. The old asset is **left in place** on Roblox (it
-is never archived, not even audio) and is no longer managed: servers that are still running keep
-loading `rbxassetid://<old id>` until you republish the place. Anything that references the
-asset's `id` is updated in the same apply, and `baseplate show --json` reports the new id, so
-regenerating the Luau module after `apply` picks it up. Each replace counts against Roblox's upload
-limits (watch the monthly audio cap).
+`apply` uploads a new asset and records its **new id** in state. The old asset is **left in place**
+on Roblox (it is never archived, not even audio) and is no longer managed: servers that are still
+running keep loading `rbxassetid://<old id>` until you republish the place. Anything that
+references the asset's `id` is updated in the same apply, and `baseplate show --json` reports the
+new id, so regenerating the Luau module after `apply` picks it up. Each replace counts against
+Roblox's upload limits (watch the monthly audio cap).
 
-- A **Model** asset (`.fbx`/`.gltf`/`.glb`/`.rbxm`/`.rbxmx`) takes new content in place instead:
-  `apply` uploads a new version under the same id, shown as an ordinary update. Editing only its
-  name or description doesn't re-upload the content.
 - Changing `asset_type`, or the file extension when `asset_type` is omitted (e.g. `.png` to `.fbx`),
-  also replaces: Roblox can't change an existing asset's type.
+  always replaces: Roblox can't change an existing asset's type.
+- There is no per-asset setting to force a replace for an image. A general, Terraform-compatible
+  `lifecycle { replace_triggered_by = [...] }` that works for any resource is planned.
+- If Roblox ever stops accepting in-place content updates for a type, `apply` fails with an error
+  that says so (nothing is changed); Baseplate then needs an update to replace that type instead.
 - If the source files aren't on the machine running `plan` (e.g. CI), assets already in state keep
   their recorded hashes and `plan` warns that content changes can't be detected.
 - Moving or renaming a file without changing its bytes doesn't change the hash. (It can still

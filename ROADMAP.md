@@ -189,15 +189,22 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   for an in-state resource and warns; a create still fails. New `provider.TriggerAwareUpdater` (see
   the slice-8 deferral, now closed). `roblox_asset`: `content_hash` trigger; `asset_type` always
   forces replacement (a `Normalizer` fills the inferred default, so `.png` -> `.fbx` replaces too);
-  content changes replace unless the asset's current type is in `contentInPlace` (Model only; adding
-  `"Image"` is the one-line switch to stable-id image updates); replaces abandon the old asset (never
+  content changes are in-place updates (same id) when the asset's current type is in
+  `contentInPlace` = {Image, Model} (Image works live despite the docs; Decal is rejected live, so it
+  replaces, as do Audio/Video); replaces abandon the old asset (never
   archive: live servers still load the old id); Model content via `AssetClient.UpdateContent` only
-  when the hash changed. Live (`TestLiveAssetLifecycle`): PNG change -> replace -> new id, old asset
-  still readable -> converge; import with a different local file -> no changes. **Follow-ups:** no
+  when the hash changed. Live (`TestLiveAssetLifecycle`): PNG change -> in-place update, same id ->
+  converge; `asset_type` Image -> Decal -> replace, new id, old asset still readable -> converge;
+  import with a different local file -> no changes. **Follow-ups:** no
   destroy-before-create mode (natural-key ids would need one); no "deposed" tracking, so an old object
-  whose delete failed is orphaned rather than retried; Image content PATCH worked live despite the
-  docs (see CLAUDE.md), pending a maintainer decision on stable-id image updates; the planned
-  apply-time asset type-mismatch error is superseded for plans (a mismatch now plans a replace).
+  whose delete failed is orphaned rather than retried; **`lifecycle { replace_triggered_by = [...] }`**
+  (Terraform-compatible, any resource) is the planned general way to force a replace, deliberately
+  instead of a per-resource setting; if Roblox stops accepting Image content updates, apply errors
+  saying Baseplate needs updating (move the type out of `contentInPlace`); the planned apply-time
+  asset type-mismatch error is superseded for plans (a mismatch now plans a replace). Missing
+  trigger baselines are adopted for every trigger, not only replace-forcing ones. Known Roblox race:
+  an Image content PATCH within ~3s of a separate metadata PATCH can keep the earlier metadata
+  (CLAUDE.md); self-heals on the next apply.
 - Next: **Phase 2** remaining slices (see Roadmap below).
 
 Read `docs/superpowers/specs/2026-07-03-baseplate-phase1-roblox-provider-design.md` for the
