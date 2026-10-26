@@ -22,7 +22,8 @@ const preamble = "# Resource reference\n\n" +
 	"  excluded from the diff). To change it, taint/recreate the resource.\n" +
 	"- **diffable** — a normal managed attribute; a config change plans an update.\n" +
 	"- **sensitive** — redacted from all plan output and never written to state.\n" +
-	"- **trigger** — not diffed directly; a change is detected via a hash/marker and forces an update.\n\n" +
+	"- **trigger** — not diffed directly; a change is detected via a hash/marker and forces an update\n" +
+	"  (or a replace, where the resource notes say so: see `-/+` in the CLI reference).\n\n" +
 	"Every resource also has an implicit `id` (Baseplate's state id) — you never set it in config.\n"
 
 // Generate renders the full resource-reference markdown for the provider's

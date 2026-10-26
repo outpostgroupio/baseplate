@@ -14,8 +14,11 @@ import (
 )
 
 type fakeAsset struct {
-	created   opencloud.AssetCreate
-	gotFile   []byte
+	created opencloud.AssetCreate
+	gotFile []byte
+	// content records UpdateContent calls (asset id -> uploaded bytes).
+	content   map[string][]byte
+	updates   int
 	store     map[string]opencloud.Asset
 	getErr    error
 	deleteErr error
@@ -38,6 +41,15 @@ func (f *fakeAsset) Get(_ context.Context, id string) (opencloud.Asset, error) {
 	return f.store[id], nil
 }
 func (f *fakeAsset) Update(_ context.Context, a opencloud.Asset) (opencloud.Asset, error) {
+	f.updates++
+	f.store[a.ID] = a
+	return a, nil
+}
+func (f *fakeAsset) UpdateContent(_ context.Context, a opencloud.Asset, _, _ string, data []byte) (opencloud.Asset, error) {
+	if f.content == nil {
+		f.content = map[string][]byte{}
+	}
+	f.content[a.ID] = data
 	f.store[a.ID] = a
 	return a, nil
 }
@@ -138,5 +150,112 @@ func TestAssetAudioTypeInferredFromExtension(t *testing.T) {
 	}
 	if got := contentType(path); got != "audio/ogg" {
 		t.Fatalf("content type = %q", got)
+	}
+}
+
+func writeFile(t *testing.T, name, body string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestAssetContentHashTrigger(t *testing.T) {
+	fp := writeFile(t, "gem.png", "v1")
+	r := Asset(&fakeAsset{}).(provider.Triggerable)
+	t1, err := r.Triggers(provider.Attributes{"file": cty.StringVal(fp)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fp, []byte("v2"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t2, err := r.Triggers(provider.Attributes{"file": cty.StringVal(fp)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if t1["content_hash"].RawEquals(t2["content_hash"]) {
+		t.Fatal("content_hash must change when the file content changes")
+	}
+	// Same bytes at another path: same hash (a rename alone does nothing).
+	other := writeFile(t, "moved.png", "v2")
+	t3, _ := r.Triggers(provider.Attributes{"file": cty.StringVal(other)})
+	if !t2["content_hash"].RawEquals(t3["content_hash"]) {
+		t.Fatal("content_hash must depend on content only, not the path")
+	}
+}
+
+func TestAssetRequiresReplace(t *testing.T) {
+	r := Asset(&fakeAsset{}).(provider.Replacer)
+	cases := []struct {
+		name  string
+		attrs provider.Attributes
+		want  bool // content_hash forces replacement
+	}{
+		{"image default", provider.Attributes{"file": cty.StringVal("a.png")}, true},
+		{"decal", provider.Attributes{"file": cty.StringVal("a.png"), "asset_type": cty.StringVal("Decal")}, true},
+		{"audio default", provider.Attributes{"file": cty.StringVal("a.ogg")}, true},
+		{"model declared", provider.Attributes{"file": cty.StringVal("a.fbx"), "asset_type": cty.StringVal("Model")}, false},
+		{"model by extension", provider.Attributes{"file": cty.StringVal("a.rbxmx")}, false},
+	}
+	for _, c := range cases {
+		got := r.RequiresReplace(c.attrs)
+		if (len(got) == 1 && got[0] == "content_hash") != c.want {
+			t.Errorf("%s: RequiresReplace = %v, want content_hash forcing = %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestAssetModelUpdateUploadsContentInPlace(t *testing.T) {
+	fp := writeFile(t, "tree.fbx", "FBXDATA")
+	f := &fakeAsset{store: map[string]opencloud.Asset{"9": {ID: "9"}}}
+	_, err := Asset(f).Update(context.Background(), "9", provider.Attributes{
+		"file":         cty.StringVal(fp),
+		"display_name": cty.StringVal("Tree"),
+		"description":  cty.StringVal("a tree"),
+		"asset_type":   cty.StringVal("Model"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(f.content["9"]) != "FBXDATA" {
+		t.Fatalf("a Model update must upload the file content in place, got %q", f.content["9"])
+	}
+	if f.updates != 0 {
+		t.Fatal("a Model update must go through UpdateContent, not the metadata-only Update")
+	}
+	if got := f.store["9"]; got.DisplayName != "Tree" || got.AssetType != "Model" {
+		t.Fatalf("metadata not sent with content: %+v", got)
+	}
+}
+
+func TestAssetImageUpdateIsMetadataOnly(t *testing.T) {
+	fp := writeFile(t, "gem.png", "PNG")
+	f := &fakeAsset{store: map[string]opencloud.Asset{"9": {ID: "9"}}}
+	if _, err := Asset(f).Update(context.Background(), "9", provider.Attributes{
+		"file":         cty.StringVal(fp),
+		"display_name": cty.StringVal("Gem"),
+		"description":  cty.StringVal("x"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if f.updates != 1 || len(f.content) != 0 {
+		t.Fatalf("an Image update must be metadata-only (updates=%d, content=%v)", f.updates, f.content)
+	}
+}
+
+func TestAssetModelContentTypes(t *testing.T) {
+	for ext, want := range map[string]string{
+		".fbx": "model/fbx", ".gltf": "model/gltf+json", ".glb": "model/gltf-binary",
+		".rbxm": "model/x-rbxm", ".rbxmx": "model/x-rbxm",
+	} {
+		if got := contentType("m" + ext); got != want {
+			t.Errorf("contentType(%s) = %q, want %q", ext, got, want)
+		}
+		if got := defaultAssetType("m" + ext); got != "Model" {
+			t.Errorf("defaultAssetType(%s) = %q, want Model", ext, got)
+		}
 	}
 }

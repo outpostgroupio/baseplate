@@ -24,10 +24,17 @@ import (
 // no binary fixture lives in the repo, and large enough to be a valid image upload.
 func writeTestPNG(t *testing.T, path string) {
 	t.Helper()
+	writeTestPNGColor(t, path, color.RGBA{R: 0x33, G: 0x88, B: 0xff, A: 0xff})
+}
+
+// writeTestPNGColor is writeTestPNG with a chosen fill, so a test can change
+// the file's content.
+func writeTestPNGColor(t *testing.T, path string, c color.RGBA) {
+	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, 64, 64))
 	for y := 0; y < 64; y++ {
 		for x := 0; x < 64; x++ {
-			img.Set(x, y, color.RGBA{R: 0x33, G: 0x88, B: 0xff, A: 0xff})
+			img.Set(x, y, c)
 		}
 	}
 	var buf bytes.Buffer
@@ -138,8 +145,63 @@ func TestLiveAssetLifecycle(t *testing.T) {
 		t.Fatalf("expected convergence after update, got changes:\n%s", pl4.RenderText(false))
 	}
 
+	// Content change: a new PNG under the same path. Image assets can't take
+	// new content, so plan must call for a replace forced by content_hash,
+	// and apply must upload a new asset with a new id.
+	oldRes, _ := s.Find("roblox_asset.icon")
+	oldID := oldRes.ID
+	writeTestPNGColor(t, pngPath, color.RGBA{R: 0xee, G: 0x44, B: 0x22, A: 0xff})
+	pl5, err := plan.Build(ctx, p, s, desired)
+	if err != nil {
+		t.Fatalf("content-change plan: %v", err)
+	}
+	t.Logf("content-change plan:\n%s", pl5.RenderText(false))
+	if len(pl5.Changes) != 1 || pl5.Changes[0].Action != provider.ActionReplace ||
+		len(pl5.Changes[0].Replace) != 1 || pl5.Changes[0].Replace[0] != "content_hash" {
+		t.Fatalf("want a replace forced by content_hash, got:\n%s", pl5.RenderText(false))
+	}
+	if err := apply.Apply(ctx, p, b, s, pl5); err != nil {
+		t.Fatalf("replace apply: %v", err)
+	}
+	newRes, _ := s.Find("roblox_asset.icon")
+	if newRes.ID == oldID {
+		t.Fatalf("replace must produce a new asset id, still %s", oldID)
+	}
+	t.Logf("replaced asset %s -> %s", oldID, newRes.ID)
+	pl6, err := plan.Build(ctx, p, s, desired)
+	if err != nil {
+		t.Fatalf("post-replace re-plan: %v", err)
+	}
+	if pl6.HasChanges() {
+		t.Fatalf("expected convergence after replace, got changes:\n%s", pl6.RenderText(false))
+	}
+
+	// Import: adopt the old (now unmanaged) asset at a second address, with a
+	// file whose content differs from what was uploaded. Import records the
+	// file's hash as the baseline, so the next plan must not replace it (the
+	// "adopt existing assets without re-uploading" case).
+	adoptPath := filepath.Join(t.TempDir(), "adopted.png")
+	writeTestPNGColor(t, adoptPath, color.RGBA{R: 0x11, G: 0x11, B: 0x11, A: 0xff})
+	withAdopted := append(desired, plan.DesiredResource{Type: "roblox_asset", Name: "adopted", Attributes: provider.Attributes{
+		"file":            cty.StringVal(adoptPath),
+		"display_name":    cty.StringVal("Baseplate Live Test Icon (renamed)"),
+		"description":     cty.StringVal("Updated by Baseplate's live asset test"),
+		"asset_type":      cty.StringVal("Image"),
+		"creator_user_id": cty.NumberIntVal(ownerID),
+	}})
+	if err := apply.Import(ctx, p, b, s, "roblox_asset.adopted", oldID, withAdopted); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	pl7, err := plan.Build(ctx, p, s, withAdopted)
+	if err != nil {
+		t.Fatalf("post-import plan: %v", err)
+	}
+	if pl7.HasChanges() {
+		t.Fatalf("a plan right after import must not replace or change anything, got:\n%s", pl7.RenderText(false))
+	}
+
 	// NOTE: destroy runs in t.Cleanup. Image assets are not archivable via Open
 	// Cloud, so destroy unmanages the asset in place (drops it from state) and
 	// leaves it in the account — one orphaned test image per live run, by design.
-	t.Log("live asset lifecycle OK: uploaded via multipart+operation-poll, read back, converged; destroy unmanages (image assets aren't archivable)")
+	t.Log("live asset lifecycle OK: uploaded via multipart+operation-poll, read back, converged; content change replaced it with a new id and converged; import adopted without a replace; destroy unmanages (image assets aren't archivable)")
 }
