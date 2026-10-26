@@ -16,8 +16,18 @@ import (
 	"github.com/outpostgroupio/baseplate/internal/state/backend"
 )
 
+// Apply executes pl against the provider, writing state after every change.
+// s must be the state pl was built from, with pl.Moves already applied to it
+// (plan.ApplyMoves); Apply persists those moves first, so a plan that only
+// moves resources still records the new addresses.
 func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state.State, pl *plan.Plan) error {
 	resources := p.Resources()
+	if len(pl.Moves) > 0 {
+		s.Serial++
+		if err := b.Put(s); err != nil {
+			return err
+		}
+	}
 	// outputs maps an applied resource address to its resolved attributes
 	// (including "id"), so later resources can resolve references to it.
 	outputs := map[string]provider.Attributes{}
