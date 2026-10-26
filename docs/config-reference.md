@@ -200,8 +200,10 @@ With `prevent_destroy = true`, any plan that would delete the resource fails ins
 Error: Instance cannot be destroyed: roblox_experience.prod has lifecycle.prevent_destroy set, but the plan calls for this resource to be destroyed. To avoid this error and continue with the plan, either disable lifecycle.prevent_destroy or reduce the scope of the plan using the --target flag.
 ```
 
-- It covers every path that deletes: `baseplate destroy`, and `plan`/`apply` when a `for_each` key
-  is removed (or `for_each` becomes empty) while the block itself is still in the config.
+- It covers every path that deletes: `baseplate destroy`, `plan`/`apply` when a `for_each` key
+  is removed (or `for_each` becomes empty) while the block itself is still in the config, and a
+  **replace** (`-/+`, e.g. a `roblox_asset` whose image changed), which destroys the current object
+  after creating its successor.
   `plan`, `apply` and `destroy` all fail before anything changes, with exit code `1`.
 - With `for_each`, the setting applies to every instance.
 - The value must be a literal `true` or `false`. References, `local.*`, `each.*` and function calls

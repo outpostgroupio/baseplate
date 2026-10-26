@@ -101,6 +101,28 @@ Plan: 0 to import, 1 to add, 0 to change, 0 to destroy.
 (e.g. a secret's `value`) are redacted in both formats. Each change has an `address` and, for a
 `for_each` instance, its `key`.
 
+Each change is a create (`+`), update (`~`), delete (`-`) or **replace** (`-/+`). A replace happens
+when a change can't be made to the existing remote object, so a new one (with a new id) is created
+and the old one is then destroyed. The attribute or trigger that forced it is marked:
+
+```console
+-/+ roblox_asset.icon (replace)
+    display_name = Icon
+    file = assets/icon.png
+    content_hash: 6843b53e… => abeeb0b9…  # forces replacement
+
+Plan: 0 to import, 1 to add, 0 to change, 1 to destroy.
+```
+
+As in Terraform, a replace counts as one add and one destroy. In `--json` its `action` is
+`"replace"` with a `forces_replacement` list, and `result.summary.replace` counts replaces. Apply
+creates the new object first, writes its id to state, then destroys the old one, so a failed upload
+leaves the current object untouched. Resources that reference the replaced one are planned with
+`(known after apply)` values and updated in the same apply. `lifecycle { prevent_destroy = true }`
+blocks a replace. An `import {}` whose declared attributes force a replace shows `will be imported
+(id …), then replaced`. Today only `roblox_asset` replaces (when an image, decal or audio file's
+content changes).
+
 [`moved` blocks](config-reference.md#moved) are applied to the state read by `plan` (in memory
 only; `plan` never writes state) before the diff. Each move is listed before the changes, and the
 footer counts them when there are any:

@@ -97,9 +97,18 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
   Operation → poll `/v1/operations/{id}`. Base `https://apis.roblox.com/assets`.
   - `assetId` comes back as a JSON **string**, not the int64 the spec declares (Roblox serializes
     64-bit ids as strings — decode as `string`). Verified live.
-  - **Image/Decal assets are NOT archivable** (`:archive` → 400 "not an archivable asset type"),
-    so there's no Open Cloud delete path; `roblox_asset` destroy unmanages-in-place (drops from
-    state, leaves the asset), like a dev product that can't be hard-deleted. Verified live.
+  - **Image/Decal (and Model) assets are NOT archivable** (`:archive` → 400 "not an archivable
+    asset type"; Model verified live 2026-10-26), so there's no Open Cloud delete path;
+    `roblox_asset` destroy unmanages-in-place (drops from state, leaves the asset), like a dev
+    product that can't be hard-deleted. Verified live.
+  - **Content updates** (`PATCH …/assets/{id}` multipart with a `fileContent` part plus the
+    `request` part; `updateMask=displayName,description` still applies the metadata in the same
+    call) → Operation, and a **new version under the same id**. Docs say Model-only (the guide even
+    says `.fbx`-only), but live (2026-10-26) a **Model from `.rbxmx`** (`model/x-rbxm`) took it (v2,
+    metadata updated too), and so did an **Image** (v2, moderation `Reviewing` then `Approved`; the
+    public thumbnail then rendered the v2 pixels). Image in-place updates are undocumented, so
+    `roblox_asset` still replaces non-Models on a content change; reconsider if Roblox documents it.
+    A metadata-only PATCH creates no new version. `GET …/versions` lists versions.
   - **Decal vs Image (verified live 2026-10-26):** uploading `assetType: Decal` also creates a
     separate **Image** asset (its own id, owned by the same creator, and it copies the decal's
     name and description). That image id is the texture id (`Decal.Texture` / `ImageLabel.Image`).

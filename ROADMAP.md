@@ -166,9 +166,32 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   `plan.DesiredResource.PreventDestroy` (+ `Config.PreventDestroy` for blocks with no desired
   instance); `Plan.CheckPreventDestroy` runs on the post-`--target` plan in `plan`/`apply`/`destroy`
   (destroy now loads the config, when it exists, to learn the setting). Config-only, never in state,
-  so removing the block lifts the protection (Terraform parity). The engine has no replace action,
-  so deletes are the only path guarded. **Deferred:** `ignore_changes`, `create_before_destroy`,
+  so removing the block lifts the protection (Terraform parity). Deletes and (since the replace
+  slice below) replaces are guarded. **Deferred:** `ignore_changes`, `create_before_destroy`,
   `replace_triggered_by`, `precondition`/`postcondition`.
+- **Replace (`-/+`, Terraform's "forces replacement") + `roblox_asset` content changes (GitHub #2
+  item 2, 2026-10-26), proven live:** new optional capability `provider.Replacer`
+  (`RequiresReplace(desired) []string`, attribute and/or trigger names; config-dependent so a Model
+  asset updates in place while an Image replaces) and `provider.ActionReplace`. Plan renders
+  `-/+ addr (replace)` with `name: old => new  # forces replacement`, counts a replace as one add +
+  one destroy (JSON: `action: "replace"`, `forces_replacement`, `summary.replace`). Apply is
+  **create-before-destroy**: create, commit the new id, then delete the old object (a failed create
+  leaves the current object untouched; a failed delete leaves the old object unmanaged and says
+  so). Dependents: plan marks references to anything getting a new id (replace, or a drift
+  re-create, which used to keep the stale id) as unknown, so they plan an update `(known after
+  apply)` and resolve the new id from the outputs map in the same apply. `prevent_destroy` blocks a
+  replace; `import {}` + forcing attribute = import then replace. A replace-forcing trigger with no
+  value in state (state written before the trigger existed) is **adopted as the baseline**, not a
+  replace, and apply backfills it on a no-op; import already records the baseline from config.
+  `roblox_asset`: `content_hash` trigger on `file`; non-Models replace, Models PATCH new content in
+  place (`AssetClient.UpdateContent`); model file types (`.fbx`/`.gltf`/`.glb`/`.rbxm`/`.rbxmx`)
+  default `asset_type` to `Model`. Live (`TestLiveAssetLifecycle`): PNG change → replace → new id →
+  converge; import of an asset with a different local file → no changes. **Follow-ups:** a Model's
+  metadata-only edit re-uploads unchanged content (Update isn't told which trigger fired: the
+  slice-8 trigger-aware Update deferral); no destroy-before-create mode (no resource needs it yet;
+  natural-key ids would); no "deposed" tracking, so an old object whose delete failed is orphaned
+  rather than retried; Image content PATCH worked live despite the docs (see CLAUDE.md), which
+  could replace the replace for Images if Roblox documents it.
 - **`roblox_experience_config` COMPLETE (Experience Config / `ConfigService`, BETA API), proven
   live:** first resource with a **map-valued attribute** — `entries` is a native-HCL map
   (`DynamicPseudoType`, so mixed bool/number/string/object values keep their types; `map(any)`
@@ -405,8 +428,9 @@ calls was removed, renamed or newly deprecated since the June spec. Corrections 
 - **Badges:** all badge endpoints are now marked EXPERIMENTAL; the create icon (`files`) is now
   optional (Roblox applies a default) — `icon_file` could become optional after a live probe.
 - **Assets:** `PATCH /assets/v1/assets/{id}` is **multipart + `updateMask` and returns an
-  Operation**; content updates are **Model-only** (Image/Decal/Audio/Video can't take new
-  content), so a stable-id in-place image update isn't possible. Audio create accepts
+  Operation**; content updates are documented as **Model-only** (Image/Decal/Audio/Video can't
+  take new content), so `roblox_asset` replaces non-Models on a content change. Live, an Image
+  took a content PATCH anyway (2026-10-26, see CLAUDE.md); undocumented, so not relied on. Audio create accepts
   mp3/ogg/wav/flac (≤7 min, ≤20 MB; 10 or 100 uploads/month by ID-verification). No Assets-API
   field exposes a Decal's underlying image id, but `toolbox-service/v2/assets/{decalId}`
   (`creator-store-product:read`) returns `asset.textureId`, including for the key owner's own

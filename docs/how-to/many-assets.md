@@ -98,9 +98,15 @@ roblox_asset.sprites["ui/gem.png"] will be imported (id 1234567890)
     ...
 ```
 
-Adopting **does not re-upload**. An asset's `file` and owner are create-only, so after the import
-the only possible differences are metadata (`display_name`, `description`), which `apply` updates in
-place. Ids may be strings or numbers in the JSON.
+Adopting **does not re-upload**. An asset's owner is create-only, and the import records a hash of
+each `file`'s current content as its baseline instead of comparing it with what was uploaded (the
+API can't read content back), so after the import the only possible differences are metadata
+(`display_name`, `description`), which `apply` updates in place. Ids may be strings or numbers in
+the JSON. From then on, editing a file replaces its asset (see
+[below](#changing-a-files-content-replaces-the-asset)).
+
+The same holds for assets created by a Baseplate version from before content changes were tracked:
+their state has no hash, so the first `apply` records the current file's hash and uploads nothing.
 
 To adopt one instance by hand instead, quote the address for your shell:
 
@@ -223,6 +229,35 @@ Run it after every `apply` (in CI, right after the apply step) so the module alw
 $ baseplate apply --target roblox_asset.sprites                       # every sprite
 $ baseplate apply --target 'roblox_asset.sprites["units/warship.png"]' # just one
 ```
+
+## Changing a file's content replaces the asset
+
+Baseplate hashes each asset's `file` (the `content_hash` trigger). When you edit an image or sound,
+the next plan replaces that asset:
+
+```console
+$ baseplate plan
+-/+ roblox_asset.sprites["ui/gem.png"] (replace)
+    display_name = ui/gem.png
+    ...
+    content_hash: 6843b53e… => abeeb0b9…  # forces replacement
+
+Plan: 0 to import, 1 to add, 0 to change, 1 to destroy.
+```
+
+Open Cloud can't put new content into an existing Image, Decal or Audio asset, so `apply` uploads
+a new asset, records its **new id** in state, then drops the old asset (unmanaged and left on
+Roblox, as on destroy). Anything that references the asset's `id` is updated in the same apply,
+and `baseplate show --json` reports the new id, so regenerating the Luau module after `apply`
+picks it up. Each replace counts against Roblox's upload limits (watch the monthly audio cap).
+
+- A **Model** asset (`.fbx`/`.gltf`/`.glb`/`.rbxm`/`.rbxmx`) takes new content in place instead:
+  `apply` uploads a new version under the same id, shown as an ordinary update.
+- Moving or renaming a file without changing its bytes doesn't change the hash. (It can still
+  change the `for_each` key, which is covered next.)
+- `lifecycle { prevent_destroy = true }` blocks a replace, as in Terraform.
+- `--target` limits a replace like anything else. If you target only the asset, a resource that
+  references its id is updated on the next untargeted run.
 
 ## Renaming or moving a file
 
