@@ -242,17 +242,26 @@ $ baseplate plan
     ...
     content_hash: 6843b53e… => abeeb0b9…  # forces replacement
 
-Plan: 0 to import, 1 to add, 0 to change, 1 to destroy.
+    # old object (id 1234567890) is left in place, no longer managed
+
+Plan: 0 to import, 1 to add, 0 to change, 0 to destroy.
 ```
 
 Open Cloud can't put new content into an existing Image, Decal or Audio asset, so `apply` uploads
-a new asset, records its **new id** in state, then drops the old asset (unmanaged and left on
-Roblox, as on destroy). Anything that references the asset's `id` is updated in the same apply,
-and `baseplate show --json` reports the new id, so regenerating the Luau module after `apply`
-picks it up. Each replace counts against Roblox's upload limits (watch the monthly audio cap).
+a new asset and records its **new id** in state. The old asset is **left in place** on Roblox (it
+is never archived, not even audio) and is no longer managed: servers that are still running keep
+loading `rbxassetid://<old id>` until you republish the place. Anything that references the
+asset's `id` is updated in the same apply, and `baseplate show --json` reports the new id, so
+regenerating the Luau module after `apply` picks it up. Each replace counts against Roblox's upload
+limits (watch the monthly audio cap).
 
 - A **Model** asset (`.fbx`/`.gltf`/`.glb`/`.rbxm`/`.rbxmx`) takes new content in place instead:
-  `apply` uploads a new version under the same id, shown as an ordinary update.
+  `apply` uploads a new version under the same id, shown as an ordinary update. Editing only its
+  name or description doesn't re-upload the content.
+- Changing `asset_type`, or the file extension when `asset_type` is omitted (e.g. `.png` to `.fbx`),
+  also replaces: Roblox can't change an existing asset's type.
+- If the source files aren't on the machine running `plan` (e.g. CI), assets already in state keep
+  their recorded hashes and `plan` warns that content changes can't be detected.
 - Moving or renaming a file without changing its bytes doesn't change the hash. (It can still
   change the `for_each` key, which is covered next.)
 - `lifecycle { prevent_destroy = true }` blocks a replace, as in Terraform.

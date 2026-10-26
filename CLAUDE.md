@@ -107,7 +107,8 @@ resource's `Computed()` so they don't diff. `Computed()` = "excluded from diff."
     says `.fbx`-only), but live (2026-10-26) a **Model from `.rbxmx`** (`model/x-rbxm`) took it (v2,
     metadata updated too), and so did an **Image** (v2, moderation `Reviewing` then `Approved`; the
     public thumbnail then rendered the v2 pixels). Image in-place updates are undocumented, so
-    `roblox_asset` still replaces non-Models on a content change; reconsider if Roblox documents it.
+    `roblox_asset` still replaces non-Models on a content change (the `contentInPlace` set in
+    `asset.go` is the switch); reconsider if Roblox documents it.
     A metadata-only PATCH creates no new version. `GET …/versions` lists versions.
   - **Decal vs Image (verified live 2026-10-26):** uploading `assetType: Decal` also creates a
     separate **Image** asset (its own id, owned by the same creator, and it copies the decal's

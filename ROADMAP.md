@@ -82,9 +82,8 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   flat decode. No DELETE surface → `destroy` sets `enabled=false` and unmanages, same pattern as
   `roblox_game_pass`/`roblox_developer_product`. Live lifecycle verified end-to-end (create→
   converge→update name+disable→converge→icon change via the `content_hash` Trigger→converge→
-  disable+unmanage destroy) in `internal/provider/roblox/live_badge_test.go`. Deferred: `Update` is
-  stateless w.r.t. prior triggers, so a name-only edit still re-uploads/re-moderates the icon (see
-  the slice-8 deferral note in the Roadmap section below — a general engine fix, not badge-specific).
+  disable+unmanage destroy) in `internal/provider/roblox/live_badge_test.go`. A name-only edit no
+  longer re-uploads the icon (fixed by `provider.TriggerAwareUpdater`, in the replace slice).
   See `docs/superpowers/specs/2026-07-13-baseplate-phase2-badge-design.md`.
 - **`roblox_experience_event` (experience / virtual events) — SHIPPED, proven live:** live-ops
   events on the EXPERIMENTAL `virtual-events/v3` API (create on the universe collection; read/PATCH/
@@ -169,46 +168,36 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   so removing the block lifts the protection (Terraform parity). Deletes and (since the replace
   slice below) replaces are guarded. **Deferred:** `ignore_changes`, `create_before_destroy`,
   `replace_triggered_by`, `precondition`/`postcondition`.
-- **Replace (`-/+`, Terraform's "forces replacement") + `roblox_asset` content changes (GitHub #2
-  item 2, 2026-10-26), proven live:** new optional capability `provider.Replacer`
-  (`RequiresReplace(desired) []string`, attribute and/or trigger names; config-dependent so a Model
-  asset updates in place while an Image replaces) and `provider.ActionReplace`. Plan renders
-  `-/+ addr (replace)` with `name: old => new  # forces replacement`, counts a replace as one add +
-  one destroy (JSON: `action: "replace"`, `forces_replacement`, `summary.replace`). Apply is
-  **create-before-destroy**: create, commit the new id, then delete the old object (a failed create
-  leaves the current object untouched; a failed delete leaves the old object unmanaged and says
-  so). Dependents: plan marks references to anything getting a new id (replace, or a drift
-  re-create, which used to keep the stale id) as unknown, so they plan an update `(known after
-  apply)` and resolve the new id from the outputs map in the same apply. `prevent_destroy` blocks a
-  replace; `import {}` + forcing attribute = import then replace. A replace-forcing trigger with no
-  value in state (state written before the trigger existed) is **adopted as the baseline**, not a
-  replace, and apply backfills it on a no-op; import already records the baseline from config.
-  `roblox_asset`: `content_hash` trigger on `file`; non-Models replace, Models PATCH new content in
-  place (`AssetClient.UpdateContent`); model file types (`.fbx`/`.gltf`/`.glb`/`.rbxm`/`.rbxmx`)
-  default `asset_type` to `Model`. Live (`TestLiveAssetLifecycle`): PNG change → replace → new id →
-  converge; import of an asset with a different local file → no changes. **Follow-ups:** a Model's
-  metadata-only edit re-uploads unchanged content (Update isn't told which trigger fired: the
-  slice-8 trigger-aware Update deferral); no destroy-before-create mode (no resource needs it yet;
-  natural-key ids would); no "deposed" tracking, so an old object whose delete failed is orphaned
-  rather than retried; Image content PATCH worked live despite the docs (see CLAUDE.md), which
-  could replace the replace for Images if Roblox documents it.
-- **`roblox_experience_config` COMPLETE (Experience Config / `ConfigService`, BETA API), proven
-  live:** first resource with a **map-valued attribute** — `entries` is a native-HCL map
-  (`DynamicPseudoType`, so mixed bool/number/string/object values keep their types; `map(any)`
-  would unify them to string). Writes are `PATCH draft` → `publish` (not `draft:overwrite`, which
-  deletes any rule/branch it isn't sent). The resource is authoritative for base keys but **never
-  touches conditional rules or the conditional branches of kept keys**. Safety rails: refuses when a
-  draft is pending; the first create refuses if live keys aren't declared (import first); `destroy`
-  (Terraform-aligned) removes every plain key and publishes, leaving conditional rules alone — no
-  DELETE API exists, so it reuses apply's PATCH-null path and checks; protect production config
-  with `lifecycle { prevent_destroy = true }` (see `docs/config-reference.md#lifecycle`).
-  New `opencloud.ExperienceConfigClient`. Engine fixes for structural attrs: diff treats identical
-  JSON encodings as equal (map vs object, list vs tuple), plan renders objects as JSON, config
-  rejects references nested in a map (`IsWhollyKnown`), `configgen.zeroValue` handles non-primitive
-  types, resource docs render `any`; `parseAPIError` falls back to the raw body when there's no
-  `{code,message}`. Live lifecycle verified (refused unsafe create → import adopt removing an
-  undeclared key while keeping a rule + branch → converge → update → converge → destroy removed every
-  plain key and kept the rule). See the CLAUDE.md "spec gotchas" for the live-verified wire behaviour.
+- **Replace (`-/+`, Terraform's "forces replacement") + `roblox_asset` content/type changes (GitHub
+  #2 item 2, 2026-10-26), proven live:** new optional capability `provider.Replacer`
+  (`RequiresReplace(desired, actual) []string`: attribute and/or trigger names; it sees the remote
+  object so the current asset type decides whether content goes in place; `ReplaceAbandons() bool`:
+  leave the old object in place instead of deleting it) and `provider.ActionReplace`. Plan renders
+  `-/+ addr (replace)`, `name: old => new  # forces replacement`, and a line saying whether the old
+  object is destroyed or left in place; a replace counts as one add, plus one destroy unless
+  abandoned (JSON: `action: "replace"`, `forces_replacement`, `old_id`, `abandons_old`,
+  `summary.replace`). Apply is **create-before-destroy**: triggers computed first (no orphan if they
+  fail), create, commit the new id, then delete the old object or (abandon) just drop it; a failed
+  create leaves the current object untouched, a failed delete leaves the old object unmanaged and
+  says so. Dependents: references to anything getting a new id (replace, drift re-create, import then
+  replace) plan as unknown, so dependents update `(known after apply)` in the same apply, even when
+  the reference sits in a Computed attr; after import blocks resolve, dependents of an import target
+  adopted as-is are re-planned against the imported id. `prevent_destroy` blocks a replace;
+  `import {}` + forcing attribute = import then replace. Missing baselines: a replace-forcing trigger
+  with no value in state is adopted (flagged on the Change, backfilled by apply). Missing inputs:
+  `provider.TriggerUnavailableError` (asset/place/badge on a missing file) keeps the recorded value
+  for an in-state resource and warns; a create still fails. New `provider.TriggerAwareUpdater` (see
+  the slice-8 deferral, now closed). `roblox_asset`: `content_hash` trigger; `asset_type` always
+  forces replacement (a `Normalizer` fills the inferred default, so `.png` -> `.fbx` replaces too);
+  content changes replace unless the asset's current type is in `contentInPlace` (Model only; adding
+  `"Image"` is the one-line switch to stable-id image updates); replaces abandon the old asset (never
+  archive: live servers still load the old id); Model content via `AssetClient.UpdateContent` only
+  when the hash changed. Live (`TestLiveAssetLifecycle`): PNG change -> replace -> new id, old asset
+  still readable -> converge; import with a different local file -> no changes. **Follow-ups:** no
+  destroy-before-create mode (natural-key ids would need one); no "deposed" tracking, so an old object
+  whose delete failed is orphaned rather than retried; Image content PATCH worked live despite the
+  docs (see CLAUDE.md), pending a maintainer decision on stable-id image updates; the planned
+  apply-time asset type-mismatch error is superseded for plans (a mismatch now plans a replace).
 - Next: **Phase 2** remaining slices (see Roadmap below).
 
 Read `docs/superpowers/specs/2026-07-03-baseplate-phase1-roblox-provider-design.md` for the
@@ -278,15 +267,10 @@ Phase 1 design + rationale, and `docs/superpowers/plans/` for the executed task-
     attr today, `secret.value`, is Required); `roblox_asset` "one-of" `creator_user_id`/
     `creator_group_id` is omitted from generated config (a `# TODO`-worthy gap the generic emitter
     can't flag — a future `GenerateHints()` capability could).
-  - **From slice 8 (`roblox_badge`) — trigger-aware Update (own engine slice, general/reusable):**
-    `Update(ctx, id, desired)` is stateless — it never receives the prior triggers — so a resource
-    that backs an upload with a `content_hash` Trigger *and* also has normal diffable attrs (badge:
-    icon trigger + name/description/enabled) can't tell which fired, and must re-run the upload on
-    *every* Update (badge re-uploads/re-moderates its icon even on a name-only edit; no correctness
-    impact, just churn). Fix: an optional capability that passes the old triggers map into `Update`
-    so the upload fires only when its trigger actually changed. Deliberately NOT folded into the
-    badge slice — it's a general engine capability. (`roblox_place` doesn't hit this because it is
-    all-computed: the trigger is its *only* change signal.)
+  - ~~**From slice 8 (`roblox_badge`) — trigger-aware Update**~~ DONE in the replace slice: the
+    optional `provider.TriggerAwareUpdater` (`UpdateWithTriggers(ctx, id, desired, prior)`) gets the
+    triggers recorded before the update; `roblox_badge` re-uploads its icon and `roblox_asset` (Model)
+    re-sends its content only when the `content_hash` changed.
   - **`roblox_experience_event` follow-ups:** re-add `categories` if Roblox fixes
     `InvalidCategories` (re-probe: every value/rank/`[]` was rejected on 2026-10-23, and a create
     with categories still created the event, so never send them on create until that's fixed);
