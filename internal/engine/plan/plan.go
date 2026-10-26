@@ -68,9 +68,17 @@ type Plan struct {
 	// resources; callers add blocks that have no desired instance (destroy,
 	// or an empty for_each) from config. Checked by CheckPreventDestroy.
 	PreventDestroy []string
+	// Moves lists the state entries that moved {} blocks relocated before this
+	// plan was built (see ApplyMoves). They are changes in their own right:
+	// apply persists them even when nothing else changes. --target doesn't
+	// filter them (they're state-only and idempotent).
+	Moves []Move
 }
 
 func (p *Plan) HasChanges() bool {
+	if len(p.Moves) > 0 {
+		return true
+	}
 	for _, c := range p.Changes {
 		if c.Action != provider.ActionNoop || c.ImportID != "" {
 			return true
@@ -188,7 +196,7 @@ func checkMixedKeys(desired []DesiredResource) error {
 	for _, d := range desired {
 		base := addr.Format(d.Type, d.Name, "")
 		if was, seen := keyed[base]; seen && was != (d.Key != "") {
-			return fmt.Errorf("%s is declared both with and without for_each; a resource is either singular or keyed (converting between them in place needs `moved` blocks, which are not supported yet)", base)
+			return fmt.Errorf("%s is declared both with and without for_each; a resource is either singular or keyed (to convert one into the other, declare it once and add a moved block, e.g. moved { from = %s  to = %s[\"key\"] })", base, base, base)
 		}
 		keyed[base] = d.Key != ""
 	}

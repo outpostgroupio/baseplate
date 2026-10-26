@@ -32,7 +32,15 @@ type JSONChange struct {
 	ImportID string     `json:"import_id,omitempty"`
 	Attrs    []JSONAttr `json:"attributes,omitempty"`
 }
+
+// JSONMove is one state entry a moved {} block relocated.
+type JSONMove struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
 type Summary struct {
+	Move    int `json:"move"`
 	Import  int `json:"import"`
 	Add     int `json:"add"`
 	Change  int `json:"change"`
@@ -61,6 +69,18 @@ func (p *Plan) JSONChanges() []JSONChange {
 	return out
 }
 
+// JSONMoves renders the plan's moves; nil when there are none.
+func (p *Plan) JSONMoves() []JSONMove {
+	if len(p.Moves) == 0 {
+		return nil
+	}
+	out := make([]JSONMove, len(p.Moves))
+	for i, m := range p.Moves {
+		out[i] = JSONMove{From: m.From, To: m.To}
+	}
+	return out
+}
+
 // Warnings flags plan shapes that are legal but probably unintended. First, a
 // for_each resource that declares zero instances while state still holds some
 // (e.g. a fileset that matched nothing): every instance is destroyed. Second,
@@ -72,7 +92,10 @@ func (p *Plan) JSONChanges() []JSONChange {
 // the warning names the resource and the counts. The result is nil when there
 // is nothing to warn about; order is by resource address.
 func (p *Plan) Warnings() []string {
-	type counts struct{ del, add int }
+	type counts struct {
+		del, add     int
+		delAt, addAt string // the first deleted / created instance
+	}
 	byRes := map[string]*counts{}
 	for _, c := range p.Changes {
 		if c.ImportID != "" || (c.Action != provider.ActionDelete && c.Action != provider.ActionCreate) {
@@ -85,8 +108,14 @@ func (p *Plan) Warnings() []string {
 			byRes[base] = n
 		}
 		if c.Action == provider.ActionDelete {
+			if n.del == 0 {
+				n.delAt = c.Address
+			}
 			n.del++
 		} else {
+			if n.add == 0 {
+				n.addAt = c.Address
+			}
 			n.add++
 		}
 	}
@@ -107,18 +136,26 @@ func (p *Plan) Warnings() []string {
 	}
 	for _, b := range bases {
 		n := byRes[b]
+		// With exactly one of each, the pair is almost certainly the rename,
+		// so the example names the real addresses; otherwise it can't pair
+		// them up and shows the shape.
+		from, to := b+`["old-key"]`, b+`["new-key"]`
+		if n.del == 1 && n.add == 1 {
+			from, to = n.delAt, n.addAt
+		}
 		out = append(out, fmt.Sprintf(
 			"%s: this plan destroys %d instance(s) and creates %d. Each created instance is a new remote object "+
 				"with a new id (for roblox_asset, a new upload), so if a for_each key was renamed the object is "+
-				"replaced, not moved. moved {} blocks, which will rename an instance in place, are planned.",
-			b, n.del, n.add))
+				"replaced, not moved. To keep the existing object and its id, declare the rename with a moved block, "+
+				"e.g. moved { from = %s  to = %s } (moved blocks also take for_each, to move many keys at once).",
+			b, n.del, n.add, from, to))
 	}
 	return out
 }
 
 // Summary counts changes by action, matching the RenderText footer.
 func (p *Plan) Summary() Summary {
-	var s Summary
+	s := Summary{Move: len(p.Moves)}
 	for _, c := range p.Changes {
 		if c.ImportID != "" {
 			s.Import++
@@ -139,6 +176,9 @@ func (p *Plan) Summary() Summary {
 func (p *Plan) RenderText(color bool) string {
 	var b strings.Builder
 	var add, chg, del, imp int
+	for _, m := range p.Moves {
+		fmt.Fprintf(&b, "~ %s has moved to %s\n", m.From, m.To)
+	}
 	for _, c := range p.Changes {
 		if c.ImportID != "" {
 			imp++
@@ -206,7 +246,11 @@ func (p *Plan) RenderText(color bool) string {
 	for _, w := range p.Warnings() {
 		fmt.Fprintf(&b, "\nWarning: %s\n", w)
 	}
-	fmt.Fprintf(&b, "\nPlan: %d to import, %d to add, %d to change, %d to destroy.\n", imp, add, chg, del)
+	fmt.Fprintf(&b, "\nPlan: %d to import, %d to add, %d to change, %d to destroy", imp, add, chg, del)
+	if len(p.Moves) > 0 {
+		fmt.Fprintf(&b, ", %d to move", len(p.Moves))
+	}
+	b.WriteString(".\n")
 	return b.String()
 }
 

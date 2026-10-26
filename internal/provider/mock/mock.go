@@ -17,6 +17,7 @@ type Provider struct {
 	store   map[string]provider.Attributes
 	seq     int
 	creates int
+	deletes int
 }
 
 func New() *Provider {
@@ -47,6 +48,13 @@ func (p *Provider) Creates() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.creates
+}
+
+// Deletes returns how many Delete calls the provider has served.
+func (p *Provider) Deletes() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.deletes
 }
 
 func (p *Provider) Resources() map[string]provider.Resource {
@@ -118,6 +126,7 @@ func (r *res) Update(_ context.Context, id string, desired provider.Attributes) 
 func (r *res) Delete(_ context.Context, id string) error {
 	r.p.mu.Lock()
 	defer r.p.mu.Unlock()
+	r.p.deletes++
 	delete(r.p.store, id)
 	return nil
 }

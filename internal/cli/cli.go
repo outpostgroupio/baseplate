@@ -117,6 +117,7 @@ type validateResult struct {
 }
 
 type planResult struct {
+	Moves    []plan.JSONMove   `json:"moves,omitempty"`
 	Changes  []plan.JSONChange `json:"changes"`
 	Summary  plan.Summary      `json:"summary"`
 	Warnings []string          `json:"warnings,omitempty"`
@@ -129,6 +130,7 @@ type importResult struct {
 
 type applyResult struct {
 	Applied int               `json:"applied"`
+	Moves   []plan.JSONMove   `json:"moves,omitempty"`
 	Changes []plan.JSONChange `json:"changes"`
 	// Restarts lists the server restarts requested by apply --restart-servers.
 	Restarts []restartResult `json:"restarts,omitempty"`
@@ -250,10 +252,16 @@ func run(args []string, s streams) int {
 		if generateConfigOut != "" {
 			toResolve = declaredImports(imports, declared)
 		}
+		// Moves rewrite the in-memory state only; plan never writes it back.
+		moves, err := plan.ApplyMoves(st, cfg.Moved)
+		if err != nil {
+			return err
+		}
 		pl, err := plan.Build(context.Background(), p, st, desired)
 		if err != nil {
 			return err
 		}
+		pl.Moves = moves
 		pl.EmptyForEach = cfg.EmptyForEach
 		if err := plan.ResolveImports(context.Background(), p, st, pl, toResolve); err != nil {
 			return err
@@ -270,7 +278,7 @@ func run(args []string, s streams) int {
 		}
 		if err := output.Emit(s.out, fmtOf(jsonOut), "plan",
 			pl.RenderText(true),
-			planResult{Changes: pl.JSONChanges(), Summary: pl.Summary(), Warnings: pl.Warnings()}); err != nil {
+			planResult{Moves: pl.JSONMoves(), Changes: pl.JSONChanges(), Summary: pl.Summary(), Warnings: pl.Warnings()}); err != nil {
 			return err
 		}
 		if pl.HasChanges() {
@@ -363,21 +371,23 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 	var desired []plan.DesiredResource
 	var imports []plan.ImportBlock
 	var emptyForEach, protected []string
+	var moved []plan.MovedBlock
 	if !destroy {
 		cfg, err := config.LoadConfig(cfgPath, p)
 		if err != nil {
 			return err
 		}
-		desired, imports, emptyForEach, protected = cfg.Resources, cfg.Imports, cfg.EmptyForEach, cfg.PreventDestroy
+		desired, imports, emptyForEach, protected, moved = cfg.Resources, cfg.Imports, cfg.EmptyForEach, cfg.PreventDestroy, cfg.Moved
 	} else if _, statErr := os.Stat(cfgPath); statErr == nil {
 		// destroy plans against no desired resources, but still reads the
 		// config (when there is one) for lifecycle.prevent_destroy. As in
-		// Terraform, the protection lives only in config.
+		// Terraform, the protection lives only in config. Moves apply too, so
+		// a protected resource is checked under its current address.
 		cfg, err := config.LoadConfig(cfgPath, p)
 		if err != nil {
 			return err
 		}
-		protected = cfg.PreventDestroy
+		protected, moved = cfg.PreventDestroy, cfg.Moved
 	}
 	b, localFallback, err := openBackend(cfgPath, statePath)
 	if err != nil {
@@ -405,10 +415,18 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 	if err != nil {
 		return err
 	}
+	// Moves are applied to the in-memory state under the lock; apply.Apply
+	// persists them (even when nothing else changes). --target doesn't limit
+	// them: they are state-only and idempotent.
+	moves, err := plan.ApplyMoves(st, moved)
+	if err != nil {
+		return err
+	}
 	pl, err := plan.Build(context.Background(), p, st, desired)
 	if err != nil {
 		return err
 	}
+	pl.Moves = moves
 	pl.EmptyForEach = emptyForEach
 	if err := plan.ResolveImports(context.Background(), p, st, pl, imports); err != nil {
 		return err
@@ -450,7 +468,7 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 		text += restartText(restarts)
 	}
 	return output.Emit(s.out, format, verb, text,
-		applyResult{Applied: len(pl.Changes), Changes: pl.JSONChanges(), Restarts: restarts})
+		applyResult{Applied: len(pl.Changes), Moves: pl.JSONMoves(), Changes: pl.JSONChanges(), Restarts: restarts})
 }
 
 // importRun adopts an existing resource (declared in config) into state by id,
