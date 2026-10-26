@@ -36,7 +36,11 @@ func (p *Plan) CheckPreventDestroy() error {
 		case provider.ActionDelete:
 			errs = append(errs, fmt.Errorf("Instance cannot be destroyed: %s has lifecycle.prevent_destroy set, but the plan calls for this resource to be destroyed. To avoid this error and continue with the plan, either disable lifecycle.prevent_destroy or reduce the scope of the plan using the --target flag.", c.Address))
 		case provider.ActionReplace:
-			errs = append(errs, fmt.Errorf("Instance cannot be destroyed: %s has lifecycle.prevent_destroy set, but the plan calls for this resource to be replaced (a change to %s forces replacement, which destroys the current object). To avoid this error and continue with the plan, either disable lifecycle.prevent_destroy, revert the change, or reduce the scope of the plan using the --target flag.", c.Address, strings.Join(c.Replace, ", ")))
+			fate := "destroys the current object"
+			if c.AbandonsOld {
+				fate = "leaves the current object unmanaged"
+			}
+			errs = append(errs, fmt.Errorf("Instance cannot be destroyed: %s has lifecycle.prevent_destroy set, but the plan calls for this resource to be replaced (a change to %s forces replacement, which %s). To avoid this error and continue with the plan, either disable lifecycle.prevent_destroy, revert the change, or reduce the scope of the plan using the --target flag.", c.Address, strings.Join(c.Replace, ", "), fate))
 		}
 	}
 	return errors.Join(errs...)

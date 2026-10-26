@@ -35,6 +35,10 @@ type JSONChange struct {
 	// ForcesReplacement names the attributes/triggers that force a replace
 	// (action "replace").
 	ForcesReplacement []string `json:"forces_replacement,omitempty"`
+	// OldID is the id of the object a replace supersedes, and AbandonsOld is
+	// true when that object is left in place (unmanaged) instead of destroyed.
+	OldID       string `json:"old_id,omitempty"`
+	AbandonsOld bool   `json:"abandons_old,omitempty"`
 }
 
 // JSONMove is one state entry a moved {} block relocated.
@@ -60,6 +64,9 @@ func (p *Plan) JSONChanges() []JSONChange {
 	out := make([]JSONChange, 0, len(p.Changes))
 	for _, c := range p.Changes {
 		jc := JSONChange{Address: c.Address, Key: c.Key, Action: c.Action.String(), ImportID: c.ImportID, ForcesReplacement: c.Replace}
+		if c.Action == provider.ActionReplace {
+			jc.OldID, jc.AbandonsOld = c.ID, c.AbandonsOld
+		}
 		sensitive := map[string]bool{}
 		for _, k := range c.Sensitive {
 			sensitive[k] = true
@@ -157,12 +164,17 @@ func (p *Plan) Warnings() []string {
 				"e.g. moved { from = %s  to = %s } (moved blocks also take for_each, to move many keys at once).",
 			b, n.del, n.add, from, to))
 	}
+	for _, c := range p.Changes {
+		if c.Warning != "" {
+			out = append(out, c.Warning)
+		}
+	}
 	return out
 }
 
 // Summary counts changes by action, matching the RenderText footer. An import
-// counts only as an import, unless it is then replaced (a new object is
-// created and the adopted one destroyed).
+// counts only as an import, unless it is then replaced. A replace counts as an
+// add, plus a destroy unless the old object is left in place (AbandonsOld).
 func (p *Plan) Summary() Summary {
 	s := Summary{Move: len(p.Moves)}
 	for _, c := range p.Changes {
@@ -181,8 +193,10 @@ func (p *Plan) Summary() Summary {
 			s.Destroy++
 		case provider.ActionReplace:
 			s.Add++
-			s.Destroy++
 			s.Replace++
+			if !c.AbandonsOld {
+				s.Destroy++
+			}
 		}
 	}
 	return s
@@ -218,6 +232,9 @@ func (p *Plan) RenderText(color bool) string {
 					continue
 				}
 				fmt.Fprintf(&b, "    %s: %s => %s%s\n", d.Name, ctyString(d.Old), ctyString(d.New), note)
+			}
+			if c.Action == provider.ActionReplace {
+				b.WriteString(oldObjectNote(c))
 			}
 			continue
 		}
@@ -274,6 +291,9 @@ func (p *Plan) RenderText(color bool) string {
 			}
 			fmt.Fprintf(&b, "    %s: %s => %s%s\n", d.Name, ctyString(d.Old), ctyString(d.New), forcesNote)
 		}
+		if c.Action == provider.ActionReplace {
+			b.WriteString(oldObjectNote(c))
+		}
 	}
 	for _, w := range p.Warnings() {
 		fmt.Fprintf(&b, "\nWarning: %s\n", w)
@@ -285,6 +305,14 @@ func (p *Plan) RenderText(color bool) string {
 	}
 	b.WriteString(".\n")
 	return b.String()
+}
+
+// oldObjectNote says what a replace does with the object it supersedes.
+func oldObjectNote(c Change) string {
+	if c.AbandonsOld {
+		return fmt.Sprintf("    # old object (id %s) is left in place, no longer managed\n", c.ID)
+	}
+	return fmt.Sprintf("    # old object (id %s) is destroyed after the new one is created\n", c.ID)
 }
 
 // forcesNote marks the attribute/trigger lines that force a replace.

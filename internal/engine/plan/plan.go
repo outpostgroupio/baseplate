@@ -58,6 +58,15 @@ type Change struct {
 	// Replace names the attributes and/or triggers whose change forces this
 	// replace (Action == ActionReplace); see provider.Replacer.
 	Replace []string
+	// AbandonsOld is set on a replace whose old object is left in place (only
+	// dropped from state) rather than deleted; see provider.Replacer.
+	AbandonsOld bool
+	// BackfillTriggers names triggers with no value recorded in state that
+	// plan adopted as a baseline instead of diffing; apply records them.
+	BackfillTriggers []string
+	// Warning, when set, is a plan warning about this change (e.g. a trigger
+	// input that is missing, so changes to it can't be detected).
+	Warning string
 }
 
 type Plan struct {
@@ -76,6 +85,11 @@ type Plan struct {
 	// apply persists them even when nothing else changes. --target doesn't
 	// filter them (they're state-only and idempotent).
 	Moves []Move
+
+	// desired and pending carry Build's inputs to ResolveImports, which
+	// re-plans dependents of import targets (see replanDependents).
+	desired map[string]DesiredResource
+	pending map[string]bool
 }
 
 func (p *Plan) HasChanges() bool {
@@ -128,11 +142,12 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 		return nil, err
 	}
 
-	pl := &Plan{PreventDestroy: protectedBlocks(desired)}
+	pl := &Plan{PreventDestroy: protectedBlocks(desired), desired: byAddr}
 	// newID marks the addresses this plan gives a new remote object (create or
 	// replace). Their outputs, the id above all, aren't known until apply, so a
 	// dependent that references one is planned against an unknown value.
 	newID := map[string]bool{}
+	pl.pending = newID
 	for _, addr := range order {
 		if r, isDelete := deletes[addr]; isDelete {
 			pl.Changes = append(pl.Changes, Change{
@@ -169,34 +184,14 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 		if err != nil {
 			return nil, err
 		}
-		// Resolve references from existing state so a referenced attribute
-		// (e.g. an id) diffs against its real resolved value, not null — this
-		// keeps re-plans convergent after apply.
-		resolved, err := normalize(resources[d.Type], addr, mergeRefsFromState(d, s))
+		c, err := planInState(resources[d.Type], d, st, actual, s, newID, nil)
 		if err != nil {
 			return nil, err
 		}
-		// A reference to a resource this plan creates or replaces resolves to
-		// a value that only exists after apply (e.g. a re-uploaded asset's new
-		// id), so diff against an unknown: the dependent is updated in the same
-		// apply, once the new value is in the outputs map.
-		effectiveDesired := withPendingRefs(resolved, d.Refs, newID)
-		forcing := replaceKeys(resources[d.Type], effectiveDesired)
-		diffs := diffAttrs(actual, effectiveDesired, resources[d.Type].Computed())
-		td, err := triggerDiffs(resources[d.Type], resolved, st, forcing)
-		if err != nil {
-			return nil, err
-		}
-		diffs = append(diffs, td...)
-		action, replace := classify(diffs, forcing)
-		if action == provider.ActionReplace {
+		if c.Action == provider.ActionReplace {
 			newID[addr] = true
 		}
-		pl.Changes = append(pl.Changes, Change{
-			Address: addr, Type: d.Type, Name: d.Name, Key: d.Key, ID: st.ID, Action: action,
-			Desired: d.Attributes, Actual: actual, AttrDiffs: diffs, DependsOn: d.DependsOn, Refs: d.Refs,
-			Sensitive: sensitiveAttrs(resources[d.Type]), Replace: replace,
-		})
+		pl.Changes = append(pl.Changes, c)
 	}
 	// deletes must run in reverse dependency order; re-sort delete block.
 	reorderDeletes(pl)
@@ -222,6 +217,13 @@ func checkMixedKeys(desired []DesiredResource) error {
 // from already-applied state, so the diff compares against real resolved values
 // (keeping re-plans convergent). Unresolvable refs are left absent.
 func mergeRefsFromState(d DesiredResource, s *state.State) provider.Attributes {
+	return mergeRefs(d, s, nil)
+}
+
+// mergeRefs is mergeRefsFromState plus importIDs: the id an import target
+// will have once adopted (it isn't in state yet), so a reference to its id
+// resolves to a known value.
+func mergeRefs(d DesiredResource, s *state.State, importIDs map[string]string) provider.Attributes {
 	out := make(provider.Attributes, len(d.Attributes)+len(d.Refs))
 	for k, v := range d.Attributes {
 		out[k] = v
@@ -229,6 +231,9 @@ func mergeRefsFromState(d DesiredResource, s *state.State) provider.Attributes {
 	for attr, ref := range d.Refs {
 		target, ok := s.Find(ref.Address)
 		if !ok {
+			if id, imported := importIDs[ref.Address]; imported && ref.Attr == "id" {
+				out[attr] = cty.StringVal(id)
+			}
 			continue
 		}
 		if ref.Attr == "id" {
@@ -293,111 +298,6 @@ func sameJSON(a, b cty.Value) bool {
 		return false
 	}
 	return string(aj) == string(bj)
-}
-
-// withPendingRefs returns desired with every referenced attribute whose target
-// gets a new remote object in this plan (pending) replaced by an unknown value.
-// desired is not mutated.
-func withPendingRefs(desired provider.Attributes, refs map[string]provider.Ref, pending map[string]bool) provider.Attributes {
-	var hit bool
-	for _, ref := range refs {
-		if pending[ref.Address] {
-			hit = true
-			break
-		}
-	}
-	if !hit {
-		return desired
-	}
-	out := make(provider.Attributes, len(desired)+len(refs))
-	for k, v := range desired {
-		out[k] = v
-	}
-	for attr, ref := range refs {
-		if pending[ref.Address] {
-			out[attr] = cty.UnknownVal(cty.DynamicPseudoType)
-		}
-	}
-	return out
-}
-
-// replaceKeys returns the set of attribute/trigger names whose change forces a
-// replace of this resource (provider.Replacer), or nil.
-func replaceKeys(res provider.Resource, desired provider.Attributes) map[string]bool {
-	r, ok := res.(provider.Replacer)
-	if !ok {
-		return nil
-	}
-	keys := r.RequiresReplace(desired)
-	if len(keys) == 0 {
-		return nil
-	}
-	out := make(map[string]bool, len(keys))
-	for _, k := range keys {
-		out[k] = true
-	}
-	return out
-}
-
-// classify picks the action for an in-state resource from its diffs: noop when
-// nothing differs, replace when any differing name forces replacement (those
-// names are returned, sorted), update otherwise.
-func classify(diffs []AttrDiff, forcing map[string]bool) (provider.ChangeAction, []string) {
-	if len(diffs) == 0 {
-		return provider.ActionNoop, nil
-	}
-	var replace []string
-	for _, d := range diffs {
-		if forcing[d.Name] {
-			replace = append(replace, d.Name)
-		}
-	}
-	if len(replace) > 0 {
-		sort.Strings(replace)
-		return provider.ActionReplace, replace
-	}
-	return provider.ActionUpdate, nil
-}
-
-// triggerDiffs compares a Triggerable resource's config-computed triggers against
-// the triggers recorded in state. Each changed key becomes an AttrDiff that forces
-// an Update, even when no declared attribute differs (e.g. a place whose file
-// content changed). Resources that are not Triggerable yield no diffs.
-//
-// A replace-forcing key (forcing) with no value recorded in state is skipped:
-// the state predates the trigger, so there is nothing to compare with, and
-// replacing every such object (e.g. each asset uploaded before roblox_asset had
-// a content_hash) would be destructive. The current value becomes the baseline
-// when apply next writes the resource (see apply's trigger backfill).
-func triggerDiffs(res provider.Resource, desired provider.Attributes, st *state.Resource, forcing map[string]bool) ([]AttrDiff, error) {
-	t, ok := res.(provider.Triggerable)
-	if !ok {
-		return nil, nil
-	}
-	want, err := t.Triggers(desired)
-	if err != nil {
-		return nil, err
-	}
-	have := decodeAttrs(st.Triggers)
-	names := make([]string, 0, len(want))
-	for k := range want {
-		names = append(names, k)
-	}
-	sort.Strings(names)
-	var diffs []AttrDiff
-	for _, k := range names {
-		o, recorded := have[k]
-		if !recorded {
-			if forcing[k] {
-				continue
-			}
-			o = cty.NullVal(cty.DynamicPseudoType)
-		}
-		if !o.RawEquals(want[k]) {
-			diffs = append(diffs, AttrDiff{Name: k, Old: o, New: want[k]})
-		}
-	}
-	return diffs, nil
 }
 
 func valOr(a provider.Attributes, k string) cty.Value {
