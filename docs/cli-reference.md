@@ -183,6 +183,8 @@ protected.
 Adopt an existing resource into state without recreating it, so a subsequent `plan`/`apply`
 reconciles rather than creating a duplicate. The resource must already be **declared in the config**.
 Reads the live resource and writes a state entry under the state lock; it never mutates the remote.
+Like `plan` and `apply`, it applies the config's [`moved` blocks](config-reference.md#moved) to state
+first, and writes them along with the imported entry.
 
 ```console
 $ baseplate import roblox_experience.main 10438196190

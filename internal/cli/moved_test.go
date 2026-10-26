@@ -6,6 +6,11 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/zclconf/go-cty/cty"
+
+	"github.com/outpostgroupio/baseplate/internal/provider"
+	"github.com/outpostgroupio/baseplate/internal/provider/mock"
 )
 
 const movedBefore = `
@@ -139,6 +144,61 @@ moved {
 	}
 	if got := strings.Join(stateAddrs(t, st), ","); got != "mock_thing.old" {
 		t.Fatalf("a refused destroy must not write state (moves included), got %s", got)
+	}
+}
+
+const importMovedCfg = `
+resource "mock_thing" "new" {
+  name = "x"
+}
+resource "mock_thing" "other" {
+  name = "other"
+}
+moved {
+  from = mock_thing.old
+  to   = mock_thing.new
+}
+`
+
+// The import command applies moves first, like plan/apply: importing to a
+// move's destination finds the moved entry there instead of adding a second
+// entry (which would make every later plan fail with "both in state").
+func TestImportCommandAppliesMovesFirst(t *testing.T) {
+	cfg, st := pdSetup(t, `
+resource "mock_thing" "old" {
+  name = "x"
+}`)
+	writePDCfg(t, cfg, importMovedCfg)
+	var out bytes.Buffer
+	if code := runOut([]string{"import", "--config", cfg, "--state", st, "mock_thing.new", "mock_thing/99"}, &out); code != 1 {
+		t.Fatalf("expected exit 1, got %d\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), `"mock_thing.new" is already in state`) {
+		t.Fatalf("want an already-in-state error for the move's destination:\n%s", out.String())
+	}
+	if got := strings.Join(stateAddrs(t, st), ","); got != "mock_thing.old" {
+		t.Fatalf("a failed import must not write state, got %s", got)
+	}
+}
+
+// A successful import persists the moves along with the imported entry.
+func TestImportCommandPersistsMoves(t *testing.T) {
+	cfg, st := pdSetup(t, `
+resource "mock_thing" "old" {
+  name = "x"
+}`)
+	newProvider().(*mock.Provider).Seed("ext/1", provider.Attributes{"name": cty.StringVal("other")})
+	writePDCfg(t, cfg, importMovedCfg)
+	var out bytes.Buffer
+	if code := runOut([]string{"import", "--config", cfg, "--state", st, "mock_thing.other", "ext/1"}, &out); code != 0 {
+		t.Fatalf("import exit %d\n%s", code, out.String())
+	}
+	if got := strings.Join(stateAddrs(t, st), ","); got != "mock_thing.new,mock_thing.other" {
+		t.Fatalf("state after import = %s", got)
+	}
+	out.Reset()
+	if code := runOut([]string{"plan", "--config", cfg, "--state", st}, &out); code != 0 {
+		t.Fatalf("plan after import should converge (exit 0), got %d\n%s", code, out.String())
 	}
 }
 

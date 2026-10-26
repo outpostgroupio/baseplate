@@ -479,7 +479,7 @@ func importRun(p provider.Provider, cfgPath, statePath, address, id string, form
 		return fmt.Errorf("import: %w", err)
 	}
 	address = addr.Format(typ, name, key)
-	_, desired, _, err := config.Load(cfgPath, p)
+	cfg, err := config.LoadConfig(cfgPath, p)
 	if err != nil {
 		return err
 	}
@@ -500,7 +500,15 @@ func importRun(p provider.Provider, cfgPath, statePath, address, id string, form
 	if err != nil {
 		return err
 	}
-	if err := apply.Import(context.Background(), p, b, st, address, id, desired); err != nil {
+	// Apply moved blocks first, exactly as plan/apply/destroy do, so the
+	// import sees state at its current addresses (importing to a move's
+	// destination is then "already in state", not a second entry). The import
+	// writes the whole state, so the moves are persisted with it; a failed
+	// import writes nothing.
+	if _, err := plan.ApplyMoves(st, cfg.Moved); err != nil {
+		return err
+	}
+	if err := apply.Import(context.Background(), p, b, st, address, id, cfg.Resources); err != nil {
 		return err
 	}
 	return output.Emit(s.out, format, "import",
