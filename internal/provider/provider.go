@@ -142,6 +142,25 @@ type Normalizer interface {
 	Normalize(desired Attributes) (Attributes, error)
 }
 
+// Outputter is an optional Resource capability. Outputs names the resource's
+// computed, output-only attributes (with their types): values the provider
+// determines (never set in config, so they are not in DecodeSpec, and they
+// belong in Computed so they never diff) that Create, Update and Read report
+// alongside the other attributes. Like `id`, they can be referenced as
+// type.name.attr (resolved at apply time) and are recorded in state, so
+// `baseplate show` lists them.
+//
+// An output may be absent when the provider can't determine it (a
+// best-effort lookup that failed; the resource should provider.Warn why) or
+// when it doesn't apply to the object. The engine treats a recorded output as
+// fixed for the object's id: when a later Read or Update doesn't report it,
+// the value already in state is kept, and when Read reports a value that
+// state lacks (state written before the output existed, or an earlier lookup
+// that failed), apply records it even if nothing else changed.
+type Outputter interface {
+	Outputs() map[string]cty.Type
+}
+
 // Documented is an optional Resource capability. Doc returns authored
 // documentation for a resource — its summary, per-attribute descriptions, any
 // caveats, and the API-key scopes it needs. The resource-docs generator merges
@@ -162,4 +181,7 @@ type ResourceDoc struct {
 	// TriggerAttrs names attributes whose changes are detected via a trigger and
 	// force an update (rendered with the "trigger" kind instead of "create-only").
 	TriggerAttrs []string
+	// Outputs describes each computed output attribute (see Outputter), keyed
+	// by name; rendered with the "computed" kind.
+	Outputs map[string]string
 }

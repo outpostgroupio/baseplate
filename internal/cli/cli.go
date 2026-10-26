@@ -124,8 +124,9 @@ type planResult struct {
 }
 
 type importResult struct {
-	Address string `json:"address"`
-	ID      string `json:"id"`
+	Address  string   `json:"address"`
+	ID       string   `json:"id"`
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 type applyResult struct {
@@ -134,6 +135,9 @@ type applyResult struct {
 	Changes []plan.JSONChange `json:"changes"`
 	// Restarts lists the server restarts requested by apply --restart-servers.
 	Restarts []restartResult `json:"restarts,omitempty"`
+	// Warnings are the provider warnings reported while planning and
+	// applying (see provider.Warn).
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 var errCancelled = errors.New("cancelled at confirmation prompt")
@@ -257,15 +261,17 @@ func run(args []string, s streams) int {
 		if err != nil {
 			return err
 		}
-		pl, err := plan.Build(context.Background(), p, st, desired)
+		ctx, warns := provider.WithWarnings(context.Background())
+		pl, err := plan.Build(ctx, p, st, desired)
 		if err != nil {
 			return err
 		}
 		pl.Moves = moves
 		pl.EmptyForEach = cfg.EmptyForEach
-		if err := plan.ResolveImports(context.Background(), p, st, pl, toResolve); err != nil {
+		if err := plan.ResolveImports(ctx, p, st, pl, toResolve); err != nil {
 			return err
 		}
+		pl.ProviderWarnings = warns.List()
 		filterPlanByTarget(pl, tgt)
 		pl.PreventDestroy = append(pl.PreventDestroy, cfg.PreventDestroy...)
 		if err := pl.CheckPreventDestroy(); err != nil {
@@ -422,23 +428,29 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 	if err != nil {
 		return err
 	}
-	pl, err := plan.Build(context.Background(), p, st, desired)
+	ctx, warns := provider.WithWarnings(context.Background())
+	pl, err := plan.Build(ctx, p, st, desired)
 	if err != nil {
 		return err
 	}
 	pl.Moves = moves
 	pl.EmptyForEach = emptyForEach
-	if err := plan.ResolveImports(context.Background(), p, st, pl, imports); err != nil {
+	if err := plan.ResolveImports(ctx, p, st, pl, imports); err != nil {
 		return err
 	}
+	pl.ProviderWarnings = warns.List()
 	filterPlanByTarget(pl, tgt)
 	pl.PreventDestroy = append(pl.PreventDestroy, protected...)
 	if err := pl.CheckPreventDestroy(); err != nil {
 		return err
 	}
 
+	shown := map[string]bool{} // warnings already printed with the plan
 	if pl.HasChanges() {
 		if format == output.Text {
+			for _, w := range pl.ProviderWarnings {
+				shown[w] = true
+			}
 			fmt.Fprint(s.out, pl.RenderText(true))
 			if restart != nil {
 				fmt.Fprint(s.out, restart.describe(pl))
@@ -453,10 +465,15 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 			return errCancelled
 		}
 	}
-	if err := apply.Apply(context.Background(), p, b, st, pl); err != nil {
+	if err := apply.Apply(ctx, p, b, st, pl); err != nil {
 		return err
 	}
 	text := fmt.Sprintf("Apply complete. %d change(s).\n", len(pl.Changes))
+	for _, w := range warns.List() {
+		if !shown[w] {
+			text += fmt.Sprintf("Warning: %s\n", w)
+		}
+	}
 	for _, c := range pl.Changes {
 		if c.Action == provider.ActionReplace && c.AbandonsOld {
 			text += fmt.Sprintf("%s: the old object (id %s) was left in place and is no longer managed.\n", c.Address, c.ID)
@@ -473,7 +490,7 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 		text += restartText(restarts)
 	}
 	return output.Emit(s.out, format, verb, text,
-		applyResult{Applied: len(pl.Changes), Moves: pl.JSONMoves(), Changes: pl.JSONChanges(), Restarts: restarts})
+		applyResult{Applied: len(pl.Changes), Moves: pl.JSONMoves(), Changes: pl.JSONChanges(), Restarts: restarts, Warnings: warns.List()})
 }
 
 // importRun adopts an existing resource (declared in config) into state by id,
@@ -513,12 +530,16 @@ func importRun(p provider.Provider, cfgPath, statePath, address, id string, form
 	if _, err := plan.ApplyMoves(st, cfg.Moved); err != nil {
 		return err
 	}
-	if err := apply.Import(context.Background(), p, b, st, address, id, cfg.Resources); err != nil {
+	ctx, warns := provider.WithWarnings(context.Background())
+	if err := apply.Import(ctx, p, b, st, address, id, cfg.Resources); err != nil {
 		return err
 	}
-	return output.Emit(s.out, format, "import",
-		fmt.Sprintf("Imported %s (id %s).\n", address, id),
-		importResult{Address: address, ID: id})
+	text := fmt.Sprintf("Imported %s (id %s).\n", address, id)
+	for _, w := range warns.List() {
+		text += fmt.Sprintf("Warning: %s\n", w)
+	}
+	return output.Emit(s.out, format, "import", text,
+		importResult{Address: address, ID: id, Warnings: warns.List()})
 }
 
 // targetAddr is a parsed --target: a whole resource (every instance, when key is
