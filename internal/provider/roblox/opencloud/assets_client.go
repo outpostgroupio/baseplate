@@ -31,6 +31,10 @@ type AssetClient interface {
 	CreateAndAwait(ctx context.Context, req AssetCreate, fileName, contentType string, data []byte) (Asset, error)
 	Get(ctx context.Context, assetID string) (Asset, error)
 	Update(ctx context.Context, a Asset) (Asset, error)
+	// UpdateContent uploads new content for an existing asset (and its
+	// metadata) in one PATCH, creating a new version under the same id. Open
+	// Cloud only accepts new content for Model assets.
+	UpdateContent(ctx context.Context, a Asset, fileName, contentType string, data []byte) (Asset, error)
 	Delete(ctx context.Context, assetID string) error
 }
 
@@ -58,6 +62,7 @@ type assetRequest struct {
 // description are sent even when empty: the updateMask names them, so an empty
 // value clears the field.
 type assetUpdateRequest struct {
+	AssetType   string `json:"assetType,omitempty"`
 	AssetID     string `json:"assetId"`
 	DisplayName string `json:"displayName"`
 	Description string `json:"description"`
@@ -154,6 +159,27 @@ func (ac *assetClient) Update(ctx context.Context, a Asset) (Asset, error) {
 		return Asset{}, err
 	}
 	res, err := ac.await(ctx, "asset update", op)
+	if err != nil {
+		return Asset{}, err
+	}
+	return res.toAsset(a.ID), nil
+}
+
+// UpdateContent is Update plus a `fileContent` part. The new content becomes a
+// new version of the same asset; the spec and creator docs say only Model
+// assets accept it (Image/Decal/Audio/Video can't take new content).
+func (ac *assetClient) UpdateContent(ctx context.Context, a Asset, fileName, contentType string, data []byte) (Asset, error) {
+	body := assetUpdateRequest{AssetType: a.AssetType, AssetID: a.ID, DisplayName: a.DisplayName, Description: a.Description}
+	var op operation
+	path := "/v1/assets/" + url.PathEscape(a.ID) + "?updateMask=displayName,description"
+	parts := []Part{
+		{Name: "request", JSON: body},
+		{Name: "fileContent", Filename: fileName, ContentType: contentType, Data: data},
+	}
+	if _, err := ac.c.DoMultipart(ctx, http.MethodPatch, path, parts, &op); err != nil {
+		return Asset{}, err
+	}
+	res, err := ac.await(ctx, "asset content update", op)
 	if err != nil {
 		return Asset{}, err
 	}

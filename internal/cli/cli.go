@@ -457,6 +457,11 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 		return err
 	}
 	text := fmt.Sprintf("Apply complete. %d change(s).\n", len(pl.Changes))
+	for _, c := range pl.Changes {
+		if c.Action == provider.ActionReplace && c.AbandonsOld {
+			text += fmt.Sprintf("%s: the old object (id %s) was left in place and is no longer managed.\n", c.Address, c.ID)
+		}
+	}
 	var restarts []restartResult
 	if restart != nil {
 		if restarts, err = restart.run(context.Background(), p, st, pl); err != nil {

@@ -12,7 +12,8 @@ The resources Baseplate can manage, and their attributes.
   excluded from the diff). To change it, taint/recreate the resource.
 - **diffable** — a normal managed attribute; a config change plans an update.
 - **sensitive** — redacted from all plan output and never written to state.
-- **trigger** — not diffed directly; a change is detected via a hash/marker and forces an update.
+- **trigger** — not diffed directly; a change is detected via a hash/marker and forces an update
+  (or a replace, where the resource notes say so: see `-/+` in the CLI reference).
 
 Every resource also has an implicit `id` (Baseplate's state id) — you never set it in config.
 
@@ -50,18 +51,18 @@ Example: [`examples/analytics-alert.bp.hcl`](../examples/analytics-alert.bp.hcl)
 
 ## `roblox_asset`
 
-Uploads a user- or group-owned image, decal or audio asset.
+Uploads a user- or group-owned image, decal, audio or model asset.
 
 | Attribute | Type | Kind | Description |
 |---|---|---|---|
-| `asset_type` | string | optional, diffable | Asset type: `Image`, `Decal` or `Audio`. Defaults to `Audio` for audio files and `Image` otherwise. Use `Image` for anything the game shows in an `ImageLabel` or `Decal`. Roblox can't change an existing asset's type. |
+| `asset_type` | string | optional, diffable | Asset type: `Image`, `Decal`, `Audio` or `Model`. Defaults to `Audio` for audio files, `Model` for model files and `Image` otherwise. Changing it (including the default, by changing the file's extension) replaces the asset, because Roblox can't change an existing asset's type. Use `Image` for anything the game shows in an `ImageLabel` or `Decal`. |
 | `creator_group_id` | number | optional, create-only | Owning group id (set exactly one of creator_user_id/creator_group_id). |
 | `creator_user_id` | number | optional, create-only | Owning user id (set exactly one of creator_user_id/creator_group_id). |
 | `description` | string | required, diffable | Asset description. |
 | `display_name` | string | required, diffable | Asset name. |
-| `file` | string | required, create-only | Path to the file to upload: `.png`/`.jpg`/`.bmp`/`.tga` for images and decals, `.mp3`/`.ogg`/`.wav`/`.flac` for audio. |
+| `file` | string | required, trigger | Path to the file to upload: `.png`/`.jpg`/`.bmp`/`.tga` for images and decals, `.mp3`/`.ogg`/`.wav`/`.flac` for audio, `.fbx`/`.gltf`/`.glb`/`.rbxm`/`.rbxmx` for models. A change to the file's content is detected by hash: an Image or Model takes the new content in place (same id); a Decal, Audio or Video asset is replaced (a new upload with a new id; the old asset is left in place). |
 
-The `id` output is the `assetId` (a numeric string). For an `Image` asset (the default for image files) that id is the texture id: use it directly as `rbxassetid://<id>` in `ImageLabel.Image` or `Decal.Texture`. A `Decal` asset's id is not a texture id. Each Decal wraps a separate Image asset that Roblox creates alongside it, owned by the same creator. To adopt assets from a Decal-based uploader, import those underlying image ids, not the decal ids (see the many-assets how-to). Changing `file` doesn't re-upload: Open Cloud only accepts new content for Model assets, so a changed image or sound needs a new resource (and gets a new id). Audio is limited to 7 minutes and 20 MB, and Roblox caps audio uploads per month (10, or 100 for ID-verified accounts). Image/decal assets are not archivable, so `destroy` unmanages the asset in place (drops it from state, leaves it uploaded).
+The `id` output is the `assetId` (a numeric string). For an `Image` asset (the default for image files) that id is the texture id: use it directly as `rbxassetid://<id>` in `ImageLabel.Image` or `Decal.Texture`. A `Decal` asset's id is not a texture id. Each Decal wraps a separate Image asset that Roblox creates alongside it, owned by the same creator. To adopt assets from a Decal-based uploader, import those underlying image ids, not the decal ids (see the many-assets how-to). When the content of `file` changes (its `content_hash` trigger), an `Image` or `Model` asset is updated in place: apply uploads the file as a new version of the same asset, so the id doesn't change (Roblox documents content updates for Models only, but Images accept them too, verified live; a metadata-only edit doesn't re-send the content). A `Decal`, `Audio` or `Video` asset can't take new content (Roblox rejects a Decal content update as not supported yet, verified live), so plan shows `-/+ (replace)`: apply uploads a new asset, which gets a new id, and drops the old one from state. The old asset is **left in place** (never archived, even for Audio), because live servers keep using its id until the place is republished. A change to `asset_type` always replaces. Forcing a replace for a type that updates in place is a planned general feature (`lifecycle { replace_triggered_by = [...] }`), not a per-resource setting. If `file` is missing on the machine running `plan` (e.g. CI without the source images), an asset already in state keeps its recorded hash and plan warns that content changes can't be detected; creating an asset still needs the file. Renaming or moving the file without changing its bytes does nothing. References to the asset's `id` and `baseplate show --json` pick up the new id in the same apply. An imported asset records the current file's hash as its baseline, so adopting existing assets never re-uploads them; the same goes for assets created by Baseplate versions without the hash, on their next apply. `lifecycle { prevent_destroy = true }` blocks a replace. Audio is limited to 7 minutes and 20 MB, and Roblox caps audio uploads per month (10, or 100 for ID-verified accounts). Image, Decal and Model assets are not archivable, so `destroy` unmanages the asset in place (drops it from state, leaves it uploaded).
 
 Requires the `asset:read`, `asset:write` [scopes](how-to/api-key-scopes.md).
 
@@ -81,7 +82,7 @@ Manages a badge (an achievement players can earn in an experience).
 | `payment_source` | string | optional, create-only | Funding source when `expected_cost` > 0: `user` (default) or `group`. |
 | `universe_id` | string | required, create-only | The universe. Often a reference to an experience. |
 
-Badges can't be hard-deleted, so `destroy` sets `enabled = false` and unmanages the badge. The icon is reconciled via a content-hash trigger; any update re-uploads the icon. Reads use the public badge endpoint on `badges.roblox.com` (writes use Open Cloud on `apis.roblox.com`).
+Badges can't be hard-deleted, so `destroy` sets `enabled = false` and unmanages the badge. The icon is reconciled via a content-hash trigger and re-uploaded only when its content changes. Reads use the public badge endpoint on `badges.roblox.com` (writes use Open Cloud on `apis.roblox.com`).
 
 Requires the `legacy-universe.badge:manage-and-spend-robux`, `legacy-universe.badge:write`, `legacy-badge:manage` [scopes](how-to/api-key-scopes.md).
 

@@ -101,6 +101,40 @@ Plan: 0 to import, 1 to add, 0 to change, 0 to destroy.
 (e.g. a secret's `value`) are redacted in both formats. Each change has an `address` and, for a
 `for_each` instance, its `key`.
 
+Each change is a create (`+`), update (`~`), delete (`-`) or **replace** (`-/+`). A replace happens
+when a change can't be made to the existing remote object, so a new one (with a new id) is created
+first. The attribute or trigger that forced it is marked, and the last line says what happens to
+the old object: some resources destroy it, others leave it in place and only stop managing it.
+`roblox_asset` leaves it in place, because live servers keep loading the old id until the place is
+republished:
+
+```console
+-/+ roblox_asset.click (replace)
+    display_name = Click
+    file = assets/click.ogg
+    content_hash: 6843b53e… => abeeb0b9…  # forces replacement
+    # old object (id 1234567890) is left in place, no longer managed
+
+Plan: 0 to import, 1 to add, 0 to change, 0 to destroy.
+```
+
+A replace counts as one add, plus one destroy when the old object is destroyed (as in Terraform).
+In `--json` its `action` is `"replace"`, with a `forces_replacement` list, the superseded `old_id`
+and `abandons_old: true` when the old object is left in place; `result.summary.replace` counts
+replaces, and `apply` prints the ids it left in place. Apply creates the new object first, writes
+its id to state, then handles the old one, so a failed upload leaves the current object untouched.
+Resources that reference the replaced one are planned with `(known after apply)` values and updated
+in the same apply. `lifecycle { prevent_destroy = true }` blocks a replace. An `import {}` whose
+declared attributes force a replace shows `will be imported (id …), then replaced`. Today only
+`roblox_asset` replaces: when a decal, audio or video file's content changes (images and models are
+updated in place, keeping their id), or when its `asset_type` changes. Forcing a replace on demand
+will come with a general `lifecycle { replace_triggered_by = [...] }`.
+
+When a file a resource hashes (an asset's `file`, a place's `file`, a badge's `icon_file`) is
+missing on the machine running `plan`, for example in CI without the source files, a resource
+already in state keeps its recorded hash, so nothing is planned for its content, and `plan` prints
+a `Warning:` that content changes can't be detected. Creating a resource still needs the file.
+
 [`moved` blocks](config-reference.md#moved) are applied to the state read by `plan` (in memory
 only; `plan` never writes state) before the diff. Each move is listed before the changes, and the
 footer counts them when there are any:

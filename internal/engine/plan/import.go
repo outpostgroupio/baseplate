@@ -20,9 +20,17 @@ type ImportBlock struct {
 // ResolveImports rewrites the plan in place for declarative import blocks. A
 // pending import (target not yet in state) becomes an import Change that adopts
 // the live resource and reconciles it to config. An already-in-state target is
-// left unchanged (the import is already satisfied). Triggers are intentionally
-// not diffed here — the adopt step (apply) sets the trigger baseline from config,
-// so a triggerable resource imports cleanly.
+// left unchanged (the import is already satisfied). An adopted object whose
+// declared attributes differ in a replace-forcing attribute (e.g. a different
+// asset_type) is imported and then replaced, as in Terraform. Triggers are
+// intentionally not diffed here: the adopt step (apply) sets the trigger
+// baseline from config, so a triggerable resource imports cleanly and an
+// import never replaces on content.
+//
+// Build planned each import target as a create, so their dependents were
+// planned against an unknown id. Once each import is resolved, dependents are
+// re-planned: against the imported id when the object is adopted as-is, or
+// still unknown when it is then replaced.
 func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl *Plan, imports []ImportBlock) error {
 	resources := p.Resources()
 	idx := map[string]int{}
@@ -30,7 +38,9 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 		idx[pl.Changes[i].Address] = i
 	}
 	seen := map[string]bool{}
-	claimed := map[[2]string]string{} // {type, id} -> address importing it
+	claimed := map[[2]string]string{}     // {type, id} -> address importing it
+	pendingImports := map[string]string{} // address -> import id, for targets not yet in state
+	actuals := map[string]provider.Attributes{}
 	for _, imp := range imports {
 		if seen[imp.Address] {
 			return fmt.Errorf("duplicate import block for %q", imp.Address)
@@ -58,31 +68,61 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 		if c.Action != provider.ActionCreate {
 			continue // already in state → import already satisfied
 		}
-		r := resources[c.Type]
-		actual, err := r.Read(ctx, imp.ID)
+		actual, err := resources[c.Type].Read(ctx, imp.ID)
 		if err != nil {
 			if errors.Is(err, provider.ErrNotFound) {
 				return fmt.Errorf("import %s: no %s found with id %q", imp.Address, c.Type, imp.ID)
 			}
 			return err
 		}
+		pendingImports[imp.Address] = imp.ID
+		actuals[imp.Address] = actual
+	}
+	if len(pendingImports) == 0 {
+		return nil
+	}
+	pending := pl.pending
+	if pending == nil {
+		pending = map[string]bool{}
+		pl.pending = pending
+	}
+	// Resolve each import in dependency order (Changes are topologically
+	// sorted), so an import that references another import target sees its
+	// final status, then re-plan the in-state dependents of any target whose
+	// "gets a new id" status changed.
+	importIDs := map[string]string{}
+	flipped := map[string]bool{}
+	for i := range pl.Changes {
+		c := &pl.Changes[i]
+		id, ok := pendingImports[c.Address]
+		if !ok {
+			continue
+		}
+		r := resources[c.Type]
+		actual := actuals[c.Address]
 		d := DesiredResource{Type: c.Type, Name: c.Name, Key: c.Key, Attributes: c.Desired, Refs: c.Refs}
-		effectiveDesired, err := normalize(r, c.Address, mergeRefsFromState(d, s))
+		resolved, err := normalize(r, c.Address, mergeRefs(d, s, importIDs))
 		if err != nil {
 			return err
 		}
-		diffs := diffAttrs(actual, effectiveDesired, r.Computed())
-		c.ImportID = imp.ID
-		c.ID = imp.ID
+		effective := withPendingRefs(resolved, c.Refs, pending)
+		diffs := diffAttrs(actual, effective, r.Computed())
+		c.ImportID = id
+		c.ID = id
 		c.Actual = actual
 		c.AttrDiffs = diffs
-		if len(diffs) > 0 {
-			c.Action = provider.ActionUpdate
-		} else {
-			c.Action = provider.ActionNoop
+		c.Action, c.Replace = classify(diffs, replaceKeys(r, effective, actual))
+		c.AbandonsOld = c.Action == provider.ActionReplace && abandons(r)
+		replaced := c.Action == provider.ActionReplace
+		if !replaced {
+			importIDs[c.Address] = id
+		}
+		if pending[c.Address] != replaced {
+			pending[c.Address] = replaced
+			flipped[c.Address] = true
 		}
 	}
-	return nil
+	return pl.replanDependents(resources, s, flipped, importIDs)
 }
 
 // ImportCollision returns an error when a state entry other than address

@@ -18,6 +18,27 @@ type Provider struct {
 	seq     int
 	creates int
 	deletes int
+	// fail makes the next call of an operation ("create", "delete") fail with
+	// the given error (consumed once), for failure-path tests.
+	fail map[string]error
+	// lastPrior is the prior-triggers map of the last UpdateWithTriggers.
+	lastPrior map[string]cty.Value
+}
+
+// FailNext makes the next call of op ("create" or "delete") return err.
+func (p *Provider) FailNext(op string, err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.fail == nil {
+		p.fail = map[string]error{}
+	}
+	p.fail[op] = err
+}
+
+func (p *Provider) takeFail(op string) error {
+	err := p.fail[op]
+	delete(p.fail, op)
+	return err
 }
 
 func New() *Provider {
@@ -65,6 +86,8 @@ func (p *Provider) Resources() map[string]provider.Resource {
 		"mock_ref":      &res{p: p, typ: "mock_ref"},
 		"mock_trigger":  &res{p: p, typ: "mock_trigger"},
 		"mock_secret":   &res{p: p, typ: "mock_secret"},
+		"mock_replace":  &replaceRes{res: res{p: p, typ: "mock_replace"}},
+		"mock_abandon":  &replaceRes{res: res{p: p, typ: "mock_abandon"}, abandon: true},
 	}
 }
 
@@ -87,8 +110,11 @@ func (r *res) DecodeSpec() hcldec.Spec {
 		// reference (unknown until apply) still decodes cleanly.
 		spec["target"] = &hcldec.AttrSpec{Name: "target", Type: cty.String, Required: true}
 	}
-	if r.typ == "mock_trigger" {
+	if r.typ == "mock_trigger" || r.typ == "mock_replace" || r.typ == "mock_abandon" {
 		spec["rev"] = &hcldec.AttrSpec{Name: "rev", Type: cty.String, Required: false}
+	}
+	if r.typ == "mock_replace" || r.typ == "mock_abandon" {
+		spec["kind"] = &hcldec.AttrSpec{Name: "kind", Type: cty.String, Required: false}
 	}
 	if r.typ == "mock_secret" {
 		spec["value"] = &hcldec.AttrSpec{Name: "value", Type: cty.String, Required: false}
@@ -109,6 +135,9 @@ func (r *res) Read(_ context.Context, id string) (provider.Attributes, error) {
 func (r *res) Create(_ context.Context, desired provider.Attributes) (string, provider.Attributes, error) {
 	r.p.mu.Lock()
 	defer r.p.mu.Unlock()
+	if err := r.p.takeFail("create"); err != nil {
+		return "", nil, err
+	}
 	r.p.seq++
 	r.p.creates++
 	id := fmt.Sprintf("%s/%d", r.typ, r.p.seq)
@@ -127,6 +156,9 @@ func (r *res) Delete(_ context.Context, id string) error {
 	r.p.mu.Lock()
 	defer r.p.mu.Unlock()
 	r.p.deletes++
+	if err := r.p.takeFail("delete"); err != nil {
+		return err
+	}
 	delete(r.p.store, id)
 	return nil
 }
@@ -135,7 +167,7 @@ func (r *res) Computed() []string {
 	if r.typ == "mock_computed" {
 		return []string{"server_id"}
 	}
-	if r.typ == "mock_trigger" {
+	if r.typ == "mock_trigger" || r.typ == "mock_replace" || r.typ == "mock_abandon" {
 		return []string{"rev"}
 	}
 	return nil
@@ -150,7 +182,7 @@ func (r *res) Sensitive() []string {
 }
 
 func (r *res) Triggers(desired provider.Attributes) (map[string]cty.Value, error) {
-	if r.typ != "mock_trigger" {
+	if r.typ != "mock_trigger" && r.typ != "mock_replace" && r.typ != "mock_abandon" {
 		return nil, nil
 	}
 	out := map[string]cty.Value{}
@@ -173,6 +205,53 @@ func (r *res) Dependencies(desired provider.Attributes) []provider.Ref {
 		return []provider.Ref{{Address: s, Attr: "id"}}
 	}
 	return nil
+}
+
+// replaceRes is mock_replace (and mock_abandon, which leaves the old object in
+// place on replace instead of deleting it). A change to "kind" (an attribute)
+// forces a replace; so does a change to "rev" (a trigger) unless the CURRENT
+// object's kind is "inplace" (mirroring roblox_asset, where an existing Model
+// takes new content in place). A rev of "<missing>" makes Triggers report an
+// unavailable input. Updates go through UpdateWithTriggers, which records the
+// prior triggers it was given (see Provider.LastPrior).
+var (
+	_ provider.Replacer            = (*replaceRes)(nil)
+	_ provider.TriggerAwareUpdater = (*replaceRes)(nil)
+)
+
+type replaceRes struct {
+	res
+	abandon bool
+}
+
+func (r *replaceRes) RequiresReplace(_, actual provider.Attributes) []string {
+	if v, ok := actual["kind"]; ok && v.IsKnown() && !v.IsNull() && v.AsString() == "inplace" {
+		return []string{"kind"}
+	}
+	return []string{"kind", "rev"}
+}
+
+func (r *replaceRes) ReplaceAbandons() bool { return r.abandon }
+
+func (r *replaceRes) Triggers(desired provider.Attributes) (map[string]cty.Value, error) {
+	if v, ok := desired["rev"]; ok && v.IsKnown() && !v.IsNull() && v.AsString() == "<missing>" {
+		return nil, &provider.TriggerUnavailableError{Reason: "rev source not found"}
+	}
+	return r.res.Triggers(desired)
+}
+
+func (r *replaceRes) UpdateWithTriggers(ctx context.Context, id string, desired provider.Attributes, prior map[string]cty.Value) (provider.Attributes, error) {
+	r.p.mu.Lock()
+	r.p.lastPrior = prior
+	r.p.mu.Unlock()
+	return r.res.Update(ctx, id, desired)
+}
+
+// LastPrior returns the prior triggers passed to the last UpdateWithTriggers.
+func (p *Provider) LastPrior() map[string]cty.Value {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.lastPrior
 }
 
 func clone(a provider.Attributes) provider.Attributes {

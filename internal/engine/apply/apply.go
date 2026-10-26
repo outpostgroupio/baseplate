@@ -48,7 +48,7 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 			if err != nil {
 				return err
 			}
-			trigs, err := computeTriggers(r, desired)
+			trigs, err := triggersKeeping(r, desired, nil)
 			if err != nil {
 				return err
 			}
@@ -59,10 +59,10 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 				return err
 			}
 			outputs[c.Address] = withID(actual, c.ImportID)
-			if c.Action != provider.ActionUpdate {
+			if c.Action != provider.ActionUpdate && c.Action != provider.ActionReplace {
 				continue
 			}
-			// else fall through to the ActionUpdate case to reconcile to config.
+			// else fall through to the update/replace case to reconcile to config.
 		}
 		switch c.Action {
 		case provider.ActionNoop:
@@ -70,11 +70,25 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 				outputs[c.Address] = withID(c.Actual, c.ID)
 			}
 			// Nothing changed remotely, but the dependency edges may have (e.g. a
-			// for_each dependency lost an instance). Refresh them so state never
-			// keeps an edge to something that's gone; write only on a real
-			// change so a converged apply doesn't churn the serial.
-			if st, ok := s.Find(c.Address); ok && !sameSet(st.Dependencies, c.DependsOn) {
+			// for_each dependency lost an instance), and a trigger may have no
+			// recorded baseline yet (state written before the resource had it;
+			// plan skips such replace-forcing triggers). Refresh both so state
+			// never keeps an edge to something that's gone and the next content
+			// change is detected; write only on a real change so a converged
+			// apply doesn't churn the serial.
+			st, ok := s.Find(c.Address)
+			if !ok {
+				continue
+			}
+			changed := false
+			if !sameSet(st.Dependencies, c.DependsOn) {
 				st.Dependencies = c.DependsOn
+				changed = true
+			}
+			if len(c.BackfillTriggers) > 0 && backfillTriggers(r, c, outputs, st) {
+				changed = true
+			}
+			if changed {
 				s.Serial++
 				if err := b.Put(s); err != nil {
 					return err
@@ -86,11 +100,13 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 			if err != nil {
 				return err
 			}
-			id, out, err := r.Create(ctx, desired)
+			// Triggers first: a failure after Create would orphan the new
+			// remote object (created, but never recorded in state).
+			trigs, err := computeTriggers(r, desired)
 			if err != nil {
 				return err
 			}
-			trigs, err := computeTriggers(r, desired)
+			id, out, err := r.Create(ctx, desired)
 			if err != nil {
 				return err
 			}
@@ -103,16 +119,24 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 			if err != nil {
 				return err
 			}
-			out, err := r.Update(ctx, c.ID, desired)
+			var prior map[string]json.RawMessage
+			if st, ok := s.Find(c.Address); ok {
+				prior = st.Triggers
+			}
+			trigs, err := triggersKeeping(r, desired, prior)
 			if err != nil {
 				return err
 			}
-			trigs, err := computeTriggers(r, desired)
+			out, err := update(ctx, r, c.ID, desired, prior)
 			if err != nil {
 				return err
 			}
 			outputs[c.Address] = withID(out, c.ID)
 			if err := commit(b, s, stateResource(c, c.ID, out, trigs)); err != nil {
+				return err
+			}
+		case provider.ActionReplace:
+			if err := replace(ctx, r, b, s, c, outputs); err != nil {
 				return err
 			}
 		case provider.ActionDelete:
@@ -128,6 +152,123 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 		}
 	}
 	return nil
+}
+
+// replace swaps the remote object at c.Address for a new one,
+// create-before-destroy: create the successor, commit it to state (so state
+// always names a live object and dependents resolve the new id from outputs),
+// then delete the old object, or, for a resource that abandons on replace
+// (c.AbandonsOld), leave it in place untouched. Creating first means a failed
+// create leaves the current object managed and untouched. If the final delete
+// fails, the old object is left behind unmanaged and the error says so; a
+// re-run won't retry it, because state already points at the successor.
+//
+// Resources whose ids are natural keys (two objects can't coexist) would need
+// destroy-before-create; none implements provider.Replacer today.
+func replace(ctx context.Context, r provider.Resource, b backend.Backend, s *state.State, c plan.Change, outputs map[string]provider.Attributes) error {
+	desired, err := resolveRefs(c, outputs)
+	if err != nil {
+		return err
+	}
+	// Triggers first, before any remote mutation: a failure after Create would
+	// orphan the successor.
+	trigs, err := computeTriggers(r, desired)
+	if err != nil {
+		return err
+	}
+	id, out, err := r.Create(ctx, desired)
+	if err != nil {
+		return fmt.Errorf("%s: replace: creating the new object (the current one, id %s, is unchanged): %w", c.Address, c.ID, err)
+	}
+	outputs[c.Address] = withID(out, id)
+	if err := commit(b, s, stateResource(c, id, out, trigs)); err != nil {
+		return err
+	}
+	if c.AbandonsOld {
+		return nil // the old object stays on the platform, no longer managed
+	}
+	if err := r.Delete(ctx, c.ID); err != nil && !errors.Is(err, provider.ErrNotFound) {
+		return fmt.Errorf("%s: replaced by id %s, but deleting the old object (id %s) failed; it is no longer managed and must be removed by hand: %w", c.Address, id, c.ID, err)
+	}
+	return nil
+}
+
+// update calls the resource's UpdateWithTriggers when it has one (passing the
+// triggers recorded before this update), else Update.
+func update(ctx context.Context, r provider.Resource, id string, desired provider.Attributes, prior map[string]json.RawMessage) (provider.Attributes, error) {
+	if u, ok := r.(provider.TriggerAwareUpdater); ok {
+		return u.UpdateWithTriggers(ctx, id, desired, decodeRaw(prior))
+	}
+	return r.Update(ctx, id, desired)
+}
+
+// triggersKeeping computes the triggers for desired. When an input is missing
+// (provider.TriggerUnavailableError), the triggers that could not be computed
+// keep their prior recorded values, so an update or import that doesn't need
+// the input (e.g. a metadata edit on a machine without the source file)
+// neither fails nor loses the baseline.
+func triggersKeeping(r provider.Resource, desired provider.Attributes, prior map[string]json.RawMessage) (map[string]json.RawMessage, error) {
+	t, ok := r.(provider.Triggerable)
+	if !ok {
+		return nil, nil
+	}
+	vals, err := t.Triggers(desired)
+	var unavailable *provider.TriggerUnavailableError
+	if err != nil && !errors.As(err, &unavailable) {
+		return nil, err
+	}
+	out := encodeValues(vals)
+	for k, v := range prior {
+		if _, ok := out[k]; !ok && unavailable != nil {
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// backfillTriggers records the triggers plan adopted as a baseline
+// (c.BackfillTriggers: no value in state) and reports whether it did. It never
+// overwrites a recorded value: a differing value is a real change, which plan
+// turns into an update or replace.
+func backfillTriggers(r provider.Resource, c plan.Change, outputs map[string]provider.Attributes, st *state.Resource) bool {
+	desired, err := resolveRefs(c, outputs)
+	if err != nil {
+		return false
+	}
+	trigs, err := triggersKeeping(r, desired, nil)
+	if err != nil {
+		return false
+	}
+	added := false
+	for _, k := range c.BackfillTriggers {
+		v, ok := trigs[k]
+		if !ok {
+			continue
+		}
+		if _, recorded := st.Triggers[k]; recorded {
+			continue
+		}
+		if st.Triggers == nil {
+			st.Triggers = map[string]json.RawMessage{}
+		}
+		st.Triggers[k] = v
+		added = true
+	}
+	return added
+}
+
+// decodeRaw decodes a state map of {value,type}-wrapped JSON values.
+func decodeRaw(m map[string]json.RawMessage) map[string]cty.Value {
+	out := map[string]cty.Value{}
+	for k, raw := range m {
+		if v, err := ctyjson.Unmarshal(raw, cty.DynamicPseudoType); err == nil {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // resolveRefs returns the change's desired attributes with referenced attributes
@@ -255,7 +396,7 @@ func Import(ctx context.Context, p provider.Provider, b backend.Backend, s *stat
 		}
 		return err
 	}
-	trigs, err := computeTriggers(r, d.Attributes)
+	trigs, err := triggersKeeping(r, d.Attributes, nil)
 	if err != nil {
 		return err
 	}
