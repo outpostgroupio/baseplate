@@ -87,9 +87,9 @@ type Triggerable interface {
 //
 // Only names that the plan diffs can force a replace: declared attributes that
 // are not in Computed (a Normalizer can fill in an omitted optional's default
-// so it is diffed), and trigger keys. A replace-forcing trigger with no
+// so it is diffed), and trigger keys. A trigger with no
 // recorded value in state (state written before the trigger existed) is adopted
-// as the baseline instead of forcing a replace; apply records it.
+// as the baseline instead of forcing an update or replace; apply records it.
 //
 // ReplaceAbandons reports what happens to the old object: false deletes it
 // (Delete) once its successor exists; true leaves it in place on the platform

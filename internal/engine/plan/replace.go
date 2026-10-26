@@ -147,10 +147,13 @@ func classify(diffs []AttrDiff, forcing map[string]bool) (provider.ChangeAction,
 // differs (e.g. a place whose file content changed). Resources that are not
 // Triggerable yield nothing.
 //
-// A replace-forcing key with no value recorded in state is not diffed: the state
-// predates the trigger, so there is nothing to compare with, and replacing every
-// such object (e.g. each asset uploaded before roblox_asset had a content_hash)
-// would be destructive. Such keys are returned as backfill, for apply to record.
+// A key with no value recorded in state is not diffed: the state predates the
+// trigger (or the input was missing when it was recorded), so there is nothing
+// to compare with, and re-uploading or replacing every such object (e.g. each
+// asset uploaded before roblox_asset had a content_hash) would be wasteful or
+// destructive. Such keys are returned as backfill, for apply to record. Every
+// Triggerable resource records its triggers from its first create or import,
+// so this only affects state written before a trigger existed.
 //
 // When an input is missing (provider.TriggerUnavailableError, e.g. a source
 // file absent on this machine), the triggers that couldn't be computed keep
@@ -178,11 +181,8 @@ func triggerDiffs(res provider.Resource, address string, desired provider.Attrib
 	for _, k := range names {
 		o, recorded := have[k]
 		if !recorded {
-			if forcing[k] {
-				backfill = append(backfill, k)
-				continue
-			}
-			o = cty.NullVal(cty.DynamicPseudoType)
+			backfill = append(backfill, k)
+			continue
 		}
 		if !o.RawEquals(want[k]) {
 			diffs = append(diffs, AttrDiff{Name: k, Old: o, New: want[k]})
