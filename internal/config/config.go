@@ -233,6 +233,7 @@ func LoadConfig(path string, p provider.Provider) (*Config, error) {
 	var out []plan.DesiredResource
 	var imports []plan.ImportBlock
 	var moved []plan.MovedBlock
+	var movedAt []hcl.Range // the declaring block of each moved entry
 	importSeen := map[string]bool{}
 	for _, b := range content.Blocks {
 		switch b.Type {
@@ -293,9 +294,12 @@ func LoadConfig(path string, p provider.Provider) (*Config, error) {
 				return nil, err
 			}
 			moved = append(moved, ms...)
+			for range ms {
+				movedAt = append(movedAt, b.DefRange)
+			}
 		}
 	}
-	if err := l.checkMovedSet(moved); err != nil {
+	if err := l.checkMovedSet(moved, movedAt); err != nil {
 		return nil, err
 	}
 	sort.Strings(empty)

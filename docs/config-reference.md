@@ -162,7 +162,9 @@ The map can come from a file, e.g. `jsondecode(file("${path.config}/asset-rename
 - Dependencies recorded in state follow the move, on the moved resource and on everything that
   depends on it.
 - `import` blocks are resolved after moves. An `import` whose `to` is a move's destination is
-  already satisfied once the move has happened.
+  already satisfied once the move has happened. The `baseplate import` command applies moves
+  first too (under the state lock), so importing to a move's destination reports it as already in
+  state, and a successful import writes any pending moves with it.
 
 Load-time errors:
 
@@ -172,6 +174,10 @@ Load-time errors:
 - `from` must no longer be declared. If `from` is still in the config, the block is rejected:
   change the config so the resource is declared at `to` instead. This matches Terraform.
 - Two blocks can't move the same `from`, or move two things to the same `to`.
+- A whole-resource move (`a.b` → `a.c`) can't be combined with an instance move out of the same
+  resource (`a.b["k"]` → …), since the whole move already takes every instance, or with an
+  instance move into its destination resource (… → `a.c["k"]`). The error names both blocks.
+  Chains through a renamed resource (`a.x["k"]` → `a.b["k"]`, then `a.b` → `a.c`) are fine.
 
 ## `lifecycle`
 

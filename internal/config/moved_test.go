@@ -132,6 +132,29 @@ moved {
 `, []plan.MovedBlock{{From: "mock_thing.a", To: "mock_thing.b"}})
 }
 
+// A chain through a wholly moved resource is not a conflict: the instance
+// move feeds the whole-resource move (x["k"] -> a["k"], then a -> c).
+func TestMovedChainThroughWholeResourceMoveLoads(t *testing.T) {
+	wantMoved(t, `
+moved {
+  from = mock_thing.x["k"]
+  to   = mock_thing.a["k"]
+}
+moved {
+  from = mock_thing.a
+  to   = mock_thing.c
+}
+moved {
+  from = mock_thing.c["k"]
+  to   = mock_thing.d["k"]
+}
+`, []plan.MovedBlock{
+		{From: `mock_thing.x["k"]`, To: `mock_thing.a["k"]`},
+		{From: "mock_thing.a", To: "mock_thing.c"},
+		{From: `mock_thing.c["k"]`, To: `mock_thing.d["k"]`},
+	})
+}
+
 func TestMovedErrors(t *testing.T) {
 	cases := map[string]struct {
 		src   string
@@ -220,7 +243,7 @@ moved {
 moved {
   from = mock_thing.a
   to   = mock_thing.c
-}`, []string{"ambiguous moved blocks", "mock_thing.a is moved to both"}},
+}`, []string{"ambiguous moved blocks", "mock_thing.a is moved to mock_thing.b by the block at", "c.bp.hcl:2", "c.bp.hcl:6"}},
 		"duplicate to": {`
 moved {
   from = mock_thing.a
@@ -229,7 +252,36 @@ moved {
 moved {
   from = mock_thing.b
   to   = mock_thing.c
-}`, []string{"ambiguous moved blocks", "are moved to mock_thing.c"}},
+}`, []string{"ambiguous moved blocks", "mock_thing.c is the destination of both", "c.bp.hcl:2", "c.bp.hcl:6"}},
+		"whole-resource move and instance move out of it": {`
+moved {
+  from = mock_thing.a
+  to   = mock_thing.c
+}
+moved {
+  from = mock_thing.a["k"]
+  to   = mock_thing.d["k"]
+}`, []string{"conflicting moved blocks", "c.bp.hcl:2 moves all of mock_thing.a to mock_thing.c",
+			`c.bp.hcl:6 also moves mock_thing.a["k"] out of mock_thing.a`}},
+		"instance move out of a wholly moved resource, declared first": {`
+moved {
+  for_each = toset(["k"])
+  from     = mock_thing.a[each.key]
+  to       = mock_thing.d[each.key]
+}
+moved {
+  from = mock_thing.a
+  to   = mock_thing.c
+}`, []string{"conflicting moved blocks", "c.bp.hcl:7 moves all of mock_thing.a", `c.bp.hcl:2 also moves mock_thing.a["k"]`}},
+		"whole-resource move and instance move into its destination": {`
+moved {
+  from = mock_thing.a
+  to   = mock_thing.c
+}
+moved {
+  from = mock_thing.x["k"]
+  to   = mock_thing.c["k"]
+}`, []string{"conflicting moved blocks", `also moves mock_thing.x["k"] into mock_thing.c["k"]`}},
 		"for_each value not a string key": {`
 moved {
   for_each = { a = 1 }

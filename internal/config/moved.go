@@ -112,19 +112,62 @@ func (l *loader) fromStillDeclared(typ, name, key string, fromKeyed, toKeyed boo
 	return fmt.Errorf("%s: moved block from %s to %s: %s is still declared in the configuration. A moved block's `from` is the old address: change the configuration so that this %s is declared as %s instead", l.path, from, to, from, what, to)
 }
 
-// checkMovedSet rejects two moves out of (or into) the same address: which
-// one wins would depend on state, not on the config.
-func (l *loader) checkMovedSet(moved []plan.MovedBlock) error {
-	froms, tos := map[string]string{}, map[string]string{}
-	for _, m := range moved {
-		if other, dup := froms[m.From]; dup {
-			return fmt.Errorf("%s: ambiguous moved blocks: %s is moved to both %s and %s", l.path, m.From, other, m.To)
+// checkMovedSet rejects moved blocks whose outcome would depend on state
+// rather than on the config:
+//   - two moves out of the same address, or into the same address;
+//   - a whole-resource move (`a.b` -> `a.c`) next to an instance move out of
+//     the same resource (`a.b["k"]` -> ...): the whole move takes every
+//     instance, so the instance move would silently do nothing;
+//   - a whole-resource move next to an instance move into its destination
+//     resource (... -> `a.c["k"]`): both would claim the same address.
+//
+// at[i] is the declaring block of moved[i], so errors name both blocks.
+func (l *loader) checkMovedSet(moved []plan.MovedBlock, at []hcl.Range) error {
+	pos := func(i int) string { return fmt.Sprintf("%s:%d", at[i].Filename, at[i].Start.Line) }
+	type parsed struct {
+		fromBase, toBase string
+		whole            bool
+	}
+	ps := make([]parsed, len(moved))
+	froms, tos := map[string]int{}, map[string]int{}
+	wholeFrom, wholeTo := map[string]int{}, map[string]int{}
+	for i, m := range moved {
+		if j, dup := froms[m.From]; dup {
+			return fmt.Errorf("ambiguous moved blocks: %s is moved to %s by the block at %s and to %s by the block at %s", m.From, moved[j].To, pos(j), m.To, pos(i))
 		}
-		froms[m.From] = m.To
-		if other, dup := tos[m.To]; dup {
-			return fmt.Errorf("%s: ambiguous moved blocks: both %s and %s are moved to %s", l.path, other, m.From, m.To)
+		froms[m.From] = i
+		if j, dup := tos[m.To]; dup {
+			return fmt.Errorf("ambiguous moved blocks: %s is the destination of both %s (block at %s) and %s (block at %s)", m.To, moved[j].From, pos(j), m.From, pos(i))
 		}
-		tos[m.To] = m.From
+		tos[m.To] = i
+		ft, fn, _, fKeyed, err := addr.Parse(m.From)
+		if err != nil {
+			return err
+		}
+		tt, tn, _, tKeyed, err := addr.Parse(m.To)
+		if err != nil {
+			return err
+		}
+		ps[i] = parsed{fromBase: ft + "." + fn, toBase: tt + "." + tn, whole: !fKeyed && !tKeyed}
+		if ps[i].whole {
+			wholeFrom[ps[i].fromBase] = i
+			wholeTo[ps[i].toBase] = i
+		}
+	}
+	for i, p := range ps {
+		if p.whole {
+			continue
+		}
+		if w, ok := wholeFrom[p.fromBase]; ok {
+			return fmt.Errorf("conflicting moved blocks: the block at %s moves all of %s to %s, but the block at %s also moves %s out of %s. "+
+				"The whole-resource move already takes every instance; remove one of the blocks",
+				pos(w), moved[w].From, moved[w].To, pos(i), moved[i].From, p.fromBase)
+		}
+		if w, ok := wholeTo[p.toBase]; ok {
+			return fmt.Errorf("conflicting moved blocks: the block at %s moves all of %s to %s, but the block at %s also moves %s into %s. "+
+				"Both would claim the same addresses; remove one of the blocks",
+				pos(w), moved[w].From, moved[w].To, pos(i), moved[i].From, moved[i].To)
+		}
 	}
 	return nil
 }

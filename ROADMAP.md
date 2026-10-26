@@ -155,7 +155,9 @@ docs live in `docs/superpowers/specs/`; the executed task-by-task plans in `docs
   first (even a move-only plan). `destroy` applies moves too, so `prevent_destroy` is checked at the
   new address. **`--target` doesn't filter moves** (Terraform instead errors when targets don't
   cover every moved address; Baseplate's single `--target` makes that unworkable). The rename
-  warning now suggests a concrete `moved` block. The `import` CLI command doesn't apply moves.
+  warning now suggests a concrete `moved` block. The `import` CLI command applies moves first too (under the lock; persisted with the import).
+  A whole-resource move next to an instance move out of (or into) the same resource is a load
+  error naming both blocks.
   Docs: `docs/config-reference.md#moved`, `docs/how-to/many-assets.md` (generating the rename map
   from `git diff -M`).
 - **`lifecycle { prevent_destroy = true }` (2026-10-23):** Terraform-compatible. `internal/config`
