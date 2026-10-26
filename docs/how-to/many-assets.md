@@ -4,6 +4,8 @@ A game with hundreds of images, sprites and icons shouldn't need hundreds of han
 `resource` blocks. This guide shows the end-to-end pattern: find files with `fileset`, declare one
 `roblox_asset` per file with `for_each`, adopt the ids you've already uploaded with an
 `import {}` block, then read the result back with `baseplate show --json` to generate a Luau module.
+If your current uploader creates Decals, see
+[Migrating from a Decal-based uploader](#migrating-from-a-decal-based-uploader).
 
 ## 1. Declare one asset per file
 
@@ -105,6 +107,78 @@ To adopt one instance by hand instead, quote the address for your shell:
 ```console
 $ baseplate import 'roblox_asset.sprites["ui/gem.png"]' 1234567890
 ```
+
+## Migrating from a Decal-based uploader
+
+Many uploaders create **Decal** assets. A Decal's asset id isn't what `ImageLabel.Image`,
+`ImageButton.Image` or `Decal.Texture` need: each Decal wraps a separate **Image** asset that Roblox
+creates alongside it, and that image's id is the texture id. So these pipelines resolve every decal
+afterwards, typically by running Luau (`InsertService:LoadAsset(decalId)`, then reading
+`Decal.Texture`).
+
+With Baseplate you don't need that step:
+
+- **New uploads: use `asset_type = "Image"`**, the default for image files. An Image asset *is* the
+  texture, so its `id` goes straight into `rbxassetid://<id>`. There's no wrapper and nothing to
+  look up.
+- **Existing assets: import the texture ids, not the decal ids.** The image Roblox created behind
+  each decal is a normal Image asset owned by the same user or group. Open Cloud can read it, so
+  `import` adopts it like any other asset, without re-uploading. Your old pipeline already
+  resolved these ids, so keep its `path → textureId` map as JSON and import from that:
+
+```json
+{ "ui/gem.png": "9876543210", "ui/coin.png": "9876543211" }
+```
+
+```hcl
+locals {
+  sprites     = fileset("${path.config}/assets/sprites", "**/*.png")
+  texture_ids = jsondecode(file("${path.config}/tools/texture-ids.json"))
+}
+
+resource "roblox_asset" "sprites" {
+  for_each = local.sprites
+
+  file             = "${path.config}/assets/sprites/${each.key}"
+  display_name     = "sprite/${trimsuffix(each.key, ".png")}"
+  description      = "Game sprite"
+  asset_type       = "Image" # explicit, so a decal id in the map shows up in the plan
+  creator_group_id = 123456
+}
+
+import {
+  for_each = { for path, id in local.texture_ids : path => id if contains(local.sprites, path) }
+  to       = roblox_asset.sprites[each.key]
+  id       = each.value
+}
+```
+
+The auto-created image takes the decal's name and description, so expect the first plan to rename
+it to your `display_name`. Renaming the image doesn't touch the Decal, and the Decal still points at
+the same image:
+
+```console
+$ baseplate plan
+roblox_asset.sprites["ui/coin.png"] will be imported (id 9876543211)
+    display_name: Coin => sprite/ui/coin
+roblox_asset.sprites["ui/gem.png"] will be imported (id 9876543210)
+    display_name: Gem => sprite/ui/gem
+```
+
+After `apply`, the next `plan` shows no changes. Files without an entry in the map are new uploads,
+and they're created as Image assets.
+
+**Check that the map holds texture ids.** If a decal id got in by mistake, Baseplate adopts the
+Decal without complaint, and `rbxassetid://<decalId>` won't render in an `ImageLabel`. Declaring
+`asset_type = "Image"`, as above, catches this. The import then plans
+`asset_type: Decal => Image`. Roblox can't change an asset's type, so `apply` can't fix that
+diff. Replace the entry with the decal's texture id instead.
+
+The decals themselves stay where they are. Nothing in the game needs them once it uses the texture
+ids, and Decal assets can't be archived through Open Cloud anyway.
+
+The Luau module from [step 3](#3-read-the-ids-back-show---json) then works unchanged. Every managed
+`id` is an image id, so `rbxassetid://<id>` is the texture.
 
 ## 3. Read the ids back: `show --json`
 
