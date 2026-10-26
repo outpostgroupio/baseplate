@@ -20,7 +20,9 @@ type ImportBlock struct {
 // ResolveImports rewrites the plan in place for declarative import blocks. A
 // pending import (target not yet in state) becomes an import Change that adopts
 // the live resource and reconciles it to config. An already-in-state target is
-// left unchanged (the import is already satisfied). Triggers are intentionally
+// left unchanged (the import is already satisfied). An adopted object whose
+// config differs in a replace-forcing attribute is imported then replaced.
+// Triggers are intentionally
 // not diffed here — the adopt step (apply) sets the trigger baseline from config,
 // so a triggerable resource imports cleanly.
 func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl *Plan, imports []ImportBlock) error {
@@ -76,11 +78,11 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 		c.ID = imp.ID
 		c.Actual = actual
 		c.AttrDiffs = diffs
-		if len(diffs) > 0 {
-			c.Action = provider.ActionUpdate
-		} else {
-			c.Action = provider.ActionNoop
-		}
+		// An adopted object whose declared attributes can't be reconciled in
+		// place (e.g. a different asset_type) is replaced right after the
+		// import, as in Terraform. Triggers aren't compared (above), so an
+		// import never replaces on content.
+		c.Action, c.Replace = classify(diffs, replaceKeys(r, effectiveDesired))
 	}
 	return nil
 }

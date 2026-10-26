@@ -27,6 +27,10 @@ const (
 	ActionCreate
 	ActionUpdate
 	ActionDelete
+	// ActionReplace creates a new remote object and then deletes the old one
+	// (create-before-destroy), because a change the provider can't apply in
+	// place forces a new object with a new id. See Replacer.
+	ActionReplace
 )
 
 func (a ChangeAction) String() string {
@@ -37,6 +41,8 @@ func (a ChangeAction) String() string {
 		return "update"
 	case ActionDelete:
 		return "delete"
+	case ActionReplace:
+		return "replace"
 	default:
 		return "noop"
 	}
@@ -67,6 +73,23 @@ type Resource interface {
 // compared. The values are persisted in state and compared on plan.
 type Triggerable interface {
 	Triggers(desired Attributes) (map[string]cty.Value, error)
+}
+
+// Replacer is an optional Resource capability, Baseplate's equivalent of
+// Terraform's "forces replacement". RequiresReplace returns the attribute and/or
+// trigger names (see Triggerable) whose change can't be applied in place for this
+// desired config: when any of them differs, plan calls for a replace (a new
+// remote object with a new id, then the old one deleted) instead of an update.
+// It receives the desired attributes so the answer can depend on config (e.g. a
+// Model asset takes new content in place while an Image needs a new upload).
+// Values may be unknown (a reference to a resource being replaced).
+//
+// Only names that the plan diffs can force a replace: declared attributes that
+// are not in Computed, and trigger keys. A replace-forcing trigger with no
+// recorded value in state (state written before the trigger existed) is adopted
+// as the baseline instead of forcing a replace; apply records it.
+type Replacer interface {
+	RequiresReplace(desired Attributes) []string
 }
 
 // Sensitive is an optional Resource capability. Sensitive returns attribute names

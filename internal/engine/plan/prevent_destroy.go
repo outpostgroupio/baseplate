@@ -4,19 +4,21 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/outpostgroupio/baseplate/internal/addr"
 	"github.com/outpostgroupio/baseplate/internal/provider"
 )
 
-// CheckPreventDestroy returns an error for every delete in the plan whose
-// resource block sets lifecycle.prevent_destroy (see Plan.PreventDestroy). It
-// runs on the final plan, after any --target narrowing, so a protected
-// resource outside the targeted scope doesn't block the plan, as in Terraform.
+// CheckPreventDestroy returns an error for every delete or replace in the plan
+// whose resource block sets lifecycle.prevent_destroy (see Plan.PreventDestroy).
+// A replace destroys the current remote object (after creating its successor),
+// so it is blocked too, as in Terraform. It runs on the final plan, after any
+// --target narrowing, so a protected resource outside the targeted scope
+// doesn't block the plan, as in Terraform.
 //
-// The engine has no replace (destroy-then-create) action: a resource whose
-// remote object has vanished is re-created, not deleted, so deletes are the
-// only destroy path to guard.
+// A resource whose remote object has vanished is re-created, not deleted, so
+// it isn't guarded.
 func (p *Plan) CheckPreventDestroy() error {
 	if len(p.PreventDestroy) == 0 {
 		return nil
@@ -27,10 +29,15 @@ func (p *Plan) CheckPreventDestroy() error {
 	}
 	var errs []error
 	for _, c := range p.Changes {
-		if c.Action != provider.ActionDelete || !protected[addr.Format(c.Type, c.Name, "")] {
+		if !protected[addr.Format(c.Type, c.Name, "")] {
 			continue
 		}
-		errs = append(errs, fmt.Errorf("Instance cannot be destroyed: %s has lifecycle.prevent_destroy set, but the plan calls for this resource to be destroyed. To avoid this error and continue with the plan, either disable lifecycle.prevent_destroy or reduce the scope of the plan using the --target flag.", c.Address))
+		switch c.Action {
+		case provider.ActionDelete:
+			errs = append(errs, fmt.Errorf("Instance cannot be destroyed: %s has lifecycle.prevent_destroy set, but the plan calls for this resource to be destroyed. To avoid this error and continue with the plan, either disable lifecycle.prevent_destroy or reduce the scope of the plan using the --target flag.", c.Address))
+		case provider.ActionReplace:
+			errs = append(errs, fmt.Errorf("Instance cannot be destroyed: %s has lifecycle.prevent_destroy set, but the plan calls for this resource to be replaced (a change to %s forces replacement, which destroys the current object). To avoid this error and continue with the plan, either disable lifecycle.prevent_destroy, revert the change, or reduce the scope of the plan using the --target flag.", c.Address, strings.Join(c.Replace, ", ")))
+		}
 	}
 	return errors.Join(errs...)
 }

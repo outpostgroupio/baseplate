@@ -14,10 +14,11 @@ import (
 )
 
 var symbols = map[provider.ChangeAction]string{
-	provider.ActionCreate: "+",
-	provider.ActionUpdate: "~",
-	provider.ActionDelete: "-",
-	provider.ActionNoop:   " ",
+	provider.ActionCreate:  "+",
+	provider.ActionUpdate:  "~",
+	provider.ActionDelete:  "-",
+	provider.ActionReplace: "-/+",
+	provider.ActionNoop:    " ",
 }
 
 type JSONAttr struct {
@@ -31,6 +32,9 @@ type JSONChange struct {
 	Action   string     `json:"action"`
 	ImportID string     `json:"import_id,omitempty"`
 	Attrs    []JSONAttr `json:"attributes,omitempty"`
+	// ForcesReplacement names the attributes/triggers that force a replace
+	// (action "replace").
+	ForcesReplacement []string `json:"forces_replacement,omitempty"`
 }
 
 // JSONMove is one state entry a moved {} block relocated.
@@ -39,12 +43,15 @@ type JSONMove struct {
 	To   string `json:"to"`
 }
 
+// Summary counts a replace as one add and one destroy, as Terraform does, and
+// also in Replace so consumers can tell replaced objects from plain ones.
 type Summary struct {
 	Move    int `json:"move"`
 	Import  int `json:"import"`
 	Add     int `json:"add"`
 	Change  int `json:"change"`
 	Destroy int `json:"destroy"`
+	Replace int `json:"replace"`
 }
 
 // JSONChanges renders every change as a machine-readable value. Sensitive
@@ -52,7 +59,7 @@ type Summary struct {
 func (p *Plan) JSONChanges() []JSONChange {
 	out := make([]JSONChange, 0, len(p.Changes))
 	for _, c := range p.Changes {
-		jc := JSONChange{Address: c.Address, Key: c.Key, Action: c.Action.String(), ImportID: c.ImportID}
+		jc := JSONChange{Address: c.Address, Key: c.Key, Action: c.Action.String(), ImportID: c.ImportID, ForcesReplacement: c.Replace}
 		sensitive := map[string]bool{}
 		for _, k := range c.Sensitive {
 			sensitive[k] = true
@@ -153,13 +160,17 @@ func (p *Plan) Warnings() []string {
 	return out
 }
 
-// Summary counts changes by action, matching the RenderText footer.
+// Summary counts changes by action, matching the RenderText footer. An import
+// counts only as an import, unless it is then replaced (a new object is
+// created and the adopted one destroyed).
 func (p *Plan) Summary() Summary {
 	s := Summary{Move: len(p.Moves)}
 	for _, c := range p.Changes {
 		if c.ImportID != "" {
 			s.Import++
-			continue
+			if c.Action != provider.ActionReplace {
+				continue
+			}
 		}
 		switch c.Action {
 		case provider.ActionCreate:
@@ -168,6 +179,10 @@ func (p *Plan) Summary() Summary {
 			s.Change++
 		case provider.ActionDelete:
 			s.Destroy++
+		case provider.ActionReplace:
+			s.Add++
+			s.Destroy++
+			s.Replace++
 		}
 	}
 	return s
@@ -175,37 +190,39 @@ func (p *Plan) Summary() Summary {
 
 func (p *Plan) RenderText(color bool) string {
 	var b strings.Builder
-	var add, chg, del, imp int
 	for _, m := range p.Moves {
 		fmt.Fprintf(&b, "~ %s has moved to %s\n", m.From, m.To)
 	}
 	for _, c := range p.Changes {
+		forcing := map[string]bool{}
+		for _, k := range c.Replace {
+			forcing[k] = true
+		}
 		if c.ImportID != "" {
-			imp++
-			fmt.Fprintf(&b, "%s will be imported (id %s)\n", c.Address, c.ImportID)
+			then := ""
+			if c.Action == provider.ActionReplace {
+				then = ", then replaced"
+			}
+			fmt.Fprintf(&b, "%s will be imported (id %s)%s\n", c.Address, c.ImportID, then)
 			sensitive := map[string]bool{}
 			for _, k := range c.Sensitive {
 				sensitive[k] = true
 			}
 			for _, d := range c.AttrDiffs {
+				note := ""
+				if forcing[d.Name] {
+					note = forcesNote
+				}
 				if sensitive[d.Name] {
-					fmt.Fprintf(&b, "    %s: (sensitive value) => (sensitive value)\n", d.Name)
+					fmt.Fprintf(&b, "    %s: (sensitive value) => (sensitive value)%s\n", d.Name, note)
 					continue
 				}
-				fmt.Fprintf(&b, "    %s: %s => %s\n", d.Name, ctyString(d.Old), ctyString(d.New))
+				fmt.Fprintf(&b, "    %s: %s => %s%s\n", d.Name, ctyString(d.Old), ctyString(d.New), note)
 			}
 			continue
 		}
 		if c.Action == provider.ActionNoop {
 			continue
-		}
-		switch c.Action {
-		case provider.ActionCreate:
-			add++
-		case provider.ActionUpdate:
-			chg++
-		case provider.ActionDelete:
-			del++
 		}
 		fmt.Fprintf(&b, "%s %s (%s)\n", symbols[c.Action], c.Address, c.Action)
 		attrs := c.Desired
@@ -231,6 +248,9 @@ func (p *Plan) RenderText(color bool) string {
 			sensitive[k] = true
 		}
 		for _, k := range keys {
+			if forcing[k] {
+				continue // rendered as old => new below
+			}
 			if sensitive[k] {
 				fmt.Fprintf(&b, "    %s = (sensitive value)\n", k)
 				continue
@@ -242,17 +262,33 @@ func (p *Plan) RenderText(color bool) string {
 				fmt.Fprintf(&b, "    %s = (known after apply)\n", k)
 			}
 		}
+		// What forced the replace — an attribute or a trigger (e.g. a file's
+		// content_hash) — shown old => new so the reason is visible.
+		for _, d := range c.AttrDiffs {
+			if !forcing[d.Name] {
+				continue
+			}
+			if sensitive[d.Name] {
+				fmt.Fprintf(&b, "    %s: (sensitive value) => (sensitive value)%s\n", d.Name, forcesNote)
+				continue
+			}
+			fmt.Fprintf(&b, "    %s: %s => %s%s\n", d.Name, ctyString(d.Old), ctyString(d.New), forcesNote)
+		}
 	}
 	for _, w := range p.Warnings() {
 		fmt.Fprintf(&b, "\nWarning: %s\n", w)
 	}
-	fmt.Fprintf(&b, "\nPlan: %d to import, %d to add, %d to change, %d to destroy", imp, add, chg, del)
-	if len(p.Moves) > 0 {
-		fmt.Fprintf(&b, ", %d to move", len(p.Moves))
+	sum := p.Summary()
+	fmt.Fprintf(&b, "\nPlan: %d to import, %d to add, %d to change, %d to destroy", sum.Import, sum.Add, sum.Change, sum.Destroy)
+	if sum.Move > 0 {
+		fmt.Fprintf(&b, ", %d to move", sum.Move)
 	}
 	b.WriteString(".\n")
 	return b.String()
 }
+
+// forcesNote marks the attribute/trigger lines that force a replace.
+const forcesNote = "  # forces replacement"
 
 func ctyString(v cty.Value) string {
 	if !v.IsKnown() {
