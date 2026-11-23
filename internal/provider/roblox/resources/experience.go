@@ -202,14 +202,21 @@ func publicError(id string, public bool, err error) error {
 		return err
 	}
 	if strings.Contains(strings.ToLower(apiErr.Message), "scope") {
-		return fmt.Errorf("roblox_experience: changing `public` needs the legacy-universe:manage scope on the API key for universe %s: %w", id, err)
+		return explained{fmt.Errorf("roblox_experience: changing `public` needs the legacy-universe:manage scope on the API key for universe %s: %w", id, err)}
 	}
 	verb := "private"
 	if public {
 		verb = "public"
 	}
-	return fmt.Errorf("roblox_experience: Roblox refused to make universe %s %s; check in Creator Hub that the key's owner can configure it and, when making it public, that the experience's maturity questionnaire is complete: %w", id, verb, err)
+	return explained{fmt.Errorf("roblox_experience: Roblox refused to make universe %s %s; check in Creator Hub that the key's owner can configure it and, when making it public, that the experience's maturity questionnaire is complete: %w", id, verb, err)}
 }
+
+// explained wraps a 401/403 whose message already says what to fix, so the
+// engine doesn't also list the resource's documented scopes.
+type explained struct{ error }
+
+func (e explained) Unwrap() error    { return e.error }
+func (explained) AccessDenied() bool { return false }
 
 // Delete is a no-op: Baseplate adopts an existing universe's config but does
 // not own its lifecycle, so dropping the resource just stops managing it.

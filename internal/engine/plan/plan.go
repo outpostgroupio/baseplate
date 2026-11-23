@@ -178,6 +178,7 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 			continue
 		}
 		actual, err := resources[d.Type].Read(ctx, st.ID)
+		err = provider.ResourceError(addr, d.Type, resources[d.Type], err)
 		if errors.Is(err, provider.ErrNotFound) {
 			newID[addr] = true
 			pl.Changes = append(pl.Changes, Change{

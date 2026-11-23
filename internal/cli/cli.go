@@ -772,7 +772,7 @@ func generateConfig(ctx context.Context, p provider.Provider, imports []plan.Imp
 			if errors.Is(err, provider.ErrNotFound) {
 				return fmt.Errorf("generate %s: no %s found with id %q", imp.Address, typ, imp.ID)
 			}
-			return err
+			return provider.ResourceError(imp.Address, typ, r, err)
 		}
 		block, err := configgen.Generate(r, name, imp.ID, actual)
 		if err != nil {

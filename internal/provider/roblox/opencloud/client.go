@@ -58,13 +58,28 @@ type APIError struct {
 	Status  int
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	// Request is the failed request's method and URL path ("PATCH
+	// /cloud/v2/universes/1"), without the query. It's empty for an error
+	// reported inside a long-running operation.
+	Request string `json:"-"`
 }
 
 func (e *APIError) Error() string {
-	if e.Message != "" {
-		return fmt.Sprintf("Roblox API %d: %s", e.Status, e.Message)
+	s := fmt.Sprintf("Roblox API %d", e.Status)
+	if e.Request != "" {
+		s += " on " + e.Request
 	}
-	return fmt.Sprintf("Roblox API %d", e.Status)
+	if e.Message != "" {
+		s += ": " + e.Message
+	}
+	return s
+}
+
+// AccessDenied reports whether Roblox refused the API key (401 or 403). It
+// implements provider.AccessDenied, so the engine can name the scopes the
+// resource needs.
+func (e *APIError) AccessDenied() bool {
+	return e.Status == http.StatusUnauthorized || e.Status == http.StatusForbidden
 }
 
 // IsNotFound reports whether err is, or wraps, a Roblox API 404 response.
@@ -135,12 +150,14 @@ func (c *Client) send(ctx context.Context, method, path, contentType string, bod
 		}
 		if resp.StatusCode == 429 || resp.StatusCode >= 500 {
 			resp.Body.Close()
-			lastErr = &APIError{Status: resp.StatusCode}
+			lastErr = &APIError{Status: resp.StatusCode, Request: describe(req)}
 			continue
 		}
 		if resp.StatusCode >= 400 {
 			defer resp.Body.Close()
-			return resp, parseAPIError(resp)
+			e := parseAPIError(resp)
+			e.Request = describe(req)
+			return resp, e
 		}
 		defer resp.Body.Close()
 		if out != nil {
@@ -192,7 +209,13 @@ func backoff(attempt int) time.Duration {
 	return d
 }
 
-func parseAPIError(resp *http.Response) error {
+// describe names a request for an error message: its method and URL path.
+// The query is left out; it can be long (page tokens, filters).
+func describe(req *http.Request) string {
+	return req.Method + " " + req.URL.Path
+}
+
+func parseAPIError(resp *http.Response) *APIError {
 	b, _ := io.ReadAll(resp.Body)
 	e := &APIError{Status: resp.StatusCode}
 	_ = json.Unmarshal(b, e)   // best-effort; code/message may be absent

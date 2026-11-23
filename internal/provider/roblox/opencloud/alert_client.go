@@ -330,6 +330,10 @@ func (e *AlertsNotEligibleError) Error() string {
 
 func (e *AlertsNotEligibleError) Unwrap() error { return e.Err }
 
+// AccessDenied is false: the message already explains the 403, and adding the
+// resource's scopes would suggest a fix that doesn't apply.
+func (e *AlertsNotEligibleError) AccessDenied() bool { return false }
+
 // IsAlertsNotEligible reports whether err is, or wraps, an AlertsNotEligibleError.
 func IsAlertsNotEligible(err error) bool {
 	var e *AlertsNotEligibleError
