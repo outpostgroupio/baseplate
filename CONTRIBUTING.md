@@ -1,103 +1,66 @@
-# Contributing to Baseplate
+# Contributing
 
-Thanks for your interest in Baseplate — a Terraform-style Infrastructure-as-Code tool for Roblox,
-written in Go. This guide covers how to set up, make a change, and get it merged.
+Thanks for helping out. For anything bigger than a small fix, please open an issue first so we can
+agree on the approach before you write the code.
 
-## Before you start
+Security problems go through [SECURITY.md](SECURITY.md), not public issues.
 
-- Skim **[ROADMAP.md](ROADMAP.md)** for where the project is heading and what's in scope.
-- For anything non-trivial, **open an issue first** to discuss the approach — it saves everyone time.
-- Good first contributions: docs fixes, test coverage, and the smaller items called out in the roadmap.
+## Setup
 
-## Development setup
-
-Baseplate is pure Go with **no runtime dependencies on cgo** — that's a hard constraint (the binary
-must build with `CGO_ENABLED=0`).
-
-- **Go 1.24+** (module floor is 1.24).
-- Clone your fork, then:
+You need Go 1.24 or later. The release binary must build without cgo, so don't add dependencies
+that need it.
 
 ```bash
-# Build (must succeed with cgo disabled — this is what CI checks)
 CGO_ENABLED=0 go build ./...
-
-# Vet
 go vet ./...
-
-# Full test suite (hermetic: no network, no Roblox credentials needed)
 go test ./... -race
 ```
 
-The race detector needs cgo, so tests run under the default toolchain; the *distribution* build is
-what must be cgo-free.
+The test suite doesn't touch the network or need Roblox credentials. (The race detector needs cgo,
+so the tests run with cgo enabled; only the release build has to be cgo-free.)
 
-### Running the CLI locally
+To try the CLI:
 
 ```bash
-go run ./cmd/baseplate {validate|plan|apply|destroy} --config X.bp.hcl --state X.bpstate
+go run ./cmd/baseplate plan --config X.bp.hcl --state X.bpstate
 ```
 
-Without `ROBLOX_API_KEY` set, the CLI uses an in-memory mock provider, which is enough for most
-engine-level work. Exit codes: `0` no changes, `2` (plan) changes present, `1` error.
+Without `ROBLOX_API_KEY` the CLI uses an in-memory mock provider, which is enough for most engine
+work but doesn't know the `roblox_*` resource types.
 
 ## Making changes
 
-- **Write tests.** New behavior and bug fixes should come with tests; we lean on test-driven
-  development. `go test ./... -race` must stay green.
-- **Match the surrounding code.** Run `gofmt` (or `go fmt ./...`), follow existing patterns, and keep
-  files focused.
-- **Keep it pure Go.** Avoid adding dependencies unless clearly justified; never anything that breaks
-  the `CGO_ENABLED=0` build.
-- **Keep changes focused.** One logical change per PR — it makes review and the changelog cleaner.
+- Add tests for new behaviour and bug fixes.
+- Run `gofmt` and follow the style of the code around your change.
+- Keep each PR to one logical change.
+- If you change a resource's schema or its `Doc()`, run `go generate ./...` to update
+  `docs/resource-reference.md`. A test fails if the file is out of date.
 
-## Commits, PR titles, and merging
+[docs/development.md](docs/development.md) covers the code layout, live tests against Roblox,
+releases, and notes on Open Cloud behaviour that isn't in Roblox's docs.
 
-We **squash-merge every PR** (merge commits and rebase-merge are disabled). That means:
+## PR titles
 
-- Your PR's **title becomes the single commit on `main`** and the line that appears in release notes.
-- Individual commit messages inside your PR are not preserved, so **you don't need to police every
-  commit** — just write a good PR title.
-
-**PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/):**
+PRs are squash-merged, so the PR title becomes the commit message on `main` and the line in the
+release notes. Titles must follow [Conventional Commits](https://www.conventionalcommits.org/), and
+a CI check enforces it:
 
 ```
-<type>(<optional scope>): <description>
+feat(cli): add --auto-approve to apply
+fix(state): resend original lock payload on unlock
+docs: clarify the http backend setup
+feat(engine)!: change the plan JSON envelope
 ```
 
-A CI check (`pr-title`) enforces this and comments on your PR if the title doesn't match. Examples:
+A `!` marks a breaking change. `feat` and `fix` appear in the release notes under their own
+headings; `refactor`, `perf` and `revert` go under "Other changes"; `docs`, `test`, `build`, `ci`,
+`chore` and `style` are left out.
 
-- `feat(cli): add --auto-approve to apply`
-- `fix(state): resend original lock payload on unlock`
-- `docs: clarify the http backend setup`
-- `feat(engine)!: change the plan JSON envelope` (a `!` marks a breaking change)
+## CI
 
-Allowed types:
-
-| Type | Use for | In release notes? |
-|---|---|---|
-| `feat` | a new feature | ✅ **Features** |
-| `fix` | a bug fix | ✅ **Bug fixes** |
-| `refactor`, `perf`, `revert` | code changes with no new feature/fix | ✅ Other changes |
-| `docs`, `test`, `build`, `ci`, `chore`, `style` | docs, tests, tooling, formatting | ❌ (filtered out) |
-
-Release notes are generated from these titles, so a clear, user-facing description helps everyone.
-
-## What CI checks
-
-Every PR runs:
-
-- **`ci`** — `CGO_ENABLED=0 go build ./...`, `go vet ./...`, and `go test ./... -race`.
-- **`pr-title`** — validates the PR title against Conventional Commits.
-
-All checks must pass before a maintainer merges.
-
-## Live tests (optional)
-
-Most contributions need only the hermetic suite above. A small set of opt-in tests run against a real
-Roblox universe and require credentials — see **[docs/roblox-live-testing.md](docs/roblox-live-testing.md)**.
-You do **not** need these to contribute; maintainers run them when relevant.
+Every PR runs the build, `go vet` and the race-enabled tests (`ci`), plus the PR title check
+(`pr-title`). Both must pass before merging.
 
 ## License
 
-By contributing, you agree that your contributions are licensed under the project's
-[MIT License](LICENSE).
+By contributing, you agree that your contributions are licensed under the [MIT License](LICENSE).

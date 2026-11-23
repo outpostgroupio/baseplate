@@ -40,7 +40,7 @@ func TestLiveAssetTextureID(t *testing.T) {
 	}
 	owner := os.Getenv("BASEPLATE_TEST_USER")
 	if owner == "" {
-		owner = "5822334358"
+		t.Fatal("BASEPLATE_TEST_USER must be set to the user id that owns the API key")
 	}
 	ownerID, err := strconv.ParseInt(owner, 10, 64)
 	if err != nil {

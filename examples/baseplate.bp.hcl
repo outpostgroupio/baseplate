@@ -43,8 +43,8 @@ resource "roblox_asset" "gem_icon" {
   creator_user_id = 0 # your Roblox user id (or use creator_group_id)
 }
 
-# A developer product whose universe_id is a REFERENCE to the experience above —
-# resolved at apply time, after the experience is reconciled.
+# A developer product whose universe_id references the experience above. The
+# reference is resolved at apply time, after the experience is reconciled.
 resource "roblox_developer_product" "gems_100" {
   universe_id = roblox_experience.main.id
   name        = "100 Gems"

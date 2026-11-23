@@ -19,7 +19,7 @@ import (
 func planInState(res provider.Resource, d DesiredResource, st *state.Resource, actual provider.Attributes, s *state.State, pending map[string]bool, importIDs map[string]string) (Change, error) {
 	address := d.Address()
 	// Resolve references from existing state so a referenced attribute (e.g. an
-	// id) diffs against its real resolved value, not null — this keeps re-plans
+	// id) diffs against its real resolved value, not null; this keeps re-plans
 	// convergent after apply.
 	resolved, err := normalize(res, address, mergeRefs(d, s, importIDs))
 	if err != nil {

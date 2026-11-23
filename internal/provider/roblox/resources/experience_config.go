@@ -42,7 +42,7 @@ type experienceConfig struct {
 // accepts a bare universe id (repository InExperienceConfig).
 //
 // Ownership: the resource is authoritative for the repository's BASE keys (a key
-// not in `entries` is removed on apply) but never touches what it doesn't model —
+// not in `entries` is removed on apply) but never touches what it doesn't model:
 // conditional rules and the conditional branches of keys it keeps. It writes with
 // a PATCH draft (changed keys + explicit nulls for removed keys, no
 // conditionalRules), never draft:overwrite, which deletes every rule/branch that
@@ -59,18 +59,18 @@ func (e *experienceConfig) Type() string { return "roblox_experience_config" }
 
 func (e *experienceConfig) Doc() provider.ResourceDoc {
 	return provider.ResourceDoc{
-		Summary: "Manages a universe's Experience Config (BETA): the key/value settings a published game reads at runtime through `ConfigService` — declarative feature flags and tuning values. Each apply stages the key changes as a draft and publishes it.",
+		Summary: "Manages a universe's Experience Config (a beta Roblox feature): the key/value settings, such as feature flags and tuning values, that a published game reads at runtime through `ConfigService`. Each apply stages the key changes as a draft and publishes it.",
 		Attributes: map[string]string{
 			"universe_id": "The universe.",
 			"repository":  "Config repository. Default `InExperienceConfig` (the only one Roblox documents).",
 			"entries": "Map of config key to value. Values are written as native HCL: bool, number, string, or an object/list (a JSON config), e.g. `{ enable_tutorial = true, boss_health = 100, shop = { discount = 0.2 } }`. " +
-				"**Authoritative:** keys in the repository but not here are removed on apply. Max 100 keys, 256-char keys; `.RBX.` is reserved in keys.",
+				"Keys in the repository but not listed here are removed on apply. Max 100 keys, 256-char keys; `.RBX.` is reserved in keys.",
 			"deployment_strategy": "`Immediate` (default) or `GradualRollout` (~15-20 min). Used for every publish, but not readable back, so it isn't diffed (listed as create-only): changing it alone doesn't publish.",
 		},
 		Notes: "The resource owns the repository's base keys: an apply removes any published key that isn't in `entries`. " +
-			"To protect an existing game, the **first** apply (create) refuses if the repository already has keys that aren't declared — `import` it first so the plan shows what would be removed. " +
-			"Conditional rules and the conditional (targeted) values of keys you keep are **preserved** (Baseplate never sends them, and verifies the staged draft and the published result); a removed key's conditional values are removed with it, and a type change for a key with conditional values is rejected by Roblox. " +
-			"Apply refuses if the repository has an unpublished draft (e.g. pending edits in Creator Hub) — publish or discard it first. " +
+			"To protect an existing game, the first apply (create) refuses if the repository already has keys that aren't declared. `import` it first so the plan shows what would be removed. " +
+			"Conditional rules and the conditional (targeted) values of keys you keep are preserved (Baseplate never sends them, and verifies the staged draft and the published result); a removed key's conditional values are removed with it, and a type change for a key with conditional values is rejected by Roblox. " +
+			"Apply refuses if the repository has an unpublished draft (for example, pending edits in Creator Hub). Publish or discard it first. " +
 			"`destroy` removes every plain key in the repository and publishes (the same ownership as apply; conditional rules are left alone, and an empty or never-published repository is a no-op). Protect production config with [`lifecycle { prevent_destroy = true }`](config-reference.md#lifecycle), which makes any plan that would destroy it fail. " +
 			"With `GradualRollout` (observed ~20 minutes), the API keeps returning the previous values until the rollout completes and rejects new drafts meanwhile, so a re-plan in that window shows the change again and an apply fails with a retry-later error. " +
 			"Numbers are stored as doubles (exact only up to 2^53).",
@@ -91,7 +91,7 @@ func (e *experienceConfig) DecodeSpec() hcldec.Spec {
 }
 
 // Computed excludes from diff: identity (universe_id/repository are fixed by
-// the id), deployment_strategy (write-only — not readable back), and the
+// the id), deployment_strategy (write-only, not readable back), and the
 // provider-reported config_version. Only `entries` diffs.
 func (e *experienceConfig) Computed() []string {
 	return []string{"id", "universe_id", "repository", "deployment_strategy", "config_version"}
@@ -144,7 +144,7 @@ func (e *experienceConfig) Update(ctx context.Context, id string, desired provid
 	return e.write(ctx, universeID, repo, desired, false)
 }
 
-// Delete removes every plain key the resource owns and publishes — the same
+// Delete removes every plain key the resource owns and publishes, the same
 // ownership as apply (which already removes undeclared plain keys), so it needs
 // no state. Conditional rules are left alone and the same draft guard, draft
 // verification and post-publish checks apply. An empty or never-published
@@ -330,7 +330,7 @@ func (e *experienceConfig) publishOnce(ctx context.Context, universeID, repo str
 		}
 		if problem := unintendedChanges(draft, changes, pub); problem != "" {
 			_ = e.cc.DiscardDraft(ctx, universeID, repo, "")
-			return 0, nil, fmt.Errorf("roblox_experience_config: universe %s repository %s: the staged draft changed under Baseplate and now %s; it was discarded and nothing was published — retry shortly", universeID, repo, problem)
+			return 0, nil, fmt.Errorf("roblox_experience_config: universe %s repository %s: the staged draft changed under Baseplate and now %s; it was discarded and nothing was published; retry shortly", universeID, repo, problem)
 		}
 		hash = draft.Hash
 		version, err = e.cc.Publish(ctx, universeID, repo, hash, configPublishMessage, strategy)
@@ -338,7 +338,7 @@ func (e *experienceConfig) publishOnce(ctx context.Context, universeID, repo str
 	switch {
 	case opencloud.IsEmptyDraft(err):
 		// Nothing changed remotely (e.g. drift already reverted). Don't leave the
-		// no-op draft behind — it would block the next apply.
+		// no-op draft behind, because it would block the next apply.
 		if derr := e.discard(ctx, universeID, repo, hash); derr != nil {
 			return 0, nil, fmt.Errorf("roblox_experience_config: discarding no-op draft: %w", derr)
 		}
@@ -408,7 +408,7 @@ func (e *experienceConfig) stage(ctx context.Context, universeID, repo string, c
 			return "", fmt.Errorf("roblox_experience_config: the staged draft %s, and discarding it failed: %v", problem, derr)
 		}
 	}
-	return "", fmt.Errorf("roblox_experience_config: universe %s repository %s: Roblox staged a draft that %s (not requested by Baseplate); it was discarded and nothing was published — retry shortly", universeID, repo, problem)
+	return "", fmt.Errorf("roblox_experience_config: universe %s repository %s: Roblox staged a draft that %s (not requested by Baseplate); it was discarded and nothing was published; retry shortly", universeID, repo, problem)
 }
 
 // unintendedChanges returns a description of anything the staged draft would do
@@ -471,7 +471,7 @@ func (e *experienceConfig) awaitVersion(ctx context.Context, universeID, repo st
 }
 
 // lostPreserved reports conditional rules or kept keys' branches that existed
-// before the publish but are gone after it — a safety net behind the draft check
+// before the publish but are gone after it: a safety net behind the draft check
 // in stage (Baseplate never asks for either to be removed).
 func lostPreserved(before, after opencloud.ConfigValues, changes map[string]json.RawMessage) string {
 	var lost []string

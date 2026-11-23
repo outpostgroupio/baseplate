@@ -39,7 +39,7 @@ func (g *gamePass) Doc() provider.ResourceDoc {
 			"icon_file":   "Path to an icon image (direct upload).",
 			"is_for_sale": "On sale (default `true`).",
 		},
-		Notes:       "Game passes can't be hard-deleted, so `destroy` sets `is_for_sale = false` and unmanages it. Managed pricing is intentionally not exposed — it requires prior manual acceptance of Roblox's managed-pricing terms in the Creator Dashboard.",
+		Notes:       "Game passes can't be hard-deleted, so `destroy` sets `is_for_sale = false` and unmanages it. Managed pricing isn't exposed, because it requires prior manual acceptance of Roblox's managed-pricing terms in the Creator Dashboard.",
 		Scopes:      []string{"game-pass:read", "game-pass:write"},
 		ExampleFile: "examples/game-pass.bp.hcl",
 	}

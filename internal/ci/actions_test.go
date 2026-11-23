@@ -29,7 +29,7 @@ func parseValid(t *testing.T, path string) []byte {
 }
 
 // noInterpolationInScripts guards the script-injection footgun (C1): no run/script
-// body may contain a ${{ }} expression — inputs must arrive via env.
+// body may contain a ${{ }} expression, so inputs must arrive via env.
 func noInterpolationInScripts(t *testing.T, node *yaml.Node) {
 	t.Helper()
 	if node.Kind == yaml.MappingNode {

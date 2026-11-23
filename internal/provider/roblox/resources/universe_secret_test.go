@@ -2,6 +2,7 @@ package resources
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/zclconf/go-cty/cty"
@@ -69,8 +70,8 @@ func TestSecretIsSensitive(t *testing.T) {
 		t.Fatal("roblox_universe_secret must implement provider.Sensitive")
 	}
 	got := s.Sensitive()
-	if len(got) != 1 || got[0] != "value" {
-		t.Fatalf("Sensitive() = %v, want [value]", got)
+	if len(got) != 2 || got[0] != "value" || got[1] != "value_hash" {
+		t.Fatalf("Sensitive() = %v, want [value value_hash]", got)
 	}
 }
 
@@ -91,6 +92,16 @@ func TestSecretTriggersHashChangesWithValue(t *testing.T) {
 	}
 	if t1["value_hash"].RawEquals(t2["value_hash"]) {
 		t.Fatal("value_hash must change when the plaintext changes")
+	}
+	again, err := tr.Triggers(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !t2["value_hash"].RawEquals(again["value_hash"]) {
+		t.Fatal("value_hash must be stable for the same plaintext")
+	}
+	if h := t2["value_hash"].AsString(); !strings.HasPrefix(h, "scrypt:") || strings.Contains(h, "different") {
+		t.Fatalf("value_hash = %q, want an scrypt fingerprint", h)
 	}
 }
 

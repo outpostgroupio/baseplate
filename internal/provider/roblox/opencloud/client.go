@@ -29,7 +29,7 @@ func New(apiKey, baseURL string, opts ...Option) *Client {
 	c := &Client{
 		apiKey:  apiKey,
 		baseURL: strings.TrimRight(baseURL, "/"),
-		http:    &http.Client{Timeout: 60 * time.Second},
+		http:    &http.Client{Timeout: 60 * time.Second, CheckRedirect: sameHostRedirects},
 		sleep:   time.Sleep,
 		maxTry:  5,
 	}
@@ -37,6 +37,21 @@ func New(apiKey, baseURL string, opts ...Option) *Client {
 		o(c)
 	}
 	return c
+}
+
+// errOffHostRedirect stops a redirect that would carry the x-api-key header to
+// another host. net/http strips Authorization on a cross-host redirect, but it
+// forwards custom headers like x-api-key.
+var errOffHostRedirect = errors.New("refusing to follow a redirect to another host with the API key")
+
+func sameHostRedirects(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if req.URL.Scheme != via[0].URL.Scheme || req.URL.Host != via[0].URL.Host {
+		return fmt.Errorf("%w (%s)", errOffHostRedirect, req.URL.Host)
+	}
+	return nil
 }
 
 type APIError struct {
@@ -65,7 +80,7 @@ func IsNotFound(err error) bool {
 // assets have no Open Cloud delete path, so destroy unmanages them in place.
 // The substring match is brittle but fails closed (an unrelated 400 propagates,
 // so we never silently orphan-and-succeed on a different error).
-// TODO: revisit if Roblox exposes a structured error code; pin with a contract test (Phase 4).
+// TODO: revisit if Roblox exposes a structured error code; pin with a contract test.
 func IsNotArchivable(err error) bool {
 	var e *APIError
 	return errors.As(err, &e) && e.Status == http.StatusBadRequest &&
@@ -112,6 +127,9 @@ func (c *Client) send(ctx context.Context, method, path, contentType string, bod
 		}
 		resp, err := c.http.Do(req)
 		if err != nil {
+			if errors.Is(err, errOffHostRedirect) {
+				return nil, err
+			}
 			lastErr = err
 			continue
 		}

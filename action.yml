@@ -10,9 +10,9 @@ inputs:
     required: false
     default: ""
   version:
-    description: "Baseplate version/ref to install (a tag like v0.1.0, a commit SHA, or latest)."
+    description: "Baseplate version to install: a tag, a commit SHA or latest. Empty (the default) builds the version matching the ref this action is pinned to."
     required: false
-    default: "latest"
+    default: ""
   api-key:
     description: "Roblox Open Cloud API key, exported as ROBLOX_API_KEY."
     required: false
@@ -38,7 +38,12 @@ runs:
       env:
         BP_VERSION: ${{ inputs.version }}
       run: |
-        go install "github.com/outpostgroupio/baseplate/cmd/baseplate@${BP_VERSION}"
+        if [ -n "$BP_VERSION" ]; then
+          go install "github.com/outpostgroupio/baseplate/cmd/baseplate@${BP_VERSION}"
+        else
+          # The action's own checkout, so pinning the action also pins the tool.
+          (cd "$GITHUB_ACTION_PATH" && go install ./cmd/baseplate)
+        fi
         echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
     - id: run
       shell: bash

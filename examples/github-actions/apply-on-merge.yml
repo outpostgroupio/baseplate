@@ -12,7 +12,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: outpostgroupio/baseplate@v0.1.0 # pin to a released tag or commit SHA
+      - uses: outpostgroupio/baseplate@v0.1.0-rc.2 # pin to a release tag or a commit SHA
         with:
           command: apply
           args: --config baseplate.bp.hcl --auto-approve

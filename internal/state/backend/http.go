@@ -33,6 +33,26 @@ type HTTPConfig struct {
 	Client        *http.Client
 }
 
+// requireTLS rejects a plain-http address unless it points at this machine:
+// the backend sends the state, and any basic-auth password, with every request.
+func requireTLS(address string) error {
+	if address == "" {
+		return nil
+	}
+	u, err := url.Parse(address)
+	if err != nil {
+		return fmt.Errorf("http backend: invalid address %q: %w", address, err)
+	}
+	if u.Scheme == "http" {
+		switch u.Hostname() {
+		case "localhost", "127.0.0.1", "::1":
+			return nil
+		}
+		return fmt.Errorf("http backend: %s must use https (plain http is only allowed for localhost)", address)
+	}
+	return nil
+}
+
 type HTTP struct {
 	cfg      HTTPConfig
 	client   *http.Client
@@ -43,6 +63,11 @@ type HTTP struct {
 func NewHTTP(cfg HTTPConfig) (*HTTP, error) {
 	if strings.TrimSpace(cfg.Address) == "" {
 		return nil, fmt.Errorf("http backend: address is required")
+	}
+	for _, a := range []string{cfg.Address, cfg.LockAddress, cfg.UnlockAddress} {
+		if err := requireTLS(a); err != nil {
+			return nil, err
+		}
 	}
 	if cfg.UpdateMethod == "" {
 		cfg.UpdateMethod = http.MethodPost

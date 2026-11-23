@@ -32,8 +32,8 @@ func TestNewAssemblesResources(t *testing.T) {
 // SchemaProvider() drifting apart (e.g. a resource added to one but not the
 // other), since the doc generator (and other introspection) uses
 // SchemaProvider() as a stand-in for the real, network-backed provider built
-// by New(). New("x") succeeds without any network call — it only constructs
-// clients — so it's safe to call here.
+// by New(). New("x") succeeds without any network call (it only constructs
+// clients), so it's safe to call here.
 func TestNewAndSchemaProviderResourceSetsMatch(t *testing.T) {
 	real, err := New("x")
 	if err != nil {

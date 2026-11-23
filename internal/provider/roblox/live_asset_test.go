@@ -64,11 +64,10 @@ func TestLiveAssetLifecycle(t *testing.T) {
 	if key == "" {
 		t.Fatal("ROBLOX_API_KEY must be set")
 	}
-	// Assets are owned by the API key's account. Defaults to the documented test
-	// user (users/5822334358); override with BASEPLATE_TEST_USER if the key differs.
+	// Assets are owned by the API key's account.
 	owner := os.Getenv("BASEPLATE_TEST_USER")
 	if owner == "" {
-		owner = "5822334358"
+		t.Fatal("BASEPLATE_TEST_USER must be set to the user id that owns the API key")
 	}
 	ownerID, err := strconv.ParseInt(owner, 10, 64)
 	if err != nil {
@@ -236,6 +235,6 @@ func TestLiveAssetLifecycle(t *testing.T) {
 
 	// NOTE: destroy runs in t.Cleanup. Image assets are not archivable via Open
 	// Cloud, so destroy unmanages the asset in place (drops it from state) and
-	// leaves it in the account — one orphaned test image per live run, by design.
+	// leaves it in the account: one orphaned test image per live run, by design.
 	t.Log("live asset lifecycle OK: uploaded via multipart+operation-poll, read back, converged; Image content change updated in place (same id) and converged; asset_type change replaced it with a new id and converged; import adopted without a replace; destroy unmanages (image assets aren't archivable)")
 }

@@ -2,13 +2,13 @@ package resources
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"strings"
 
 	"github.com/hashicorp/hcl/v2/hcldec"
 	"github.com/zclconf/go-cty/cty"
+	"golang.org/x/crypto/scrypt"
 
 	"github.com/outpostgroupio/baseplate/internal/provider"
 	"github.com/outpostgroupio/baseplate/internal/provider/roblox/opencloud"
@@ -26,7 +26,7 @@ func (u *universeSecret) Type() string { return "roblox_universe_secret" }
 
 func (u *universeSecret) Doc() provider.ResourceDoc {
 	return provider.ResourceDoc{
-		Summary: "Manages an Open Cloud secret for a universe — the only resource with a full create/update/real delete lifecycle. The value is encrypted client-side (LibSodium sealed box) before upload and is never written to state or printed in a plan.",
+		Summary: "Manages an Open Cloud secret for a universe. Secrets can be created, updated and deleted. The value is encrypted client-side (LibSodium sealed box) before upload and is never written to state or printed in a plan.",
 		Attributes: map[string]string{
 			"universe_id": "The universe.",
 			"name":        "Secret name (the API id): 1-64 chars, alphanumeric/underscore, not starting with a digit.",
@@ -49,23 +49,32 @@ func (u *universeSecret) DecodeSpec() hcldec.Spec {
 }
 
 // Computed excludes from diff: the state id; universe_id and name (create-only
-// identity); value (write-only — change detection via the value_hash trigger) and
-// key_id/timestamps (provider outputs). domain is intentionally absent — it is the
+// identity); value (write-only; change detection via the value_hash trigger) and
+// key_id/timestamps (provider outputs). domain is intentionally absent: it is the
 // one remotely-readable, mutable attribute and diffs normally.
 func (u *universeSecret) Computed() []string {
 	return []string{"id", "universe_id", "name", "value", "key_id", "create_time", "update_time"}
 }
 
-// Sensitive redacts the plaintext value from all rendered plan output.
-func (u *universeSecret) Sensitive() []string { return []string{"value"} }
+// Sensitive redacts the plaintext value, and the fingerprint derived from it,
+// from all rendered plan output.
+func (u *universeSecret) Sensitive() []string { return []string{"value", "value_hash"} }
 
 func (u *universeSecret) Dependencies(provider.Attributes) []provider.Ref { return nil }
 
+// valueHashSalt is fixed because the fingerprint must be reproducible from config
+// alone; it still rules out precomputed tables for a plain SHA-256.
+const valueHashSalt = "baseplate/roblox_universe_secret/value_hash/v2"
+
 // Triggers forces an Update when the plaintext value changes (the value is never
-// readable back, so a hash is the only comparable fingerprint).
+// readable back, so a hash is the only comparable fingerprint). The fingerprint
+// lands in state, so it uses scrypt to make guessing a weak secret from it slow.
 func (u *universeSecret) Triggers(desired provider.Attributes) (map[string]cty.Value, error) {
-	sum := sha256.Sum256([]byte(desired["value"].AsString()))
-	return map[string]cty.Value{"value_hash": cty.StringVal(hex.EncodeToString(sum[:]))}, nil
+	sum, err := scrypt.Key([]byte(desired["value"].AsString()), []byte(valueHashSalt), 1<<15, 8, 1, 32)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]cty.Value{"value_hash": cty.StringVal("scrypt:" + hex.EncodeToString(sum))}, nil
 }
 
 func (u *universeSecret) Create(ctx context.Context, desired provider.Attributes) (string, provider.Attributes, error) {
@@ -130,7 +139,7 @@ func (u *universeSecret) write(desired provider.Attributes) opencloud.SecretWrit
 	}
 }
 
-// stateAttrs is what gets persisted — never the plaintext value.
+// stateAttrs is what gets persisted, never the plaintext value.
 func (u *universeSecret) stateAttrs(universeID string, s opencloud.Secret) provider.Attributes {
 	return provider.Attributes{
 		"universe_id": cty.StringVal(universeID),

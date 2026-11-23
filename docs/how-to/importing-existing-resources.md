@@ -1,45 +1,40 @@
-# How-to: import existing resources
+# Importing existing resources
 
-Most Roblox resources already exist — a universe you created in Creator Hub, a place, a developer
-product. If you just declare them in config and run `apply`, Baseplate has no state for them and
-tries to **create duplicates** (or fails). **Importing** tells Baseplate "this config block already
-exists on the platform with this id" so it reconciles the existing resource instead.
+If a resource already exists on Roblox (a universe, a product you made in Creator Hub, assets
+uploaded by another tool), declaring it in the config isn't enough. Baseplate has no state for it,
+so `apply` would try to create a new one. Importing tells Baseplate which existing object a
+`resource` block refers to, and from then on it's managed like anything else.
 
-Baseplate offers two ways to import.
+## With an `import` block
 
-## Option A: declarative `import {}` block (recommended)
-
-Add an `import` block alongside the resource. On the next `apply`, Baseplate adopts the live resource
-and reconciles it to your config **in a single pass**.
+Add an `import` block next to the resource. The next `apply` adopts the existing object and then
+updates it to match the config, in one run:
 
 ```hcl
 resource "roblox_experience" "main" {
-  universe_id        = "10438196190"
+  universe_id        = "1234567890"
   voice_chat_enabled = true
 }
 
 import {
-  to = roblox_experience.main   # the resource address to adopt into
-  id = "10438196190"            # the platform id to adopt
+  to = roblox_experience.main
+  id = "1234567890"
 }
 ```
 
-`plan` previews it:
+`plan` shows the import:
 
 ```console
 $ baseplate plan
-roblox_experience.main will be imported (id 10438196190)
+roblox_experience.main will be imported (id 1234567890)
 
 Plan: 1 to import, 0 to add, 0 to change, 0 to destroy.
 ```
 
-`apply` adopts and reconciles. Once imported, you can delete the `import {}` block — it's a no-op
-after the resource is in state, so it's also fine to leave it in for reproducibility.
+Once the resource is in state the block does nothing, so you can delete it or leave it.
 
-### Importing many at once
-
-An `import` block can take `for_each`, which adopts every instance of a `for_each` resource from a
-map of ids in one block:
+`import` blocks take `for_each`, which is the easiest way to adopt a set of assets from a JSON map
+of ids:
 
 ```hcl
 import {
@@ -51,53 +46,38 @@ import {
 
 See [managing many assets](many-assets.md#2-adopt-assets-youve-already-uploaded).
 
-## Option B: one-off CLI import
+If you don't want to write the `resource` block by hand, `baseplate plan --generate-config=FILE`
+writes one for each `import` block whose target isn't declared yet. It doesn't support `for_each`
+targets.
 
-Adopt a single resource without editing config. The resource must already be **declared** in the
-config file.
+## With the CLI
+
+`baseplate import` adopts one resource straight away. The resource must already be declared in the
+config:
 
 ```console
-$ baseplate import roblox_experience.main 10438196190
+$ baseplate import roblox_experience.main 1234567890
+$ baseplate import 'roblox_asset.sprites["ui/gem.png"]' 1234567890
 ```
 
-This reads the live resource and writes a state entry under the state lock; it never mutates the
-remote. Afterwards, `plan` reconciles any differences between the live resource and your config.
+It reads the remote object and writes it to state. It never changes anything on Roblox. Run `plan`
+afterwards to see how the object differs from your config.
 
-## Which id do I use?
-
-The `id` is the resource's platform identifier — the same value the resource's state id is built
-from:
+## Import ids
 
 | Resource | Import id |
 |---|---|
-| `roblox_experience` | the universe id |
-| `roblox_developer_product` | `<universeId>/<productId>` |
+| `roblox_experience` | `<universeId>` |
+| `roblox_asset` | `<assetId>` |
 | `roblox_place` | `<universeId>/<placeId>` |
-| `roblox_asset` | the asset id |
-| `roblox_universe_secret` | `<universeId>/<name>` |
+| `roblox_place_config` | `<universeId>/<placeId>` |
+| `roblox_developer_product` | `<universeId>/<productId>` |
+| `roblox_game_pass` | `<universeId>/<gamePassId>` |
+| `roblox_badge` | `<universeId>/<badgeId>` |
+| `roblox_universe_secret` | `<universeId>/<secretName>` |
+| `roblox_analytics_alert` | `<universeId>/<alertId>` |
+| `roblox_experience_config` | `<universeId>/<repository>` |
+| `roblox_experience_event` | `<eventId>` |
 
-## Errors
-
-Both paths fail clearly if:
-
-- the address **isn't declared** in the config,
-- the resource is **already in state** (nothing to import),
-- the id **can't be found** on the platform.
-
-## Verifying
-
-After importing, run `plan`. A clean import of a resource whose config already matches the platform
-converges to no changes:
-
-```console
-$ baseplate plan
-Plan: 0 to import, 0 to add, 0 to change, 0 to destroy.
-```
-
-If your config differs from the live resource, `plan` shows exactly what `apply` will change to make
-the platform match your config.
-
-## See also
-
-- [Getting started → import](../getting-started.md#6-adopting-existing-resources-import)
-- [CLI reference → import](../cli-reference.md#import-address-id)
+Both ways of importing fail if the address isn't declared in the config, is already in state, or
+the id doesn't exist. They also refuse an id that another address in state already manages.

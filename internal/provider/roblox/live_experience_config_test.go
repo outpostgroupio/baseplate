@@ -33,7 +33,7 @@ const liveCfgRule = `{"rules":{"bpc1":{"tokens":[{"operand":{"attributeReference
 //  4. adopts it with an import block + apply (removing the undeclared key while
 //     preserving the rule and the kept key's branch), and converges,
 //  5. updates (change/add/remove keys, nested objects), and converges,
-//  6. destroys — which must remove every plain key (publishing) while keeping
+//  6. destroys, which must remove every plain key (publishing) while keeping
 //     the conditional rule.
 //
 // SKIPPED unless BASEPLATE_LIVE=1 and ROBLOX_API_KEY + BASEPLATE_TEST_UNIVERSE are

@@ -11,7 +11,7 @@ import (
 
 // evalLocals evaluates every `locals {}` block. Locals may reference other
 // locals (evaluated in dependency order; cycles are an error), `path.config`,
-// env() and the function library — but not resources, so every local is known
+// env() and the function library, but not resources, so every local is known
 // at load time (which for_each needs). Names must be unique across blocks.
 func (l *loader) evalLocals(blocks hcl.Blocks) (map[string]cty.Value, error) {
 	attrs := map[string]*hcl.Attribute{}

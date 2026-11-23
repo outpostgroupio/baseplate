@@ -484,7 +484,7 @@ func (l *loader) addressExpr(expr hcl.Expression, ctx *hcl.EvalContext, what str
 // evalForEach evaluates a for_each expression and returns its instance keys
 // (sorted lexically) and each key's each.value. The value must be known at load
 // time: a map/object (keys -> values) or a set of strings (each.key ==
-// each.value). Lists are rejected — order isn't identity, and silently
+// each.value). Lists are rejected: order isn't identity, and silently
 // de-duplicating would hide mistakes.
 func (l *loader) evalForEach(a *hcl.Attribute, ctx *hcl.EvalContext, what string) ([]string, map[string]cty.Value, error) {
 	trs := a.Expr.Variables()
@@ -527,7 +527,7 @@ func (l *loader) evalForEach(a *hcl.Attribute, ctx *hcl.EvalContext, what string
 			values[ev.AsString()] = ev
 		}
 	case ty.IsListType() || ty.IsTupleType():
-		return nil, nil, fmt.Errorf("%s: %s: for_each must be a map or a set of strings; got list — wrap it in toset(...)", l.path, what)
+		return nil, nil, fmt.Errorf("%s: %s: for_each must be a map or a set of strings; got list; wrap it in toset(...)", l.path, what)
 	default:
 		return nil, nil, fmt.Errorf("%s: %s: for_each must be a map or a set of strings; got %s", l.path, what, ty.FriendlyName())
 	}
@@ -574,7 +574,7 @@ func pathObject(cfgPath string) cty.Value {
 // `<type>.<name>`. Each reference is an UNKNOWN dynamic value: attribute access
 // like `roblox_asset.gem_icon.id` (or indexing, for a for_each resource) yields
 // another unknown, which decodes cleanly to any target type. The real value is
-// unknown until apply — config only needs to record the Ref (see bodyRefs);
+// unknown until apply; config only needs to record the Ref (see bodyRefs);
 // the unknown is discarded.
 func buildRefObject(blocks hcl.Blocks) map[string]cty.Value {
 	byType := map[string]map[string]cty.Value{}

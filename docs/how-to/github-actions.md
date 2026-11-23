@@ -1,58 +1,72 @@
 # GitHub Actions
 
-Baseplate ships a composite action and two example workflows so you can run plan-on-PR and
-apply-on-merge in your own repo.
+The repository is also a composite action, and `examples/github-actions/` has two workflows you can
+copy: one that comments the plan on pull requests and one that applies on merge.
 
 ## The action
 
-`uses: outpostgroupio/baseplate@<ref>` — installs Baseplate and runs a subcommand.
+```yaml
+- uses: outpostgroupio/baseplate@v0.1.0-rc.2
+  with:
+    command: plan
+    args: --config baseplate.bp.hcl
+    api-key: ${{ secrets.ROBLOX_API_KEY }}
+```
 
-Inputs: `command` (default `plan`), `args`, `version` (default `latest`), `api-key`,
-`working-directory`. Outputs: `output` (the command's text output) and `changes` (`true`/`false` for
-`plan`). **Pin `<ref>` to a released tag (e.g. `@v0.1.0`) or a commit SHA — not `@latest`.**
+Pin the action to a release tag or a full commit SHA. Releases before 1.0 are release candidates
+(`v0.1.0-rc.N`); see the [releases page](https://github.com/outpostgroupio/baseplate/releases).
+
+Inputs:
+
+- `command`: `plan` (default), `apply`, `destroy`, `validate` or `restart-servers`.
+- `args`: extra arguments, such as `--config infra.bp.hcl --auto-approve`.
+- `api-key`: the Open Cloud key, exported as `ROBLOX_API_KEY`.
+- `working-directory`: where to run (default `.`).
+- `version`: which Baseplate to install. Leave it empty to build the version that matches the ref
+  you pinned the action to. You can also pass a tag, a commit SHA or `latest`. (In `v0.1.0-rc.2`
+  and earlier the default was `latest`, so set it explicitly there.)
+
+Outputs: `output` (the command's output) and `changes` (`true` or `false`, for `plan`).
 
 ## Plan on pull requests
 
-Copy `examples/github-actions/plan-on-pr.yml` into `.github/workflows/`. On each PR it runs
-`baseplate plan` and posts (or updates) a single comment with the diff. `plan` exits `2` when there are
-changes; the action treats that as success, so a PR with changes doesn't fail CI.
+Copy `examples/github-actions/plan-on-pr.yml` to `.github/workflows/`. On each pull request it runs
+`baseplate plan` and posts the result as a comment, updating the same comment on later pushes.
+`plan` exits with `2` when there are changes; the action counts that as success.
 
-Fork PRs are skipped (they have no secrets and a read-only token). The plan comment shows resource
-attribute values — sensitive attributes (e.g. secret values) are redacted, but other values are
-visible to anyone who can see the PR.
+Pull requests from forks are skipped, because they get no secrets and a read-only token. The comment
+shows attribute values. Secret values are redacted, but everything else is visible to anyone who
+can read the pull request.
 
 ## Apply on merge
 
-Copy `examples/github-actions/apply-on-merge.yml`. On push to `main` it runs
-`baseplate apply --auto-approve` (non-interactive). A `concurrency` group serializes applies.
-
-### Restarting servers after a publish
+Copy `examples/github-actions/apply-on-merge.yml`. On every push to `main` it runs
+`baseplate apply --auto-approve`, and a `concurrency` group makes sure only one apply runs at a
+time.
 
 If the config manages `roblox_place` files, add `--restart-servers` so a merge that publishes a new
-place version also moves players onto it. The restart only happens when the apply **succeeds** and
-publishes at least one `roblox_place`; other merges leave servers alone. `--restart-bleed-off` gives
-players time to finish before old servers shut down (whole minutes, up to `60m`):
+place version also moves players onto it. Servers are only restarted when the apply succeeds and
+publishes at least one place. `--restart-bleed-off` gives players time to leave before old servers
+shut down (whole minutes, up to `60m`):
 
 ```yaml
-      - uses: outpostgroupio/baseplate@v0.1.0 # pin to a released tag or commit SHA
-        with:
-          command: apply
-          args: --config baseplate.bp.hcl --auto-approve --restart-servers --restart-bleed-off 10m
-          api-key: ${{ secrets.ROBLOX_API_KEY }}
+- uses: outpostgroupio/baseplate@v0.1.0-rc.2
+  with:
+    command: apply
+    args: --config baseplate.bp.hcl --auto-approve --restart-servers --restart-bleed-off 10m
+    api-key: ${{ secrets.ROBLOX_API_KEY }}
 ```
 
-The API key needs the `universe:write` scope for the restart, in addition to the place's
-`universe-places:write`. If the apply succeeds but the restart request fails, the job fails with
-`apply succeeded, but restarting servers failed: …`. The new version is already live, so re-run the
-restart by hand with `baseplate restart-servers`. You can also restart on demand from a
-`workflow_dispatch` job with `command: restart-servers` and `args: --universe <id> --bleed-off 10m --yes`.
+The restart needs the `universe:write` scope. If the apply succeeds but the restart fails, the job
+fails with `apply succeeded, but restarting servers failed: ...`. The new version is already live,
+so you can run `baseplate restart-servers` by hand, or from a `workflow_dispatch` job with
+`command: restart-servers` and `args: --universe <id> --bleed-off 10m --yes`.
 
 ## Protecting production
 
-`apply --auto-approve` on merge deletes whatever the merged config no longer declares. A bad merge
-can delete production that way, and so can a `destroy` run in the wrong directory or a `for_each`
-key removed by mistake. Mark the resources you can't afford to lose with
-[`prevent_destroy`](../config-reference.md#lifecycle):
+An apply on merge deletes whatever the merged config no longer declares. So does a `destroy` in the
+wrong directory, or a `for_each` key removed by mistake. Mark resources you can't afford to lose
+with [`prevent_destroy`](../config-reference.md#lifecycle):
 
 ```hcl
 resource "roblox_universe_secret" "prod_webhook" {
@@ -66,28 +80,18 @@ resource "roblox_universe_secret" "prod_webhook" {
 }
 ```
 
-Any plan that would delete it then fails with `Instance cannot be destroyed: ...`, both in the plan
-comment on the PR and in the apply job, and nothing is changed. To retire the resource on purpose,
-first merge a change that removes the `lifecycle` block (or sets `prevent_destroy = false`), then
-merge the change that removes the resource.
+A plan that would delete it then fails with `Instance cannot be destroyed: ...`, both in the PR
+comment and in the apply job, and nothing changes. To retire the resource on purpose, merge a change
+that removes the `lifecycle` block first, then one that removes the resource.
 
-Things to know:
+The setting lives in the config only, as in Terraform. A change that deletes the whole `resource`
+block removes the protection with it, so review pull requests that delete protected blocks. It also
+doesn't stop anyone deleting the resource in Creator Hub.
 
-- The protection is read from the config only, as in Terraform. Deleting the whole `resource` block
-  in one change removes the protection with it, so that change **does** delete the resource. Review
-  PRs that delete protected blocks, and read the plan comment.
-- It guards Baseplate's plans only. Nothing stops someone deleting the resource in Creator Hub.
-- Some resources are never really deleted anyway (`roblox_asset`, `roblox_place` and others are only
-  unmanaged; see [`destroy`](../cli-reference.md#destroy)). `prevent_destroy` still blocks their
-  removal from state.
+## State and secrets in CI
 
-## State in CI (important)
+A local state file doesn't survive between CI runs. For CI, use the
+[HTTP state backend](../state.md#remote-state-http-backend) and store its password as a repository
+secret.
 
-The default local state file does not persist between CI runs. For real team CI, configure a remote
-[HTTP state backend](remote-state.md) and store its `password` as a GitHub secret, so state persists
-and concurrent runs lock.
-
-## Secrets
-
-- `ROBLOX_API_KEY` — required. Passed to the action's `api-key` input.
-- Any state backend `password` — if you use a remote backend.
+The workflows need `ROBLOX_API_KEY` as a secret, plus the backend password if you use one.

@@ -45,7 +45,7 @@ func Generate(res provider.Resource, name, id string, actual provider.Attributes
 			continue
 		}
 		if as.Required {
-			msg := fmt.Sprintf("TODO: %s is required but not readable from the API — set before apply", k)
+			msg := fmt.Sprintf("TODO: %s is required but not readable from the API; set it before apply", k)
 			if sensitive[k] {
 				msg += `, e.g. env("...")`
 			}

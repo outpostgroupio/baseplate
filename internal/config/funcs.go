@@ -64,7 +64,7 @@ func functions() map[string]function.Function {
 // directories) under dir matching a doublestar pattern (`**` crosses
 // directories). Results are relative to dir and always use forward slashes, so
 // the keys are identical on every OS. A missing dir is an error rather than an
-// empty set — it is almost always a typo, and an empty for_each would plan to
+// empty set: it is almost always a typo, and an empty for_each would plan to
 // destroy every existing instance.
 func filesetFunc() function.Function {
 	return function.New(&function.Spec{

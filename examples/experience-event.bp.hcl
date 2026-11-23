@@ -3,7 +3,7 @@ provider "roblox" {
 }
 
 resource "roblox_experience" "main" {
-  universe_id     = "10438196190"
+  universe_id     = "1234567890"
   desktop_enabled = true
 }
 

@@ -17,18 +17,18 @@ import (
 // single-event GET always reports thumbnails as [].
 const eventBody = `{"id":"9007199254740993123","title":"Double XP","subtitle":"Weekend",` +
 	`"description":"d","tagline":"t","startTime":"2026-12-01T18:00:00.123+00:00","endTime":"2026-12-01T20:00:00+00:00",` +
-	`"universeId":10438196190,"placeId":123456789012,"visibility":"private","featuringStatus":"disabled",` +
-	`"host":{"hostType":"user","hostId":5822334358,"hostName":"x","hasVerifiedBadge":false},` +
+	`"universeId":1234567890,"placeId":123456789012,"visibility":"private","featuringStatus":"disabled",` +
+	`"host":{"hostType":"user","hostId":1122334455,"hostName":"x","hasVerifiedBadge":false},` +
 	`"categories":[],"thumbnails":[]}`
 
 // listBody is the list endpoint, which (unlike the single GET) does return the
-// thumbnails — out of rank order here to prove the client sorts them.
+// thumbnails, out of rank order here to prove the client sorts them.
 const listBody = `{"gameEvents":[{"id":"1","thumbnails":[]},` +
 	`{"id":"9007199254740993123","thumbnails":[{"mediaId":222,"rank":1},{"mediaId":111,"rank":0}]}],"nextPageToken":null}`
 
 func TestGameEventCreateGetUpdateDelete(t *testing.T) {
 	const evPath = "/virtual-events/v3/game-events/9007199254740993123"
-	const colPath = "/virtual-events/v3/universes/10438196190/game-events"
+	const colPath = "/virtual-events/v3/universes/1234567890/game-events"
 	var createBody, patchBody map[string]any
 	var listQuery string
 	var deleted bool
@@ -68,7 +68,7 @@ func TestGameEventCreateGetUpdateDelete(t *testing.T) {
 	ctx := context.Background()
 	s := func(v string) *string { return &v }
 
-	got, err := gc.Create(ctx, "10438196190", GameEventWrite{
+	got, err := gc.Create(ctx, "1234567890", GameEventWrite{
 		Title: s("Double XP"), Subtitle: s("Weekend"),
 		StartTime: s("2026-12-01T18:00:00Z"), EndTime: s("2026-12-01T20:00:00Z"),
 		Visibility: s("private"), PlaceID: s("123456789012"), GroupID: s("77"),
@@ -94,8 +94,8 @@ func TestGameEventCreateGetUpdateDelete(t *testing.T) {
 	if t1 := th[1].(map[string]any); t1["mediaId"] != float64(222) || t1["rank"] != float64(1) {
 		t.Fatalf("thumbnails = %#v", th)
 	}
-	if got.ID != "9007199254740993123" || got.UniverseID != "10438196190" || got.PlaceID != "123456789012" ||
-		got.HostID != "5822334358" || got.HostType != "user" {
+	if got.ID != "9007199254740993123" || got.UniverseID != "1234567890" || got.PlaceID != "123456789012" ||
+		got.HostID != "1122334455" || got.HostType != "user" {
 		t.Fatalf("create got %+v", got)
 	}
 

@@ -4,15 +4,18 @@
 /baseplate
 /tmp/
 
-# Local credentials (API keys) for the CLI and live tests — NEVER commit.
+# Local credentials (API keys) for the CLI and live tests. Never commit these.
 .env
 .env.local
 *.env.local
 
-# Large/unused vendored specs kept on disk for Phase 1B universe extraction
-# + Phase 4 drift watcher, but not committed (3MB unified spec, legacy place-publish).
+# Large vendored specs kept on disk for reference but not committed
+# (the 3MB unified spec and the legacy place-publish spec).
 /internal/provider/roblox/opencloud/specs/openapi-unified.json
 /internal/provider/roblox/opencloud/specs/universes.json
 
-# Local planning docs (specs/plans) — kept out of the public repo.
+# Local planning notes.
 /docs/superpowers/
+
+# Local agent notes (not published).
+CLAUDE.local.md

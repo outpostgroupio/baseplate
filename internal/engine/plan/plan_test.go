@@ -40,7 +40,7 @@ func TestBuildCreateAndOrder(t *testing.T) {
 }
 
 // TestBuildDeleteReverseDependencyOrder guards that deletes run in reverse
-// dependency order using the recorded state dependencies — NOT lexical order.
+// dependency order using the recorded state dependencies, not lexical order.
 // Here the dependent (mock_child.a) sorts lexically BEFORE its dependency
 // (mock_thing.z), so a lexical-only ordering would delete the dependency first
 // (wrong). Correct order deletes the dependent first.

@@ -1,0 +1,19 @@
+Baseplate
+Copyright (c) 2026 Outpost Group / Josh Harris
+Licensed under the MIT License (see LICENSE).
+
+Baseplate is not affiliated with or endorsed by Roblox Corporation. Roblox is a
+trademark of Roblox Corporation.
+
+Third-party material
+--------------------
+
+internal/provider/roblox/opencloud/specs/*.json are copies of Roblox Open Cloud
+API specifications from the Roblox Creator Documentation
+(https://github.com/Roblox/creator-docs, content/en-us/reference/cloud/),
+Copyright (c) Roblox Corporation, licensed under the Creative Commons
+Attribution 4.0 International License
+(https://creativecommons.org/licenses/by/4.0/). The Go types in
+internal/provider/roblox/opencloud/gen/ are generated from those
+specifications. The files are snapshots taken in 2026 and may differ from the
+current upstream versions.

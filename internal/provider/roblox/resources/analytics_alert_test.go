@@ -297,7 +297,7 @@ resource "roblox_analytics_alert" "pcu" {
 }
 `
 
-// Unset optional attrs (filters, webhooks, period_offset_multiplier — which the
+// Unset optional attrs (filters, webhooks, period_offset_multiplier, which the
 // server defaults to 1) must not diff; create with enabled=false PATCHes after.
 func TestAnalyticsAlertMinimalPeriodOverPeriodDisabled(t *testing.T) {
 	f := newFakeAlerts()

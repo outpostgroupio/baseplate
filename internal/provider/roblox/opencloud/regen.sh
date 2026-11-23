@@ -3,8 +3,7 @@
 # Run from anywhere: bash internal/provider/roblox/opencloud/regen.sh
 #
 # Specs live in specs/ and are vendored from Roblox/creator-docs
-# (content/en-us/reference/cloud/*). The large unified openapi.json is used
-# for universe-v2 extraction (Phase 1B) and is not committed.
+# (content/en-us/reference/cloud/*), CC-BY-4.0; see NOTICE.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR"

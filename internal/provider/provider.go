@@ -162,7 +162,7 @@ type Outputter interface {
 }
 
 // Documented is an optional Resource capability. Doc returns authored
-// documentation for a resource — its summary, per-attribute descriptions, any
+// documentation for a resource: its summary, per-attribute descriptions, any
 // caveats, and the API-key scopes it needs. The resource-docs generator merges
 // this with the schema-derived structure (types + kind tags) to render the
 // resource reference. Descriptions live here, next to DecodeSpec, so a missing

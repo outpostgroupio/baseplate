@@ -427,7 +427,7 @@ func (*errConfig) GetPublished(context.Context, string, string) (opencloud.Confi
 
 // TestConfigHCLLiteralConvergesWithReadBack decodes entries through the real
 // HCL path (as config.Load does) and checks the value read back from Roblox's
-// wire shape is RawEquals-identical — numbers (incl. non-integers parsed from
+// wire shape is RawEquals-identical: numbers (incl. non-integers parsed from
 // decimal text), nested objects and lists included.
 func TestConfigHCLLiteralConvergesWithReadBack(t *testing.T) {
 	src := `

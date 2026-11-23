@@ -38,7 +38,7 @@ func (a *analyticsAlert) Type() string { return "roblox_analytics_alert" }
 
 func (a *analyticsAlert) Doc() provider.ResourceDoc {
 	return provider.ResourceDoc{
-		Summary: "Manages an analytics alert on an experience metric (production alerting, e.g. crash rate or concurrent players). EXPERIMENTAL Roblox API. Full create/update/real-delete lifecycle.",
+		Summary: "Manages an analytics alert on an experience metric such as crash rate or concurrent players. Uses an experimental Roblox API. Alerts can be created, updated and deleted.",
 		Attributes: map[string]string{
 			"universe_id":               "The universe. Often a reference to an experience.",
 			"name":                      "Alert name. Must be unique within the experience; at most 50 characters; subject to Roblox text moderation.",
@@ -56,9 +56,9 @@ func (a *analyticsAlert) Doc() provider.ResourceDoc {
 			"webhook_configuration_ids": "UUIDs of webhooks to notify when the alert fires or resolves. Webhooks can only be created in the Creator Dashboard (Webhooks); Open Cloud has no API for them. Set `[]` to remove all.",
 			"enabled":                   "Whether the alert is enabled (default `true`). `false` pauses it without deleting it.",
 		},
-		Notes: "Built on Roblox's EXPERIMENTAL analytics-alerts API (`analytics-alert-control-plane/v1`), which may change without notice. " +
+		Notes: "Built on Roblox's experimental analytics alerts API (`analytics-alert-control-plane/v1`), which may change without notice. " +
 			"Alerts are only available to experiences that meet the Performance dashboard eligibility requirement (100+ daily active users). Roblox documents no opt-in setting. Other experiences get `403 … not enrolled in PerformanceMonitoringV2` on every call, which Baseplate reports as \"not eligible for analytics alerts\". " +
-			"A universe can have at most 20 alerts.New alerts report `config_state = \"Syncing\"` briefly before `Enabled`. " +
+			"A universe can have at most 20 alerts. New alerts report `config_state = \"Syncing\"` briefly before `Enabled`. " +
 			"Removing an optional attribute from config stops managing it but leaves the remote value in place; to clear one, set it to its empty value (`\"\"`, `{}`, `[]`). " +
 			"`universe_id` is create-only. Import with id `<universe_id>/<alert_id>`.",
 		Scopes:      []string{"universe.analytics.alert:read", "universe.analytics.alert:write"},

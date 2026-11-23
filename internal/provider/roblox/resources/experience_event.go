@@ -52,7 +52,7 @@ func (e *experienceEvent) Type() string { return "roblox_experience_event" }
 
 func (e *experienceEvent) Doc() provider.ResourceDoc {
 	return provider.ResourceDoc{
-		Summary: "Manages an experience event (virtual event) for live-ops: a scheduled, titled event shown on the experience page. Uses the EXPERIMENTAL `virtual-events/v3` Open Cloud API.",
+		Summary: "Manages an experience event (virtual event) for live-ops: a scheduled, titled event shown on the experience page. Uses the experimental `virtual-events/v3` Open Cloud API.",
 		Attributes: map[string]string{
 			"universe_id":         "The universe that owns the event. Often a reference to an experience. Create-only.",
 			"title":               "Event title.",

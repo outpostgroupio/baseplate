@@ -107,7 +107,7 @@ func TestLiveSecretLifecycle(t *testing.T) {
 	}
 	for _, sec := range list {
 		if sec.Name == name {
-			t.Fatalf("secret %q still exists after destroy — hard delete did not take", name)
+			t.Fatalf("secret %q still exists after destroy; hard delete did not take", name)
 		}
 	}
 	t.Log("live secret lifecycle OK: created, converged, rotated+redomained, converged, destroyed and verified gone")

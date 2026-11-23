@@ -1,9 +1,9 @@
-# How-to: manage many assets
+# Managing many assets
 
-A game with hundreds of images, sprites and icons shouldn't need hundreds of hand-written
-`resource` blocks. This guide shows the end-to-end pattern: find files with `fileset`, declare one
-`roblox_asset` per file with `for_each`, adopt the ids you've already uploaded with an
-`import {}` block, then read the result back with `baseplate show --json` to generate a Luau module.
+A game with hundreds of images doesn't need hundreds of `resource` blocks. This guide finds the
+files with `fileset`, declares one `roblox_asset` per file with `for_each`, adopts ids you've
+already uploaded with an `import` block, and reads the ids back with `baseplate show --json` to
+generate a Luau module.
 If your current uploader creates Decals, see
 [Migrating from a Decal-based uploader](#migrating-from-a-decal-based-uploader).
 
@@ -25,10 +25,10 @@ resource "roblox_asset" "sprites" {
 }
 ```
 
-- `fileset(dir, pattern)` returns every **file** under `dir` matching the pattern (`**` crosses
+- `fileset(dir, pattern)` returns every file under `dir` matching the pattern (`**` crosses
   directories), relative to `dir`, with forward slashes on every OS. A missing directory is an
   error, so a typo can't silently plan to destroy everything.
-- `for_each` makes one **instance** per key. Each instance's address is
+- `for_each` makes one instance per key. Each instance's address is
   `roblox_asset.sprites["ui/gem.png"]`, and inside the block `each.key` (and `each.value`) is that
   file's path.
 - `path.config` is the directory holding the config file, so the config works no matter where you
@@ -64,8 +64,8 @@ resource "roblox_asset" "icons" {
 
 A plain list isn't accepted (list order isn't identity); wrap it in `toset(...)`.
 
-**Asset names are public and moderated.** Roblox shows `display_name` in Creator Hub and moderates
-it, so derive it from something predictable (like the key, as above) rather than free text.
+Roblox shows `display_name` in Creator Hub and moderates it, so derive it from something
+predictable, like the key above.
 
 ## 2. Adopt assets you've already uploaded
 
@@ -98,7 +98,7 @@ roblox_asset.sprites["ui/gem.png"] will be imported (id 1234567890)
     ...
 ```
 
-Adopting **does not re-upload**. An asset's owner is create-only, and the import records a hash of
+Adopting doesn't re-upload anything. An asset's owner is create-only, and the import records a hash of
 each `file`'s current content as its baseline instead of comparing it with what was uploaded (the
 API can't read content back), so after the import the only possible differences are metadata
 (`display_name`, `description`), which `apply` updates in place. Ids may be strings or numbers in
@@ -116,18 +116,17 @@ $ baseplate import 'roblox_asset.sprites["ui/gem.png"]' 1234567890
 
 ## Migrating from a Decal-based uploader
 
-Many uploaders create **Decal** assets. A Decal's asset id isn't what `ImageLabel.Image`,
-`ImageButton.Image` or `Decal.Texture` need: each Decal wraps a separate **Image** asset that Roblox
+Many uploaders create Decal assets. A Decal's asset id isn't what `ImageLabel.Image`,
+`ImageButton.Image` or `Decal.Texture` need: each Decal wraps a separate Image asset that Roblox
 creates alongside it, and that image's id is the texture id. So these pipelines resolve every decal
 afterwards, typically by running Luau (`InsertService:LoadAsset(decalId)`, then reading
 `Decal.Texture`).
 
-With Baseplate you don't need that step:
+With Baseplate you can skip that step:
 
-- **New uploads: use `asset_type = "Image"`**, the default for image files. An Image asset *is* the
-  texture, so its `id` goes straight into `rbxassetid://<id>`. There's no wrapper and nothing to
-  look up.
-- **Existing assets: import the texture ids, not the decal ids.** The image Roblox created behind
+- For new uploads, use `asset_type = "Image"`, which is the default for image files. An Image
+  asset is the texture, so its `id` goes straight into `rbxassetid://<id>`.
+- For existing assets, import the texture ids rather than the decal ids. The image Roblox created behind
   each decal is a normal Image asset owned by the same user or group. Open Cloud can read it, so
   `import` adopts it like any other asset, without re-uploading. Your old pipeline already
   resolved these ids, so keep its `path → textureId` map as JSON and import from that:
@@ -174,7 +173,7 @@ roblox_asset.sprites["ui/gem.png"] will be imported (id 9876543210)
 After `apply`, the next `plan` shows no changes. Files without an entry in the map are new uploads,
 and they're created as Image assets.
 
-**Check that the map holds texture ids.** If a decal id got in by mistake, Baseplate adopts the
+Check that the map holds texture ids. If a decal id got in by mistake, Baseplate adopts the
 Decal without complaint, and `rbxassetid://<decalId>` won't render in an `ImageLabel`. Declaring
 `asset_type = "Image"`, as above, catches this. The import then plans
 `asset_type: Decal => Image`. Roblox can't change an asset's type, so `apply` can't fix that
@@ -192,7 +191,7 @@ You can also adopt the decal ids themselves, with `asset_type = "Decal"`. Basepl
 each Decal's `texture_id` by asking Roblox for the image behind it, so the same Luau module still
 gets the right texture. This needs the optional `creator-store-product:read` scope on the API key
 (see [API key scopes](api-key-scopes.md)) and costs one extra request per Decal on every `plan`.
-Two more trade-offs: editing a Decal's file **replaces** it (a new decal with a new id and a new
+Two more trade-offs: editing a Decal's file replaces it (a new decal with a new id and a new
 texture), where an Image keeps its id, and a newly uploaded Decal only gets its `texture_id` about
 a minute after the upload, on a later `apply`. For new uploads, Images are still the better
 choice.
@@ -249,8 +248,8 @@ $ baseplate apply --target 'roblox_asset.sprites["units/warship.png"]' # just on
 
 ## Changing a file's content
 
-Baseplate hashes each asset's `file` (the `content_hash` trigger). When you edit an **image** (or a
-model), the next plan updates that asset in place, and its **id stays the same**:
+Baseplate hashes each asset's `file` (the `content_hash` trigger). When you edit an image (or a
+model), the next plan updates that asset in place and its id stays the same:
 
 ```console
 $ baseplate plan
@@ -263,10 +262,10 @@ Plan: 0 to import, 0 to add, 1 to change, 0 to destroy.
 
 `apply` uploads the file as a new version of the same asset, so `rbxassetid://<id>` keeps working
 and the generated Luau module doesn't change. Roblox documents content updates for Models only, but
-Images accept them too (verified live). Editing only an asset's name or description doesn't
+Images accept them too. Editing only an asset's name or description doesn't
 re-upload its content.
 
-**Decal, Audio and Video** assets can't take new content (Roblox rejects a Decal content update as
+Decal, Audio and Video assets can't take new content (Roblox rejects a Decal content update as
 not supported yet; Audio and Video are documented as not updatable), so for them a content change
 replaces the asset:
 
@@ -281,7 +280,7 @@ $ baseplate plan
 Plan: 0 to import, 1 to add, 0 to change, 0 to destroy.
 ```
 
-`apply` uploads a new asset and records its **new id** in state. The old asset is **left in place**
+`apply` uploads a new asset and records its new id in state. The old asset is left in place
 on Roblox (it is never archived, not even audio) and is no longer managed: servers that are still
 running keep loading `rbxassetid://<old id>` until you republish the place. Anything that
 references the asset's `id` is updated in the same apply, and `baseplate show --json` reports the
@@ -304,13 +303,13 @@ Roblox's upload limits (watch the monthly audio cap).
 
 ## Renaming or moving a file
 
-The key **is** the address. Moving `ui/gem.png` to `icons/gem.png` changes the address from
+The key is part of the address. Moving `ui/gem.png` to `icons/gem.png` changes the address from
 `roblox_asset.sprites["ui/gem.png"]` to `roblox_asset.sprites["icons/gem.png"]`. On its own, that
 makes the plan destroy the old instance and create a new one:
 
-- `roblox_asset` destroy only **unmanages** the old asset (image assets can't be archived), so
-  nothing breaks on the platform;
-- but the create **uploads a new asset with a new id**, so the game's references change the next
+- `roblox_asset` destroy only stops managing the old asset (image assets can't be archived), so
+  nothing breaks on Roblox.
+- The create uploads a new asset with a new id, so the game's references change the next
   time you generate the module, and it counts against Roblox's upload limits.
 
 `plan` warns when one resource both destroys and creates instances:
@@ -408,5 +407,5 @@ Both warnings are also listed under `result.warnings` in `plan --json`, so CI ca
 
 - [Config reference](../config-reference.md): `for_each`, `each`, `locals` and every function.
 - [CLI reference](../cli-reference.md): `show`, `--target` and address quoting.
-- [How-to: import existing resources](importing-existing-resources.md)
+- [Importing existing resources](importing-existing-resources.md)
 - [Resource reference: `roblox_asset`](../resource-reference.md#roblox_asset)

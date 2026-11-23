@@ -42,7 +42,7 @@ func TestLiveImportExperience(t *testing.T) {
 	b := backend.NewLocal(filepath.Join(t.TempDir(), "live-import.bpstate"))
 	s := state.New()
 
-	// Declare only universe_id — experience.Read echoes it, so the diff compares
+	// Declare only universe_id: experience.Read echoes it, so the diff compares
 	// exactly that (the bool flags are undeclared, hence not compared).
 	desired := []plan.DesiredResource{
 		{Type: "roblox_experience", Name: "main", Attributes: provider.Attributes{

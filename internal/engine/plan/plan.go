@@ -256,7 +256,7 @@ func mergeRefs(d DesiredResource, s *state.State, importIDs map[string]string) p
 
 // diffAttrs compares actual vs desired over ONLY the attributes the config
 // declares (desired), minus any computed attributes. Attributes the provider
-// returns that the config does not declare are not managed and never diff — so
+// returns that the config does not declare are not managed and never diff, so
 // a resource's many optional/unset fields don't produce spurious drift. Drift
 // on a declared attribute is still detected (it's in desired). Computed attrs
 // are excluded even if present in desired (e.g. after an import round-trip).
@@ -287,7 +287,7 @@ func diffAttrs(actual, desired provider.Attributes, computed []string) []AttrDif
 // sameJSON reports whether two wholly-known, non-null values have identical JSON
 // encodings. It complements RawEquals for structural attributes, whose cty TYPE
 // can legitimately differ between config and read-back while the value is the
-// same — e.g. a map(string) vs an object with the same keys, or a list vs a
+// same, e.g. a map(string) vs an object with the same keys, or a list vs a
 // tuple. JSON keeps the distinctions that matter remotely (the string "1" is not
 // the number 1), so it never hides a real change.
 func sameJSON(a, b cty.Value) bool {

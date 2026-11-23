@@ -83,7 +83,7 @@ func (e *experience) Doc() provider.ResourceDoc {
 		"vr_enabled":              "Playable in VR.",
 		"private_servers_enabled": "Whether private servers can be bought. `false` disables them (and must not be combined with `private_server_price`). `true` needs `private_server_price` unless they're already enabled.",
 		"private_server_price":    "Private server price in Robux: `0` (free) or 10–500. Setting it enables private servers.",
-		"public":                  "Whether the experience is public (`true`) or private (`false`). Uses the EXPERIMENTAL legacy-develop activate/deactivate API and needs the extra `legacy-universe:manage` scope. Roblox can still refuse to make an experience public (403 \"You are not authorized to configure this universe.\"); check it can be made public in Creator Hub.",
+		"public":                  "Whether the experience is public (`true`) or private (`false`). Uses the experimental legacy-develop activate/deactivate API and needs the extra `legacy-universe:manage` scope. Roblox can still refuse to make an experience public (403 \"You are not authorized to configure this universe.\"); check it can be made public in Creator Hub.",
 	}
 	for p, label := range experienceLinkLabel {
 		attrs[p+"_link_uri"] = fmt.Sprintf("%s social link URL. `\"\"` removes the link. Creating a link needs `%s_link_title` too.", label, p)

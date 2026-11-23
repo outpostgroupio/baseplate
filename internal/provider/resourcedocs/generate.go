@@ -15,19 +15,19 @@ import (
 
 const preamble = "# Resource reference\n\n" +
 	"The resources Baseplate can manage, and their attributes.\n\n" +
-	"> **Generated file** — do not edit by hand. Run `go generate ./...` to regenerate from each\n" +
-	"> resource's schema and `Doc()`.\n\n" +
-	"**Legend for the _Kind_ column:**\n\n" +
-	"- **required** / **optional** — whether the attribute must be set in config.\n" +
-	"- **create-only** — set at create; changing it in config does **not** produce an update (it's\n" +
-	"  excluded from the diff). To change it, taint/recreate the resource.\n" +
-	"- **diffable** — a normal managed attribute; a config change plans an update.\n" +
-	"- **sensitive** — redacted from all plan output and never written to state.\n" +
-	"- **trigger** — not diffed directly; a change is detected via a hash/marker and forces an update\n" +
-	"  (or a replace, where the resource notes say so: see `-/+` in the CLI reference).\n" +
-	"- **computed** — an output Baseplate sets from Roblox; you can't set it in config. Reference it like\n" +
-	"  `id` (`type.name.attr`, resolved at apply time); `baseplate show --json` lists it.\n\n" +
-	"Every resource also has an implicit `id` (Baseplate's state id) — you never set it in config.\n"
+	"> This file is generated from each resource's schema and `Doc()`. Don't edit it by hand; run\n" +
+	"> `go generate ./...` instead.\n\n" +
+	"The _Kind_ column uses these terms:\n\n" +
+	"- required / optional: whether the attribute must be set in config.\n" +
+	"- create-only: used when the resource is created. Changing it later doesn't plan an update\n" +
+	"  (it's left out of the diff), so to change it you have to recreate the resource.\n" +
+	"- diffable: a normal managed attribute. Changing it in config plans an update.\n" +
+	"- sensitive: redacted from all plan output and never written to state.\n" +
+	"- trigger: not compared directly. Baseplate detects a change through a hash or marker and plans an\n" +
+	"  update, or a replace where the resource notes say so (see `-/+` in the CLI reference).\n" +
+	"- computed: an output Baseplate reads from Roblox. You can't set it, but you can reference it like\n" +
+	"  `id` (`type.name.attr`, resolved at apply time), and `baseplate show --json` lists it.\n\n" +
+	"Every resource also has an implicit `id` (Baseplate's state id), which you never set in config.\n"
 
 // Generate renders the full resource-reference markdown for the provider's
 // resources, sorted by Type(). It errors if a resource does not implement

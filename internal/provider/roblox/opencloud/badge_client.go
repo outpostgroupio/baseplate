@@ -46,7 +46,7 @@ type BadgeClient interface {
 
 // NewBadgeClient builds a BadgeClient. write serves the Open Cloud legacy-bridge
 // create/update/icon paths (apis.roblox.com); read serves the public single-GET
-// badge read (badges.roblox.com) — a different host, so it's a separate client.
+// badge read (badges.roblox.com), a different host, so it's a separate client.
 func NewBadgeClient(write, read *Client) BadgeClient { return &badgeClient{write: write, read: read} }
 
 type badgeClient struct {
@@ -56,7 +56,7 @@ type badgeClient struct {
 
 // badgeWire decodes BadgeResponseV2. id/iconImageId are JSON numbers (int64,
 // Task 1-confirmed); decode into int64 and format to string (never
-// interface{}/float64 — big ids lose precision).
+// interface{}/float64, where big ids lose precision).
 type badgeWire struct {
 	ID          int64  `json:"id"`
 	Name        string `json:"name"`

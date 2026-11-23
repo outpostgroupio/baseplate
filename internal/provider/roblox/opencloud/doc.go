@@ -4,7 +4,5 @@
 // per-service specs in specs/ (sourced from Roblox/creator-docs). Run
 // regen.sh to refresh them; do not hand-edit anything under gen/.
 //
-// The large unified openapi.json (specs/openapi-unified.json) is gitignored;
-// it is kept on disk as the source for extracting the universe-v2 config
-// schema in Phase 1B and for the Phase 4 schema-drift watcher.
+// The specs are CC-BY-4.0 material from Roblox Corporation; see NOTICE.
 package opencloud

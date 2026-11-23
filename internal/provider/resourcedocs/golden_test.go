@@ -27,6 +27,6 @@ func TestResourceReferenceUpToDate(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(committed) != got {
-		t.Fatalf("%s is stale — run `go generate ./...` and commit", path)
+		t.Fatalf("%s is stale; run `go generate ./...` and commit", path)
 	}
 }

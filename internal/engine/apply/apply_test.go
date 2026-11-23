@@ -38,9 +38,9 @@ func TestApplyCreatesAndPersists(t *testing.T) {
 	}
 }
 
-// TestApplyThenReplanConverges is the end-to-end Phase 0 proof: after applying,
+// TestApplyThenReplanConverges is the end-to-end proof: after applying,
 // a fresh plan against the SAME (persistent) provider + resulting state must
-// report no changes — idempotent reconciliation with no spurious diffs. It also
+// report no changes: idempotent reconciliation with no spurious diffs. It also
 // exercises a cross-resource dependency (mock_child.c → mock_thing.a).
 func TestApplyThenReplanConverges(t *testing.T) {
 	ctx := context.Background()
@@ -190,7 +190,7 @@ func TestApplyThenReplanConvergesWithReference(t *testing.T) {
 // Unmarshal(_, DynamicPseudoType), so plan reconstructs the referenced list as a
 // list. Before the fix, state was written bare (Marshal(v, v.Type())) but read
 // against DynamicPseudoType, which errors and silently DROPS the attribute from
-// the plan's comparison — so drift on a referenced collection went undetected.
+// the plan's comparison, so drift on a referenced collection went undetected.
 // This test asserts both halves: (a) convergence when nothing changed, and
 // (b) drift detection when the stored value differs (the part that fails without
 // the fix, because a dropped attribute is never compared).
@@ -227,7 +227,7 @@ func TestReplanReconstructsCollectionReference(t *testing.T) {
 	}
 
 	// (b) Drift the referring resource's stored target, then re-plan MUST detect
-	// it — proving the referenced value is actually reconstructed from state and
+	// it, proving the referenced value is actually reconstructed from state and
 	// compared, not silently dropped. Find mock_ref.b's real id from the store.
 	var refID string
 	for id, a := range p.Store() {

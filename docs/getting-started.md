@@ -1,61 +1,44 @@
 # Getting started
 
-This guide takes you from nothing to a live `plan` → `apply` → `destroy` cycle against a Roblox
-universe. It assumes you have a Roblox account and an experience (universe) you own.
+This takes you from installing Baseplate to a first `plan`, `apply` and `destroy` against an
+experience you own.
 
 ## 1. Install
 
-Download the prebuilt binary for your platform from the
-[Releases](https://github.com/outpostgroupio/baseplate/releases) page and put it on your `PATH`:
+Download the archive for your platform from the
+[releases page](https://github.com/outpostgroupio/baseplate/releases), extract it and put
+`baseplate` on your `PATH`. Or, with Go 1.24 or later:
 
 ```console
-$ chmod +x baseplate && mv baseplate /usr/local/bin/
-$ baseplate --help
+$ go install github.com/outpostgroupio/baseplate/cmd/baseplate@latest
 ```
 
-> Release binaries are in progress — see the [roadmap](../ROADMAP.md).
+## 2. Create an API key
 
-## 2. How it works
-
-Baseplate reads your `.bp.hcl` config, builds a dependency-ordered plan, and reconciles it through
-the Roblox Open Cloud API using your API key. State (which resources it manages, and their last-known
-values) is written to `baseplate.bpstate` — overridable with `--state`.
-
-You need `ROBLOX_API_KEY` set to manage `roblox_*` resources. Without it, the CLI falls back to an
-internal **mock** provider used for the engine's own tests — it doesn't understand the `roblox_*`
-types, so an `unknown resource type` error usually means the key isn't set.
-
-## 3. API keys & scopes
-
-To manage real resources, create an **Open Cloud API key** in the
-[Creator Dashboard → Credentials](https://create.roblox.com/dashboard/credentials):
-
-- Add your target **universe** to the key.
-- Grant the **scopes** for the resources you'll manage. Baseplate surfaces a clear error
-  (`401/403 … insufficient scope`) if one is missing.
-
-A few scopes are easy to miss because they're distinct from the general universe scope:
-
-| Resource | Needs |
-|---|---|
-| `roblox_place` | `universe-places:write` (distinct from `universe:write` / `universe.place:write`) |
-| `roblox_universe_secret` | `universe.secret:read` **and** `universe.secret:write` |
-
-> **Tip:** Roblox scopes are configured **per universe**. Ticking a scope isn't enough — the specific
-> universe must also be selected on the key, and you must **save** the key. A missing per-universe
-> selection shows up as a `403 "Authorization scope does not allow this operation"`.
+Create an Open Cloud API key in
+[Creator Dashboard → Credentials](https://create.roblox.com/dashboard/credentials). Add your
+experience's universe to the key, grant the scopes for the resources you'll manage (listed in
+[API key scopes](how-to/api-key-scopes.md)), and save it. Scopes are granted per universe, so
+ticking a scope without selecting the universe isn't enough.
 
 Export the key:
 
 ```console
-$ export ROBLOX_API_KEY="…"        # or put it in a gitignored .env and source it
+$ export ROBLOX_API_KEY="..."
 ```
 
-## 4. Your first real config
+You can also keep it in a gitignored `.env` file and load it with `set -a; . ./.env; set +a`.
 
-Point the config at a universe you own. `universe_id` is the id from the experience's Creator
-Dashboard URL. Baseplate **adopts** an existing universe and manages its writable config — it does
-not create universes.
+Without `ROBLOX_API_KEY`, the CLI falls back to an internal mock provider that's only used for
+Baseplate's own tests. It doesn't know the `roblox_*` resource types, so an
+`unknown resource type` error usually means the key isn't set.
+
+## 3. Write a config
+
+Baseplate doesn't create universes. It adopts one you already have and manages its settings. The
+universe id is the number in the experience's Creator Dashboard URL.
+
+Save this as `baseplate.bp.hcl`:
 
 ```hcl
 provider "roblox" {
@@ -63,33 +46,22 @@ provider "roblox" {
 }
 
 resource "roblox_experience" "main" {
-  universe_id        = "YOUR_UNIVERSE_ID"
+  universe_id        = "1234567890"
   voice_chat_enabled = true
   desktop_enabled    = true
 }
 
-# A developer product whose universe_id REFERENCES the experience above.
-# References resolve at apply time, after the experience is reconciled.
+# References like roblox_experience.main.id are resolved during apply, after the
+# experience has been reconciled.
 resource "roblox_developer_product" "gems_100" {
   universe_id = roblox_experience.main.id
   name        = "100 Gems"
   price       = 25
   description = "Buy 100 gems"
 }
-
-# A secret, pulled from the environment. The plaintext is sealed client-side and
-# never written to state or printed in a plan.
-resource "roblox_universe_secret" "discord" {
-  universe_id = roblox_experience.main.id
-  name        = "discord_token"
-  value       = env("DISCORD_TOKEN")
-  domain      = "discord.com"        # omit for a private key
-}
 ```
 
-## 5. Plan, apply, converge, destroy
-
-`plan` previews, `apply` converges, and a re-`plan` shows nothing left to do:
+## 4. Plan and apply
 
 ```console
 $ baseplate plan
@@ -101,45 +73,43 @@ $ baseplate plan
 
 Plan: 0 to import, 1 to add, 0 to change, 0 to destroy.
 
-$ baseplate apply      # create/update; state written under a lock
+$ baseplate apply
 $ baseplate plan
 Plan: 0 to import, 0 to add, 0 to change, 0 to destroy.
-
-$ baseplate destroy    # remove what's managed (some resources can't be hard-deleted; see below)
 ```
 
-(Referenced attributes like `universe_id` show as `(known after apply)` until the resource they
-point at is reconciled.) **Exit codes** (useful in CI): `0` = no changes, `2` = changes present,
-`1` = error.
+`apply` asks for confirmation on a terminal; pass `--auto-approve` to skip it. State is written to
+`baseplate.bpstate` (see [State](state.md)). `plan` exits with `0` when there's nothing to do, `2`
+when there are changes, and `1` on error, which is handy in CI.
 
-**Not everything hard-deletes.** Roblox has no delete path for some resources, so `destroy`
-*unmanages them in place* (drops them from state, leaves them on the platform): `roblox_asset`
-(image/decal), `roblox_developer_product` (set to not-for-sale), `roblox_place` (can't unpublish).
-`roblox_universe_secret` is the exception — it performs a real delete.
+## 5. Destroy
 
-## 6. Adopting existing resources (import)
+```console
+$ baseplate destroy
+```
 
-If a resource already exists in Creator Hub, don't let `apply` create a duplicate — import it first.
+Not everything can be deleted through Open Cloud. Developer products and game passes are taken off
+sale, badges are disabled, and published places and Image or Model assets are left alone; in each
+case Baseplate stops managing them. Secrets, experience events and analytics alerts are really
+deleted. The [resource reference](resource-reference.md) has the details for each type.
 
-**Declarative (recommended)** — add an `import` block; `apply` adopts and reconciles in one pass:
+## 6. Resources that already exist
+
+If something already exists in Creator Hub, import it so `apply` doesn't create a duplicate:
 
 ```hcl
 import {
-  to = roblox_experience.main
-  id = "YOUR_UNIVERSE_ID"
+  to = roblox_developer_product.gems_100
+  id = "1234567890/2233445566"   # <universeId>/<productId>
 }
 ```
 
-**One-off CLI:**
+See [importing existing resources](how-to/importing-existing-resources.md).
 
-```console
-$ baseplate import roblox_experience.main YOUR_UNIVERSE_ID
-```
+## Next steps
 
-## 7. Where to go next
-
-- [`examples/`](../examples/) — annotated configs.
-- [Config reference](config-reference.md) — `for_each`, `locals`, references and functions.
-- [How-to: manage many assets](how-to/many-assets.md) — one block for a whole directory of images.
-- [Live testing against real Roblox](roblox-live-testing.md) — the opt-in live test setup.
-- [ROADMAP.md](../ROADMAP.md) — what's built, what's next, and known limitations.
+- [`examples/`](../examples/) has a config for each resource.
+- [Config reference](config-reference.md) covers `for_each`, `locals`, `moved`, `lifecycle` and
+  functions.
+- [Managing many assets](how-to/many-assets.md) shows one block for a whole directory of images.
+- [GitHub Actions](how-to/github-actions.md) sets up plan-on-PR and apply-on-merge.

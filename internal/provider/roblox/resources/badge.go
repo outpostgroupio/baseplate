@@ -33,7 +33,7 @@ func (b *badge) Doc() provider.ResourceDoc {
 			"name":           "Badge name.",
 			"description":    "Badge description.",
 			"enabled":        "Whether the badge is active and awardable (default `true`).",
-			"icon_file":      "Path to an icon image (direct upload, required — Roblox rejects a badge created without an icon). Change detected via content hash.",
+			"icon_file":      "Path to an icon image (uploaded directly; required, because Roblox rejects a badge created without one). Change detected via content hash.",
 			"expected_cost":  "Robux cost you accept for creating the badge (default `0`). Creation is free in practice; a non-zero value opts into a paid badge.",
 			"payment_source": "Funding source when `expected_cost` > 0: `user` (default) or `group`.",
 		},

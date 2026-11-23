@@ -10,14 +10,14 @@ are in the [resource reference](resource-reference.md).
 |---|---|
 | `provider "roblox" { ... }` | Provider settings, e.g. `api_key = env("ROBLOX_API_KEY")`. |
 | `resource "<type>" "<name>" { ... }` | A resource Baseplate manages. `type.name` must be unique. |
-| `import { to = ..., id = ... }` | Adopt an existing remote resource into state on the next `apply`. See [importing](how-to/importing-existing-resources.md). |
+| `import { to = ..., id = ... }` | Adopt an existing remote resource into state on the next `apply`. See [importing existing resources](how-to/importing-existing-resources.md). |
 | `moved { from = ..., to = ... }` | Record that a resource or instance changed address, so state follows it instead of destroying and re-creating it. See [`moved`](#moved). |
 | `locals { ... }` | Named values computed once at load time. |
-| `backend "http" { ... }` | Remote state. See [remote state](how-to/remote-state.md). |
+| `backend "http" { ... }` | Remote state. See [State](state.md#remote-state-http-backend). |
 
 ## `for_each`
 
-`for_each` on a `resource` block declares one **instance** per key:
+`for_each` on a `resource` block declares one instance per key:
 
 ```hcl
 resource "roblox_asset" "icons" {
@@ -29,10 +29,10 @@ resource "roblox_asset" "icons" {
 }
 ```
 
-- The value must be a **map** (or object), whose keys become instance keys and whose values become
-  `each.value`, or a **set of strings**, where `each.key` and `each.value` are the same.
-- A **list is rejected**; wrap it in `toset(...)`. List order isn't identity.
-- The value must be **known when the config loads**: literals, `local.*`, `env()` and functions
+- The value must be a map (or object), whose keys become instance keys and whose values become
+  `each.value`, or a set of strings, where `each.key` and `each.value` are the same.
+- A list is rejected; wrap it in `toset(...)`. List order isn't identity.
+- The value must be known when the config loads: literals, `local.*`, `env()` and functions
   are fine; resource attributes (known only at apply time) are not.
 - Keys must be non-empty strings. An empty map or set declares no instances, so any instances
   already in state are planned for deletion, and `plan` warns:
@@ -108,7 +108,7 @@ moved {
 
 ### `for_each` on `moved` blocks
 
-**Baseplate extension:** Terraform doesn't allow `for_each` on `moved` blocks. Baseplate does,
+Terraform doesn't allow `for_each` on `moved` blocks. Baseplate does,
 so a whole directory of renamed files can move in one block. `each.key` and `each.value` can be
 used in the index of `from` and `to`, and the rules for the `for_each` value are the same as for
 resources:
@@ -134,28 +134,28 @@ The map can come from a file, e.g. `jsondecode(file("${path.config}/asset-rename
 
 ### How moves are applied
 
-- **Moves only change state.** Nothing is called on Roblox. After the move, the resource is planned
+- Moves only change state. Nothing is called on Roblox. After the move, the resource is planned
   at its new address like any other: a no-op if nothing else changed, an update if its attributes
   differ.
-- **`plan` doesn't write state.** It shows the moves (`~ X has moved to Y`) and counts them
+- `plan` doesn't write state. It shows the moves (`~ X has moved to Y`) and counts them
   (`…, 1 to move.`; `summary.move` and a `moves` list in `--json`). Moves are changes, so `plan`
   exits `2`.
-- **`apply` writes the moves to state**, under the state lock, even when nothing else changes.
+- `apply` writes the moves to state, under the state lock, even when nothing else changes.
   `destroy` applies them too, so `prevent_destroy` is checked against the new address.
-- **Idempotent.** If `from` isn't in state and `to` is, the move already happened and the block does
+- Moves are idempotent. If `from` isn't in state and `to` is, the move already happened and the block does
   nothing. Keep the block until every state that needs it (every environment) has been applied,
   then you can delete it.
-- **Neither in state:** nothing to do. This matches Terraform: the block may be older than the
+- If neither address is in state, nothing happens. This matches Terraform: the block may be older than the
   state, or the resource may never have been created.
-- **Both in state:** an error. Baseplate can't tell which object should end up at `to`.
+- If both are in state, it's an error. Baseplate can't tell which object should end up at `to`.
   (Terraform skips the move with a warning; Baseplate stops, because keeping both is how an asset
   ends up re-uploaded.)
-- **Chains** (`a` → `b` and `b` → `c`) are resolved in order whatever order the blocks are written
+- Chains (`a` → `b` and `b` → `c`) are resolved in order whatever order the blocks are written
   in, and `plan` shows the result as one move (`a` → `c`). A cycle (`a` → `b`, `b` → `a`) is an
   error.
-- **`to` doesn't have to be declared.** As in Terraform, the move still happens and the plan then
+- `to` doesn't have to be declared. As in Terraform, the move still happens and the plan then
   destroys the object at its new address.
-- **`--target` doesn't filter moves.** They are applied in full even when the target names another
+- `--target` doesn't filter moves. They are applied in full even when the target names another
   resource. Terraform instead refuses a targeted plan that doesn't cover every moved address;
   Baseplate's `--target` takes a single address, so that rule would make most targeted runs
   impossible, and a move is a state-only rename that is safe to apply on its own.
@@ -202,7 +202,7 @@ Error: Instance cannot be destroyed: roblox_experience.prod has lifecycle.preven
 
 - It covers every path that deletes: `baseplate destroy`, `plan`/`apply` when a `for_each` key
   is removed (or `for_each` becomes empty) while the block itself is still in the config, and a
-  **replace** (`-/+`, e.g. a `roblox_asset` whose sound or `asset_type` changed), which destroys the current object
+  replace (`-/+`, e.g. a `roblox_asset` whose sound or `asset_type` changed), which destroys the current object
   after creating its successor (or, for `roblox_asset`, leaves it in place but stops managing it).
   `plan`, `apply` and `destroy` all fail before anything changes, with exit code `1`.
 - With `for_each`, the setting applies to every instance.
@@ -210,7 +210,7 @@ Error: Instance cannot be destroyed: roblox_experience.prod has lifecycle.preven
   are rejected, because the setting has to be known when the config loads.
 - `--target` narrows the check like it narrows the plan: if the protected resource isn't targeted,
   nothing blocks.
-- **The protection lives only in the config.** It isn't written to state. Removing the
+- The protection lives only in the config. It isn't written to state. Removing the
   `lifecycle` block, setting `prevent_destroy = false`, or deleting the whole `resource` block
   removes the protection, and the next plan deletes the resource as usual. This matches Terraform.
   A `destroy` run without a config file has nothing to read the setting from, so nothing is
@@ -225,16 +225,26 @@ See [protecting production](how-to/github-actions.md#protecting-production).
 
 ## References
 
-A reference reads another resource's attribute, usually its `id`. Baseplate orders resources by
-their references and resolves the values at apply time; see
-[references and `env()`](how-to/references-and-env.md).
+A reference reads another resource's attribute, usually its `id`:
+
+```hcl
+resource "roblox_developer_product" "gems" {
+  universe_id = roblox_experience.main.id
+  name        = "100 Gems"
+  price       = 25
+}
+```
+
+Baseplate orders resources by their references, so there's no `depends_on`. Values are resolved
+during `apply`, after the referenced resource has been reconciled. Until then `plan` shows them as
+`(known after apply)`.
 
 | Form | Meaning |
 |---|---|
 | `type.name.attr` | Attribute of a resource without `for_each`. |
 | `type.name["key"].attr` | Attribute of one `for_each` instance. |
 | `type.name[each.key].attr` | Same, with the key computed (any expression that gives a known string). |
-| `type.name` | Dependency only. For a `for_each` resource, depends on **every** instance. |
+| `type.name` | Dependency only. For a `for_each` resource, depends on every instance. |
 
 A reference to a key that isn't declared is a load error that lists the declared keys.
 `type.name.attr` on a `for_each` resource is an error too: pick an instance.
@@ -256,14 +266,19 @@ locals {
 ## `path.config`
 
 `path.config` is the directory containing the config file. Relative paths in functions and in
-resource attributes such as `file` resolve against the **current working directory**, so build
+resource attributes such as `file` resolve against the current working directory, so build
 paths from `path.config` when the config should work wherever `baseplate` runs.
 
 ## Functions
 
+Use `env()` for API keys and other values you don't want in the config file. The value is only
+treated as secret in `roblox_universe_secret.value`; anywhere else it's stored in state and shown
+in plans like any other value.
+
+
 | Function | Description |
 |---|---|
-| `env(name)` | The environment variable `name`, or `""` if unset. |
+| `env(name)` | The environment variable `name`, or `""` if unset. Read when the config loads. |
 | `fileset(dir, pattern)` | Set of files (not directories) under `dir` matching a glob; `**` crosses directories. Paths are relative to `dir` and use `/`. A missing `dir` is an error. |
 | `file(path)` | The file's contents as a string. The file must be UTF-8. |
 | `basename(path)` | Last element of a `/`-separated path: `basename("ui/gem.png")` is `"gem.png"`. |
@@ -282,4 +297,4 @@ HCL's `for` expressions and conditionals work everywhere too, e.g.
 
 - [Resource reference](resource-reference.md)
 - [CLI reference](cli-reference.md)
-- [How-to: manage many assets](how-to/many-assets.md)
+- [Managing many assets](how-to/many-assets.md)

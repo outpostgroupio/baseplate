@@ -86,7 +86,7 @@ func (sc *secretClient) List(ctx context.Context, universeID string) ([]Secret, 
 			out = append(out, s.toDomain())
 		}
 		// The secrets endpoint returns a non-empty nextPageCursor even on the final
-		// (empty) page, so an empty page — not an empty cursor — is the real
+		// (empty) page, so an empty page, not an empty cursor, is the real
 		// end-of-list signal. Also stop if the cursor fails to advance, as a guard
 		// against a pathological non-terminating response.
 		if w.NextPageCursor == "" || len(w.Secrets) == 0 || w.NextPageCursor == cursor {
@@ -123,7 +123,7 @@ func (sc *secretClient) Update(ctx context.Context, universeID string, wr Secret
 }
 
 // sealedBody fetches the public key and returns a wire body carrying the sealed
-// ciphertext, key id, and domain — never the plaintext.
+// ciphertext, key id, and domain, never the plaintext.
 func (sc *secretClient) sealedBody(ctx context.Context, universeID string, wr SecretWrite) (secretWire, error) {
 	pub, keyID, err := sc.publicKey(ctx, universeID)
 	if err != nil {

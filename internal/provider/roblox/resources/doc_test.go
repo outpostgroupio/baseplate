@@ -9,7 +9,7 @@ import (
 )
 
 // Every resource must implement Documented, and every DecodeSpec attribute must
-// have a description — Generate returns an error otherwise.
+// have a description; Generate returns an error otherwise.
 func TestAllResourcesDocumented(t *testing.T) {
 	p := roblox.SchemaProvider()
 	for typ, r := range p.Resources() {

@@ -2,28 +2,28 @@
 
 The resources Baseplate can manage, and their attributes.
 
-> **Generated file** — do not edit by hand. Run `go generate ./...` to regenerate from each
-> resource's schema and `Doc()`.
+> This file is generated from each resource's schema and `Doc()`. Don't edit it by hand; run
+> `go generate ./...` instead.
 
-**Legend for the _Kind_ column:**
+The _Kind_ column uses these terms:
 
-- **required** / **optional** — whether the attribute must be set in config.
-- **create-only** — set at create; changing it in config does **not** produce an update (it's
-  excluded from the diff). To change it, taint/recreate the resource.
-- **diffable** — a normal managed attribute; a config change plans an update.
-- **sensitive** — redacted from all plan output and never written to state.
-- **trigger** — not diffed directly; a change is detected via a hash/marker and forces an update
-  (or a replace, where the resource notes say so: see `-/+` in the CLI reference).
-- **computed** — an output Baseplate sets from Roblox; you can't set it in config. Reference it like
-  `id` (`type.name.attr`, resolved at apply time); `baseplate show --json` lists it.
+- required / optional: whether the attribute must be set in config.
+- create-only: used when the resource is created. Changing it later doesn't plan an update
+  (it's left out of the diff), so to change it you have to recreate the resource.
+- diffable: a normal managed attribute. Changing it in config plans an update.
+- sensitive: redacted from all plan output and never written to state.
+- trigger: not compared directly. Baseplate detects a change through a hash or marker and plans an
+  update, or a replace where the resource notes say so (see `-/+` in the CLI reference).
+- computed: an output Baseplate reads from Roblox. You can't set it, but you can reference it like
+  `id` (`type.name.attr`, resolved at apply time), and `baseplate show --json` lists it.
 
-Every resource also has an implicit `id` (Baseplate's state id) — you never set it in config.
+Every resource also has an implicit `id` (Baseplate's state id), which you never set in config.
 
 ---
 
 ## `roblox_analytics_alert`
 
-Manages an analytics alert on an experience metric (production alerting, e.g. crash rate or concurrent players). EXPERIMENTAL Roblox API. Full create/update/real-delete lifecycle.
+Manages an analytics alert on an experience metric such as crash rate or concurrent players. Uses an experimental Roblox API. Alerts can be created, updated and deleted.
 
 | Attribute | Type | Kind | Description |
 |---|---|---|---|
@@ -43,7 +43,7 @@ Manages an analytics alert on an experience metric (production alerting, e.g. cr
 | `universe_id` | string | required, create-only | The universe. Often a reference to an experience. |
 | `webhook_configuration_ids` | set of string | optional, diffable | UUIDs of webhooks to notify when the alert fires or resolves. Webhooks can only be created in the Creator Dashboard (Webhooks); Open Cloud has no API for them. Set `[]` to remove all. |
 
-Built on Roblox's EXPERIMENTAL analytics-alerts API (`analytics-alert-control-plane/v1`), which may change without notice. Alerts are only available to experiences that meet the Performance dashboard eligibility requirement (100+ daily active users). Roblox documents no opt-in setting. Other experiences get `403 … not enrolled in PerformanceMonitoringV2` on every call, which Baseplate reports as "not eligible for analytics alerts". A universe can have at most 20 alerts.New alerts report `config_state = "Syncing"` briefly before `Enabled`. Removing an optional attribute from config stops managing it but leaves the remote value in place; to clear one, set it to its empty value (`""`, `{}`, `[]`). `universe_id` is create-only. Import with id `<universe_id>/<alert_id>`.
+Built on Roblox's experimental analytics alerts API (`analytics-alert-control-plane/v1`), which may change without notice. Alerts are only available to experiences that meet the Performance dashboard eligibility requirement (100+ daily active users). Roblox documents no opt-in setting. Other experiences get `403 … not enrolled in PerformanceMonitoringV2` on every call, which Baseplate reports as "not eligible for analytics alerts". A universe can have at most 20 alerts. New alerts report `config_state = "Syncing"` briefly before `Enabled`. Removing an optional attribute from config stops managing it but leaves the remote value in place; to clear one, set it to its empty value (`""`, `{}`, `[]`). `universe_id` is create-only. Import with id `<universe_id>/<alert_id>`.
 
 Requires the `universe.analytics.alert:read`, `universe.analytics.alert:write` [scopes](how-to/api-key-scopes.md).
 
@@ -63,9 +63,9 @@ Uploads a user- or group-owned image, decal, audio or model asset.
 | `description` | string | required, diffable | Asset description. |
 | `display_name` | string | required, diffable | Asset name. |
 | `file` | string | required, trigger | Path to the file to upload: `.png`/`.jpg`/`.bmp`/`.tga` for images and decals, `.mp3`/`.ogg`/`.wav`/`.flac` for audio, `.fbx`/`.gltf`/`.glb`/`.rbxm`/`.rbxmx` for models. A change to the file's content is detected by hash: an Image or Model takes the new content in place (same id); a Decal, Audio or Video asset is replaced (a new upload with a new id; the old asset is left in place). |
-| `texture_id` | string | computed | The texture id, for `rbxassetid://<texture_id>` in `ImageLabel.Image`, `ImageButton.Image` or `Decal.Texture`. For an `Image` asset it equals `id`. For a `Decal` it is the id of the separate Image asset Roblox creates behind the decal, looked up through toolbox-service, which needs the optional `creator-store-product:read` scope. **Unset** (absent from state and `show --json`, and an error if referenced) for `Model`, `Audio` and `Video` assets, and for a Decal whose lookup failed (see the notes). |
+| `texture_id` | string | computed | The texture id, for `rbxassetid://<texture_id>` in `ImageLabel.Image`, `ImageButton.Image` or `Decal.Texture`. For an `Image` asset it equals `id`. For a `Decal` it is the id of the separate Image asset Roblox creates behind the decal, looked up through toolbox-service, which needs the optional `creator-store-product:read` scope. Unset (absent from state and `show --json`, and an error if referenced) for `Model`, `Audio` and `Video` assets, and for a Decal whose lookup failed (see the notes). |
 
-The `id` output is the `assetId` (a numeric string). For an `Image` asset (the default for image files) that id is the texture id, and `texture_id` equals it. A `Decal` asset's id is not a texture id: each Decal wraps a separate Image asset that Roblox creates alongside it, owned by the same creator, and `texture_id` is that image's id. Use `texture_id` and you don't need to know which kind an asset is. Resolving a Decal's `texture_id` costs one extra request per Decal on every `plan` (Images cost nothing extra). If the lookup fails, plan and apply still succeed: `texture_id` stays unset (or keeps the value already recorded) and Baseplate prints a warning with the reason. The usual reasons: the API key lacks `creator-store-product:read` (one warning, and the remaining Decals skip the lookup); the decal was just uploaded (toolbox-service 404s a new decal for about a minute, verified live, so a later `apply` records it even when nothing else changed); or Roblox doesn't show the key the decal's details (group-owned decals are unverified). To adopt assets from a Decal-based uploader, import those underlying image ids, not the decal ids (see the many-assets how-to). When the content of `file` changes (its `content_hash` trigger), an `Image` or `Model` asset is updated in place: apply uploads the file as a new version of the same asset, so the id doesn't change (Roblox documents content updates for Models only, but Images accept them too, verified live; a metadata-only edit doesn't re-send the content). A `Decal`, `Audio` or `Video` asset can't take new content (Roblox rejects a Decal content update as not supported yet, verified live), so plan shows `-/+ (replace)`: apply uploads a new asset, which gets a new id, and drops the old one from state. The old asset is **left in place** (never archived, even for Audio), because live servers keep using its id until the place is republished. A change to `asset_type` always replaces. Forcing a replace for a type that updates in place is a planned general feature (`lifecycle { replace_triggered_by = [...] }`), not a per-resource setting. If `file` is missing on the machine running `plan` (e.g. CI without the source images), an asset already in state keeps its recorded hash and plan warns that content changes can't be detected; creating an asset still needs the file. Renaming or moving the file without changing its bytes does nothing. References to the asset's `id` and `baseplate show --json` pick up the new id in the same apply. An imported asset records the current file's hash as its baseline, so adopting existing assets never re-uploads them; the same goes for assets created by Baseplate versions without the hash, on their next apply. `lifecycle { prevent_destroy = true }` blocks a replace. Audio is limited to 7 minutes and 20 MB, and Roblox caps audio uploads per month (10, or 100 for ID-verified accounts). Image and Model assets are not archivable, so `destroy` unmanages the asset in place (drops it from state, leaves it uploaded); a Decal is archived (verified live; restorable).
+The `id` output is the `assetId` (a numeric string). For an `Image` asset (the default for image files) that id is the texture id, and `texture_id` equals it. A `Decal` asset's id is not a texture id: each Decal wraps a separate Image asset that Roblox creates alongside it, owned by the same creator, and `texture_id` is that image's id. Use `texture_id` and you don't need to know which kind an asset is. Resolving a Decal's `texture_id` costs one extra request per Decal on every `plan` (Images cost nothing extra). If the lookup fails, plan and apply still succeed: `texture_id` stays unset (or keeps the value already recorded) and Baseplate prints a warning with the reason. The usual reasons: the API key lacks `creator-store-product:read` (one warning, and the remaining Decals skip the lookup); the decal was just uploaded (toolbox-service returns 404 for a new decal for about a minute, so a later `apply` records it even when nothing else changed); or Roblox doesn't show the key the decal's details (group-owned decals are unverified). To adopt assets from a Decal-based uploader, import those underlying image ids, not the decal ids (see the many-assets how-to). When the content of `file` changes (its `content_hash` trigger), an `Image` or `Model` asset is updated in place: apply uploads the file as a new version of the same asset, so the id doesn't change (Roblox documents content updates for Models only, but Images accept them too; a metadata-only edit doesn't re-send the content). A `Decal`, `Audio` or `Video` asset can't take new content (Roblox rejects a Decal content update as not supported yet), so plan shows `-/+ (replace)`: apply uploads a new asset, which gets a new id, and drops the old one from state. The old asset is left in place (never archived, even for Audio), because live servers keep using its id until the place is republished. A change to `asset_type` always replaces. Forcing a replace for a type that updates in place is a planned general feature (`lifecycle { replace_triggered_by = [...] }`), not a per-resource setting. If `file` is missing on the machine running `plan` (e.g. CI without the source images), an asset already in state keeps its recorded hash and plan warns that content changes can't be detected; creating an asset still needs the file. Renaming or moving the file without changing its bytes does nothing. References to the asset's `id` and `baseplate show --json` pick up the new id in the same apply. An imported asset records the current file's hash as its baseline, so adopting existing assets never re-uploads them; the same goes for assets created by Baseplate versions without the hash, on their next apply. `lifecycle { prevent_destroy = true }` blocks a replace. Audio is limited to 7 minutes and 20 MB, and Roblox caps audio uploads per month (10, or 100 for ID-verified accounts). Image and Model assets are not archivable, so `destroy` unmanages the asset in place (drops it from state, leaves it uploaded); a Decal is archived, and can be restored.
 
 Requires the `asset:read`, `asset:write` [scopes](how-to/api-key-scopes.md).
 
@@ -80,7 +80,7 @@ Manages a badge (an achievement players can earn in an experience).
 | `description` | string | optional, diffable | Badge description. |
 | `enabled` | bool | optional, diffable | Whether the badge is active and awardable (default `true`). |
 | `expected_cost` | number | optional, create-only | Robux cost you accept for creating the badge (default `0`). Creation is free in practice; a non-zero value opts into a paid badge. |
-| `icon_file` | string | required, trigger | Path to an icon image (direct upload, required — Roblox rejects a badge created without an icon). Change detected via content hash. |
+| `icon_file` | string | required, trigger | Path to an icon image (uploaded directly; required, because Roblox rejects a badge created without one). Change detected via content hash. |
 | `name` | string | required, diffable | Badge name. |
 | `payment_source` | string | optional, create-only | Funding source when `expected_cost` > 0: `user` (default) or `group`. |
 | `universe_id` | string | required, create-only | The universe. Often a reference to an experience. |
@@ -131,7 +131,7 @@ Manages a universe's writable configuration. Adopts an existing universe (create
 | `mobile_enabled` | bool | optional, diffable | Playable on mobile. |
 | `private_server_price` | number | optional, diffable | Private server price in Robux: `0` (free) or 10–500. Setting it enables private servers. |
 | `private_servers_enabled` | bool | optional, diffable | Whether private servers can be bought. `false` disables them (and must not be combined with `private_server_price`). `true` needs `private_server_price` unless they're already enabled. |
-| `public` | bool | optional, diffable | Whether the experience is public (`true`) or private (`false`). Uses the EXPERIMENTAL legacy-develop activate/deactivate API and needs the extra `legacy-universe:manage` scope. Roblox can still refuse to make an experience public (403 "You are not authorized to configure this universe."); check it can be made public in Creator Hub. |
+| `public` | bool | optional, diffable | Whether the experience is public (`true`) or private (`false`). Uses the experimental legacy-develop activate/deactivate API and needs the extra `legacy-universe:manage` scope. Roblox can still refuse to make an experience public (403 "You are not authorized to configure this universe."); check it can be made public in Creator Hub. |
 | `roblox_group_link_title` | string | optional, diffable | Roblox group (community) social link title (1–70 characters). |
 | `roblox_group_link_uri` | string | optional, diffable | Roblox group (community) social link URL. `""` removes the link. Creating a link needs `roblox_group_link_title` too. |
 | `tablet_enabled` | bool | optional, diffable | Playable on tablet. |
@@ -155,16 +155,16 @@ Example: [`examples/baseplate.bp.hcl`](../examples/baseplate.bp.hcl).
 
 ## `roblox_experience_config`
 
-Manages a universe's Experience Config (BETA): the key/value settings a published game reads at runtime through `ConfigService` — declarative feature flags and tuning values. Each apply stages the key changes as a draft and publishes it.
+Manages a universe's Experience Config (a beta Roblox feature): the key/value settings, such as feature flags and tuning values, that a published game reads at runtime through `ConfigService`. Each apply stages the key changes as a draft and publishes it.
 
 | Attribute | Type | Kind | Description |
 |---|---|---|---|
 | `deployment_strategy` | string | optional, create-only | `Immediate` (default) or `GradualRollout` (~15-20 min). Used for every publish, but not readable back, so it isn't diffed (listed as create-only): changing it alone doesn't publish. |
-| `entries` | any | required, diffable | Map of config key to value. Values are written as native HCL: bool, number, string, or an object/list (a JSON config), e.g. `{ enable_tutorial = true, boss_health = 100, shop = { discount = 0.2 } }`. **Authoritative:** keys in the repository but not here are removed on apply. Max 100 keys, 256-char keys; `.RBX.` is reserved in keys. |
+| `entries` | any | required, diffable | Map of config key to value. Values are written as native HCL: bool, number, string, or an object/list (a JSON config), e.g. `{ enable_tutorial = true, boss_health = 100, shop = { discount = 0.2 } }`. Keys in the repository but not listed here are removed on apply. Max 100 keys, 256-char keys; `.RBX.` is reserved in keys. |
 | `repository` | string | optional, create-only | Config repository. Default `InExperienceConfig` (the only one Roblox documents). |
 | `universe_id` | string | required, create-only | The universe. |
 
-The resource owns the repository's base keys: an apply removes any published key that isn't in `entries`. To protect an existing game, the **first** apply (create) refuses if the repository already has keys that aren't declared — `import` it first so the plan shows what would be removed. Conditional rules and the conditional (targeted) values of keys you keep are **preserved** (Baseplate never sends them, and verifies the staged draft and the published result); a removed key's conditional values are removed with it, and a type change for a key with conditional values is rejected by Roblox. Apply refuses if the repository has an unpublished draft (e.g. pending edits in Creator Hub) — publish or discard it first. `destroy` removes every plain key in the repository and publishes (the same ownership as apply; conditional rules are left alone, and an empty or never-published repository is a no-op). Protect production config with [`lifecycle { prevent_destroy = true }`](config-reference.md#lifecycle), which makes any plan that would destroy it fail. With `GradualRollout` (observed ~20 minutes), the API keeps returning the previous values until the rollout completes and rejects new drafts meanwhile, so a re-plan in that window shows the change again and an apply fails with a retry-later error. Numbers are stored as doubles (exact only up to 2^53).
+The resource owns the repository's base keys: an apply removes any published key that isn't in `entries`. To protect an existing game, the first apply (create) refuses if the repository already has keys that aren't declared. `import` it first so the plan shows what would be removed. Conditional rules and the conditional (targeted) values of keys you keep are preserved (Baseplate never sends them, and verifies the staged draft and the published result); a removed key's conditional values are removed with it, and a type change for a key with conditional values is rejected by Roblox. Apply refuses if the repository has an unpublished draft (for example, pending edits in Creator Hub). Publish or discard it first. `destroy` removes every plain key in the repository and publishes (the same ownership as apply; conditional rules are left alone, and an empty or never-published repository is a no-op). Protect production config with [`lifecycle { prevent_destroy = true }`](config-reference.md#lifecycle), which makes any plan that would destroy it fail. With `GradualRollout` (observed ~20 minutes), the API keeps returning the previous values until the rollout completes and rejects new drafts meanwhile, so a re-plan in that window shows the change again and an apply fails with a retry-later error. Numbers are stored as doubles (exact only up to 2^53).
 
 Requires the `universe:read`, `universe:write` [scopes](how-to/api-key-scopes.md).
 
@@ -174,7 +174,7 @@ Example: [`examples/experience-config.bp.hcl`](../examples/experience-config.bp.
 
 ## `roblox_experience_event`
 
-Manages an experience event (virtual event) for live-ops: a scheduled, titled event shown on the experience page. Uses the EXPERIMENTAL `virtual-events/v3` Open Cloud API.
+Manages an experience event (virtual event) for live-ops: a scheduled, titled event shown on the experience page. Uses the experimental `virtual-events/v3` Open Cloud API.
 
 | Attribute | Type | Kind | Description |
 |---|---|---|---|
@@ -212,7 +212,7 @@ Manages a game pass (a one-time, permanent in-experience purchase).
 | `price` | number | required, diffable | Price in Robux. |
 | `universe_id` | string | required, create-only | The universe. Often a reference to an experience. |
 
-Game passes can't be hard-deleted, so `destroy` sets `is_for_sale = false` and unmanages it. Managed pricing is intentionally not exposed — it requires prior manual acceptance of Roblox's managed-pricing terms in the Creator Dashboard.
+Game passes can't be hard-deleted, so `destroy` sets `is_for_sale = false` and unmanages it. Managed pricing isn't exposed, because it requires prior manual acceptance of Roblox's managed-pricing terms in the Creator Dashboard.
 
 Requires the `game-pass:read`, `game-pass:write` [scopes](how-to/api-key-scopes.md).
 
@@ -259,7 +259,7 @@ Example: [`examples/baseplate.bp.hcl`](../examples/baseplate.bp.hcl).
 
 ## `roblox_universe_secret`
 
-Manages an Open Cloud secret for a universe — the only resource with a full create/update/real delete lifecycle. The value is encrypted client-side (LibSodium sealed box) before upload and is never written to state or printed in a plan.
+Manages an Open Cloud secret for a universe. Secrets can be created, updated and deleted. The value is encrypted client-side (LibSodium sealed box) before upload and is never written to state or printed in a plan.
 
 | Attribute | Type | Kind | Description |
 |---|---|---|---|

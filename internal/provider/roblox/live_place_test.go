@@ -106,7 +106,7 @@ func TestLivePlaceLifecycle(t *testing.T) {
 		t.Fatalf("expected convergence after re-publish, got:\n%s", pl4.RenderText(false))
 	}
 
-	// Destroy is a no-op (a place can't be unpublished) — nothing to clean up.
+	// Destroy is a no-op (a place can't be unpublished), so there's nothing to clean up.
 	dpl, err := plan.Build(ctx, p, s, nil)
 	if err != nil {
 		t.Fatalf("destroy plan: %v", err)

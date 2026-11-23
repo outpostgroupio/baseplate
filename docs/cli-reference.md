@@ -4,21 +4,16 @@
 baseplate <command> [flags]
 ```
 
-Baseplate manages Roblox resources declaratively: you describe the desired state in an HCL config,
-and the CLI reconciles the platform to match, tracking what it manages in a state file.
-
 ## Global flags
-
-These are accepted by every command.
 
 | Flag | Default | Description |
 |---|---|---|
 | `--config` | `baseplate.bp.hcl` | Path to the HCL config file. |
 | `--state` | `baseplate.bpstate` | Path to the state file. |
 | `--target` | *(none)* | Limit `plan`/`apply`/`destroy` to one resource (`roblox_asset.icon`; for a `for_each` resource, every instance) or one instance (`'roblox_asset.sprites["ui/gem.png"]'`). See [Addresses](#addresses). A malformed address is an error. |
-| `--json` | `false` | Emit machine-readable output on **every** command. Results are a versioned envelope `{ "format_version": 1, "command": ..., "result": ... }` on stdout; errors are `{ "format_version": 1, "command": ..., "error": { "message": ... } }` on stderr. |
+| `--json` | `false` | Emit machine-readable output. Works on every command. Results are a versioned envelope `{ "format_version": 1, "command": ..., "result": ... }` on stdout; errors are `{ "format_version": 1, "command": ..., "error": { "message": ... } }` on stderr. |
 
-State can also be stored remotely via a `backend "http" {}` block — see [Remote state](how-to/remote-state.md).
+State can also be stored remotely with a `backend "http"` block; see [State](state.md).
 
 ### Approval flags (`apply` / `destroy` / `restart-servers`)
 
@@ -28,7 +23,7 @@ State can also be stored remotely via a `backend "http" {}` block — see [Remot
 | `--yes` | `false` | Alias for `--auto-approve`. |
 
 `apply` and `destroy` render the plan (`restart-servers` describes the restart) and then, on an interactive terminal, prompt for
-confirmation — only `yes` proceeds. In a non-interactive session (no TTY, e.g. CI) the prompt is
+confirmation. Only `yes` proceeds. In a non-interactive session (no TTY, e.g. CI) the prompt is
 skipped automatically, so jobs never hang waiting on stdin. Because a text prompt would corrupt the
 JSON stream, `--json` on an interactive terminal requires `--auto-approve` (otherwise the command
 errors).
@@ -47,7 +42,7 @@ brackets and quotes mean something to your shell, so wrap the whole address in s
 
 ```console
 $ baseplate apply --target 'roblox_asset.sprites["ui/gem.png"]'
-$ baseplate import 'roblox_asset.sprites["ui/gem.png"]' 1234567890
+$ baseplate import 'roblox_asset.sprites["ui/gem.png"]' 2233445566
 ```
 
 An unquoted key (`roblox_asset.sprites[ui/gem.png]`) is rejected with
@@ -56,9 +51,9 @@ this form, so you can copy them.
 
 ## Environment
 
-- **`ROBLOX_API_KEY`** — the Open Cloud API key. Required to manage `roblox_*` resources; reference
-  it from the config with `env("ROBLOX_API_KEY")`. Without it the CLI falls back to an internal mock
-  provider used for the engine's own tests (it doesn't understand the `roblox_*` types).
+`ROBLOX_API_KEY` is the Open Cloud API key. It's needed to manage `roblox_*` resources; read it in
+the config with `env("ROBLOX_API_KEY")`. Without it the CLI falls back to an internal mock
+provider used for Baseplate's own tests, which doesn't know the `roblox_*` types.
 
 ## Exit codes
 
@@ -101,7 +96,7 @@ Plan: 0 to import, 1 to add, 0 to change, 0 to destroy.
 (e.g. a secret's `value`) are redacted in both formats. Each change has an `address` and, for a
 `for_each` instance, its `key`.
 
-Each change is a create (`+`), update (`~`), delete (`-`) or **replace** (`-/+`). A replace happens
+Each change is a create (`+`), update (`~`), delete (`-`) or replace (`-/+`). A replace happens
 when a change can't be made to the existing remote object, so a new one (with a new id) is created
 first. The attribute or trigger that forced it is marked, and the last line says what happens to
 the old object: some resources destroy it, others leave it in place and only stop managing it.
@@ -113,7 +108,7 @@ republished:
     display_name = Click
     file = assets/click.ogg
     content_hash: 6843b53e… => abeeb0b9…  # forces replacement
-    # old object (id 1234567890) is left in place, no longer managed
+    # old object (id 2233445566) is left in place, no longer managed
 
 Plan: 0 to import, 1 to add, 0 to change, 0 to destroy.
 ```
@@ -180,7 +175,7 @@ scripts. CI (no TTY) skips it automatically.
 
 | Flag | Default | Description |
 |---|---|---|
-| `--restart-servers` | `false` | After a **successful** apply that published at least one `roblox_place` (a create or update), restart the game servers running an older version of those places so players move onto the new version. Nothing is restarted if the apply fails or publishes no place. |
+| `--restart-servers` | `false` | After a successful apply that published at least one `roblox_place` (a create or update), restart the game servers running an older version of those places so players move onto the new version. Nothing is restarted if the apply fails or publishes no place. |
 | `--restart-bleed-off` | *(immediate)* | With `--restart-servers`: stop matchmaking into the old servers and shut them down after this long (whole minutes, `1m`–`60m`). Requires `--restart-servers`. |
 
 With `--restart-servers`, the confirmation prompt lists the places whose servers will be restarted
@@ -196,10 +191,11 @@ adds a `restarts` array to the apply result (same shape as the `restart-servers`
 Remove everything the state manages. Equivalent to applying an empty config: every managed resource
 is planned for deletion, in reverse-dependency order. Takes the state lock.
 
-Some Roblox resources have no delete path, so `destroy` **unmanages them in place** (drops them from
-state, leaves them on the platform) rather than deleting: `roblox_asset` (image/decal),
-`roblox_developer_product` (set to not-for-sale), `roblox_place` (can't unpublish).
-`roblox_universe_secret` is really deleted.
+Some Roblox resources can't be deleted through Open Cloud. For those, `destroy` drops them from
+state and leaves them on Roblox, after disabling them where possible: developer products and game
+passes are taken off sale, badges are disabled, and published places and Image or Model assets are
+left as they are. Secrets, experience events and analytics alerts are deleted. The
+[resource reference](resource-reference.md) describes each type.
 
 ```console
 $ baseplate destroy
@@ -219,21 +215,23 @@ protected.
 ### `import <address> <id>`
 
 Adopt an existing resource into state without recreating it, so a subsequent `plan`/`apply`
-reconciles rather than creating a duplicate. The resource must already be **declared in the config**.
+reconciles rather than creating a duplicate. The resource must already be declared in the config.
 Reads the live resource and writes a state entry under the state lock; it never mutates the remote.
 Like `plan` and `apply`, it applies the config's [`moved` blocks](config-reference.md#moved) to state
 first, and writes them along with the imported entry.
 
 ```console
-$ baseplate import roblox_experience.main 10438196190
-$ baseplate import 'roblox_asset.sprites["ui/gem.png"]' 1234567890
+$ baseplate import roblox_experience.main 1234567890
+$ baseplate import 'roblox_asset.sprites["ui/gem.png"]' 2233445566
 ```
 
 For a `for_each` resource, import one instance at a time using its [address](#addresses). Errors if
 the address isn't declared in the config, is already in state, or can't be found on the platform, or
 if another address in state already manages that id (one remote object is only ever managed at one
-address; otherwise destroying one address would delete the object the other still manages). For a config-driven alternative that runs during `apply`, use an
-[`import {}` block](getting-started.md#6-adopting-existing-resources-import).
+address; otherwise destroying one address would delete the object the other still manages). For a
+config-driven alternative that runs during `apply`, use an
+[`import` block](how-to/importing-existing-resources.md). Import ids for each resource type are listed
+there too.
 
 ### `restart-servers`
 
@@ -242,19 +240,19 @@ This is an imperative action, not a resource: it changes no state and needs no s
 the stable Open Cloud `POST /cloud/v2/universes/{id}:restartServers` endpoint and needs the
 `universe:write` scope.
 
-**This disconnects live players.** The prompt says exactly what will happen before anything is sent.
+This disconnects live players. The prompt says exactly what will happen before anything is sent.
 
 | Flag | Default | Description |
 |---|---|---|
 | `--universe` | *(from config)* | Universe id. If omitted, it is taken from the config's `roblox_experience` `universe_id`; this must be unambiguous (exactly one distinct literal id), otherwise pass `--universe`. |
 | `--place` | *(all places)* | Restrict the restart to this place id. Repeatable (`--place 1 --place 2`) or comma-separated. |
-| `--all-versions` | `false` | Restart servers on **every** version, including ones already on the latest. By default only servers running an older version than the latest published one are restarted, and if nothing newer has been published, nothing is restarted. |
+| `--all-versions` | `false` | Restart servers on every version, including ones already on the latest. By default only servers running an older version than the latest published one are restarted, and if nothing newer has been published, nothing is restarted. |
 | `--bleed-off` | *(immediate)* | Stop matchmaking new players into the affected servers now, then shut them down after this duration. Whole minutes, `1m`–`60m`. Without it, servers shut down immediately. |
 | `--auto-approve` / `--yes` | `false` | Skip the prompt (see [Approval flags](#approval-flags-apply--destroy--restart-servers)). |
 
 ```console
 $ baseplate restart-servers --bleed-off 5m
-Baseplate will restart live game servers in universe 10438196190:
+Baseplate will restart live game servers in universe 1234567890:
   places:   every place in the universe
   servers:  only servers running an older place version than the latest published one
             (if nothing newer has been published, no servers are restarted)
@@ -263,7 +261,7 @@ Baseplate will restart live game servers in universe 10438196190:
 
 Do you want to restart these servers? Only 'yes' will be accepted to confirm.
 Enter a value: yes
-Restart requested for universe 10438196190. Roblox restarts the servers asynchronously.
+Restart requested for universe 1234567890. Roblox restarts the servers asynchronously.
 ```
 
 Roblox accepts the request and restarts servers asynchronously; it reports no progress, so the
@@ -274,7 +272,7 @@ command returns as soon as the request is accepted. Exit codes: `0` when the req
 {
   "format_version": 1,
   "command": "restart-servers",
-  "result": { "universe_id": "10438196190", "place_ids": [], "all_versions": false, "bleed_off_minutes": 5 }
+  "result": { "universe_id": "1234567890", "place_ids": [], "all_versions": false, "bleed_off_minutes": 5 }
 }
 ```
 
@@ -289,9 +287,9 @@ block in `--config`) without taking the lock, makes no provider calls, and needs
 
 ```console
 $ baseplate show
-roblox_asset.sprites["ui/coin.png"]  1234567891
-roblox_asset.sprites["ui/gem.png"]   1234567890
-roblox_experience.main               10438196190
+roblox_asset.sprites["ui/coin.png"]  2233445567
+roblox_asset.sprites["ui/gem.png"]   2233445566
+roblox_experience.main               1234567890
 ```
 
 With an [address](#addresses), it prints that resource's (or each matching instance's) attributes:
@@ -299,11 +297,11 @@ With an [address](#addresses), it prints that resource's (or each matching insta
 ```console
 $ baseplate show 'roblox_asset.sprites["ui/gem.png"]'
 roblox_asset.sprites["ui/gem.png"]
-    id           = 1234567890
+    id           = 2233445566
     asset_type   = Image
     description  = Game sprite
     display_name = sprite/ui/gem
-    texture_id   = 1234567890
+    texture_id   = 2233445566
 ```
 
 `--json` returns the inventory sorted by address. `key` is present only for `for_each` instances,
@@ -322,8 +320,8 @@ and `attributes` are plain JSON values. Sensitive attributes are never included.
         "type": "roblox_asset",
         "name": "sprites",
         "key": "ui/gem.png",
-        "id": "1234567890",
-        "attributes": { "asset_type": "Image", "display_name": "sprite/ui/gem", "texture_id": "1234567890" }
+        "id": "2233445566",
+        "attributes": { "asset_type": "Image", "display_name": "sprite/ui/gem", "texture_id": "2233445566" }
       }
     ]
   }
@@ -338,6 +336,4 @@ address that isn't in state is an error.
 ## See also
 
 - [Config reference](config-reference.md)
-
-- [Getting started](getting-started.md)
 - [Resource reference](resource-reference.md)

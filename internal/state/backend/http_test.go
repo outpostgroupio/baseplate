@@ -216,3 +216,20 @@ func TestNewHTTPRequiresAddress(t *testing.T) {
 		t.Fatal("expected error when address is empty")
 	}
 }
+
+func TestHTTPRequiresTLSExceptForLoopback(t *testing.T) {
+	for _, cfg := range []HTTPConfig{
+		{Address: "http://state.example.com/s"},
+		{Address: "https://state.example.com/s", LockAddress: "http://state.example.com/lock"},
+		{Address: "https://state.example.com/s", UnlockAddress: "http://10.0.0.1/unlock"},
+	} {
+		if _, err := NewHTTP(cfg); err == nil || !strings.Contains(err.Error(), "must use https") {
+			t.Errorf("NewHTTP(%+v) err = %v, want a must-use-https error", cfg, err)
+		}
+	}
+	for _, addr := range []string{"https://state.example.com/s", "http://localhost:8080/s", "http://127.0.0.1/s", "http://[::1]:9000/s"} {
+		if _, err := NewHTTP(HTTPConfig{Address: addr}); err != nil {
+			t.Errorf("NewHTTP(%q): %v", addr, err)
+		}
+	}
+}

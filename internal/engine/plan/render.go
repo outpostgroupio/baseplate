@@ -102,7 +102,7 @@ func (p *Plan) JSONMoves() []JSONMove {
 // same plan, which is what renaming a for_each key looks like. A created
 // instance is a new remote object with a new id (for roblox_asset, a fresh
 // upload), so it is worth a second look before applying. Instances are not
-// paired up — with several of each there is no meaningful old→new mapping — so
+// paired up (with several of each there is no meaningful old→new mapping), so
 // the warning names the resource and the counts. The result is nil when there
 // is nothing to warn about; order is by resource address.
 func (p *Plan) Warnings() []string {
@@ -276,12 +276,12 @@ func (p *Plan) RenderText(color bool) string {
 			if v, ok := attrs[k]; ok {
 				fmt.Fprintf(&b, "    %s = %s\n", k, ctyString(v))
 			} else {
-				// referenced attribute — value not known until apply
+				// referenced attribute: value not known until apply
 				fmt.Fprintf(&b, "    %s = (known after apply)\n", k)
 			}
 		}
-		// What forced the replace — an attribute or a trigger (e.g. a file's
-		// content_hash) — shown old => new so the reason is visible.
+		// What forced the replace, an attribute or a trigger such as a file's
+		// content_hash, shown old => new so the reason is visible.
 		for _, d := range c.AttrDiffs {
 			if !forcing[d.Name] {
 				continue

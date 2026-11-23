@@ -33,6 +33,27 @@ func TestDoSetsAuthAndDecodes(t *testing.T) {
 	}
 }
 
+func TestDoDoesNotFollowRedirectToAnotherHost(t *testing.T) {
+	var leaked bool
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leaked = r.Header.Get("x-api-key") != ""
+	}))
+	defer other.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+"/elsewhere", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	c := New("secret", srv.URL, WithSleeper(func(time.Duration) {}))
+	_, err := c.Do(context.Background(), http.MethodGet, "/v2/thing", nil, nil)
+	if !errors.Is(err, errOffHostRedirect) {
+		t.Fatalf("err = %v, want errOffHostRedirect", err)
+	}
+	if leaked {
+		t.Fatal("the API key was sent to the redirect target")
+	}
+}
+
 func TestDoRetriesOn429ThenSucceeds(t *testing.T) {
 	var calls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

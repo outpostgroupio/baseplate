@@ -64,7 +64,7 @@ func TestSecretClientCreateSeals(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 	// The uploaded body must carry a sealed secret that decrypts to the plaintext,
-	// the key id, the domain, and the name — but never the plaintext itself.
+	// the key id, the domain, and the name, but never the plaintext itself.
 	var body struct {
 		ID     string `json:"id"`
 		Secret string `json:"secret"`

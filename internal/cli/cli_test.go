@@ -31,7 +31,7 @@ func runOut(args []string, out *bytes.Buffer) int {
 // TestImportRunWritesStateAndReports is the CLI happy path: importRun takes an
 // injectable provider, so we seed a mock "remote" resource and assert import
 // records it in the state file and prints the success line. (The full command
-// path can't be tested against a seeded remote — run() builds its own provider —
+// path can't be tested against a seeded remote (run() builds its own provider),
 // so we drive importRun directly, which is what the command calls.)
 func TestImportRunWritesStateAndReports(t *testing.T) {
 	dir := t.TempDir()

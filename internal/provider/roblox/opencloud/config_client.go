@@ -120,7 +120,7 @@ func (cc *configClient) GetPublished(ctx context.Context, universeID, repo strin
 		if !IsNotFound(err) {
 			return ConfigValues{}, err
 		}
-		// A 404 means "never published" — but the values endpoint has also been
+		// A 404 means "never published", but the values endpoint has also been
 		// seen to 404 transiently right after a publish. Reading that as "empty"
 		// would show every key as drift (or make destroy skip them), so confirm
 		// against the revision history, and only believe "never published" once
@@ -237,8 +237,8 @@ var etagRetryDelays = []time.Duration{time.Second, 2 * time.Second, 3 * time.Sec
 // doETagRetry retries a write rejected with a transient 400. Observed live: a
 // draft write issued within a few seconds of a previous draft write/publish is
 // rejected with "ETagMismatch" (the service's own concurrency token lags) or
-// "MultipleDraftNotSupported" (the previous publish is still deploying — even an
-// Immediate one, briefly; a GradualRollout one for ~20 minutes), and succeeds
+// "MultipleDraftNotSupported" (the previous publish is still deploying: an
+// Immediate one briefly, a GradualRollout one for ~20 minutes), and succeeds
 // shortly after. The rejection means nothing was applied, so retrying is safe.
 func (cc *configClient) doETagRetry(ctx context.Context, method, path string, body, out any) error {
 	for attempt := 0; ; attempt++ {
@@ -283,7 +283,7 @@ func IsDraftHashMismatch(err error) bool {
 }
 
 // IsMultipleDraft reports whether a draft write was rejected because another
-// publish is still in flight — observed live for a few seconds after an
+// publish is still in flight. Observed live for a few seconds after an
 // Immediate publish and for the whole of a GradualRollout (400, text/plain
 // "MultipleDraftNotSupported"; GET draft 404s meanwhile, so it can't be detected
 // up front). Draft writes retry it briefly before surfacing it.

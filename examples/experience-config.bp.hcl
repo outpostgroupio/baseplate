@@ -3,11 +3,11 @@ provider "roblox" {
 }
 
 resource "roblox_experience" "main" {
-  universe_id = "10438196190"
+  universe_id = "1234567890"
 }
 
-# Experience Config (BETA): key/value settings your game reads at runtime with
-# ConfigService:GetConfigAsync() — feature flags and tuning values you can change
+# Experience Config (beta): key/value settings your game reads at runtime with
+# ConfigService:GetConfigAsync(), such as feature flags and tuning values you can change
 # without republishing the place. Needs universe:read + universe:write.
 #
 # The resource owns the repository's keys: a key that isn't listed here is
@@ -17,7 +17,7 @@ resource "roblox_experience" "main" {
 #
 #   import {
 #     to = roblox_experience_config.flags
-#     id = "10438196190"
+#     id = "1234567890"
 #   }
 resource "roblox_experience_config" "flags" {
   universe_id = roblox_experience.main.id # resolved at apply time

@@ -425,7 +425,7 @@ func computeTriggers(r provider.Resource, desired provider.Attributes) (map[stri
 // encodeValues marshals against DynamicPseudoType so the concrete cty type
 // travels in the JSON wrapper ({"value":...,"type":...}). Reads use
 // Unmarshal(raw, DynamicPseudoType), which requires that wrapper and recovers
-// the exact type — so a list reloads as a list, not a tuple, and non-string
+// the exact type, so a list reloads as a list, not a tuple, and non-string
 // references round-trip and diff correctly. Marshaling against v.Type()
 // produced bare JSON that the reads could not decode (they errored and
 // silently dropped the attribute).

@@ -56,8 +56,8 @@ func (d *developerProduct) DecodeSpec() hcldec.Spec {
 	}
 }
 
-// Computed excludes from diff: the state id; universe_id (create-only — a product
-// can't move universes — and often a resolved reference); and icon_file (a
+// Computed excludes from diff: the state id; universe_id (create-only: a product
+// can't move universes, and it's often a resolved reference); and icon_file (a
 // create/update-only upload the API doesn't echo back). name/price/description/
 // is_for_sale remain diffable.
 func (d *developerProduct) Computed() []string {
