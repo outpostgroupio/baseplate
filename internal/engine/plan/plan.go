@@ -101,12 +101,7 @@ func (p *Plan) HasChanges() bool {
 	if len(p.Moves) > 0 {
 		return true
 	}
-	for _, c := range p.Changes {
-		if c.Action != provider.ActionNoop || c.ImportID != "" {
-			return true
-		}
-	}
-	return false
+	return p.Count() > 0
 }
 
 func Build(ctx context.Context, p provider.Provider, s *state.State, desired []DesiredResource) (*Plan, error) {
