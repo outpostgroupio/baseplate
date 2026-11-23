@@ -52,8 +52,9 @@ this form, so you can copy them.
 ## Environment
 
 `ROBLOX_API_KEY` is the Open Cloud API key. It's needed to manage `roblox_*` resources; read it in
-the config with `env("ROBLOX_API_KEY")`. Without it the CLI falls back to an internal mock
-provider used for Baseplate's own tests, which doesn't know the `roblox_*` types.
+the config with `env("ROBLOX_API_KEY")`. `validate` and `show` work without it. `plan`, `apply`,
+`destroy` and `import` fail with `ROBLOX_API_KEY is not set` when the config has `roblox_*`
+resources and the key is missing.
 
 ## Exit codes
 
@@ -71,7 +72,8 @@ The `2` code lets CI branch on "is there drift?" without parsing output. `apply`
 ### `validate`
 
 Load and type-check the config. Fails if the file is malformed, references an unknown resource
-type, or has an invalid attribute. Does not contact Roblox or read state.
+type, or has an invalid attribute. Does not contact Roblox or read state, and doesn't need
+`ROBLOX_API_KEY`, so CI can run it on pull requests from forks.
 
 ```console
 $ baseplate validate
@@ -96,7 +98,17 @@ Plan: 0 to import, 1 to add, 0 to change, 0 to destroy.
 (e.g. a secret's `value`) are redacted in both formats. Each change has an `address` and, for a
 `for_each` instance, its `key`.
 
-Each change is a create (`+`), update (`~`), delete (`-`) or replace (`-/+`). A replace happens
+Each change is a create (`+`), update (`~`), delete (`-`) or replace (`-/+`). An update lists only
+the attributes and triggers that change, as `old => new`, and counts the declared attributes it
+leaves alone:
+
+```console
+~ roblox_experience.main (update)
+    vr_enabled: true => false
+    # (4 unchanged attribute(s) hidden)
+```
+
+A create lists every declared attribute, and a delete every recorded one. A replace happens
 when a change can't be made to the existing remote object, so a new one (with a new id) is created
 first. The attribute or trigger that forced it is marked, and the last line says what happens to
 the old object: some resources destroy it, others leave it in place and only stop managing it.
@@ -212,7 +224,7 @@ has it set, `destroy` fails with `Instance cannot be destroyed: ...` before dele
 config, an invalid config file fails `destroy`, and a missing config file means nothing is
 protected.
 
-### `import <address> <id>`
+### `import [<address> <id>]`
 
 Adopt an existing resource into state without recreating it, so a subsequent `plan`/`apply`
 reconciles rather than creating a duplicate. The resource must already be declared in the config.
@@ -232,6 +244,32 @@ address; otherwise destroying one address would delete the object the other stil
 config-driven alternative that runs during `apply`, use an
 [`import` block](how-to/importing-existing-resources.md). Import ids for each resource type are listed
 there too.
+
+With no arguments, `import` runs every `import {}` block in the config whose target isn't in state
+yet, and nothing else: it never changes Roblox, and it writes state once, only if every block
+succeeds. Blocks whose target is already in state are skipped. Use it to adopt a live universe
+without an `apply`; the next `plan` then shows only real differences.
+
+```console
+$ baseplate import
+Imported 12 resource(s):
+  roblox_developer_product.products["gems_100"] (id 1234567890/2233445566)
+  ...
+```
+
+`--json` returns `{"imported": [{"address": ..., "id": ...}], "warnings": [...]}`.
+
+Some content can't be read back from Roblox, so an import can't tell whether the live object
+matches your config. Today that's a `roblox_place`'s `file`. Rather than recording the local
+file's hash as if it were live, the import marks the content as unverified and warns, and the next
+`plan` shows an update (a publish) with `content_hash: (unverified: imported) => …`. If you know the
+live place already matches the file, pass `--assume-current` to record the file's hash instead.
+An `import {}` block run by `apply` shows `will be imported (id …), then updated` and publishes in
+the same apply.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--assume-current` | `false` | Record content that can't be read back (a place's `file`) as already matching the config, so the next plan doesn't publish it. |
 
 ### `restart-servers`
 

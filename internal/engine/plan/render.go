@@ -215,7 +215,10 @@ func (p *Plan) RenderText(color bool) string {
 		}
 		if c.ImportID != "" {
 			then := ""
-			if c.Action == provider.ActionReplace {
+			switch c.Action {
+			case provider.ActionUpdate:
+				then = ", then updated"
+			case provider.ActionReplace:
 				then = ", then replaced"
 			}
 			fmt.Fprintf(&b, "%s will be imported (id %s)%s\n", c.Address, c.ImportID, then)
@@ -243,6 +246,10 @@ func (p *Plan) RenderText(color bool) string {
 			continue
 		}
 		fmt.Fprintf(&b, "%s %s (%s)\n", symbols[c.Action], c.Address, c.Action)
+		if c.Action == provider.ActionUpdate {
+			b.WriteString(renderUpdate(c))
+			continue
+		}
 		attrs := c.Desired
 		if c.Action == provider.ActionDelete {
 			attrs = c.Actual
@@ -305,6 +312,41 @@ func (p *Plan) RenderText(color bool) string {
 		fmt.Fprintf(&b, ", %d to move", sum.Move)
 	}
 	b.WriteString(".\n")
+	return b.String()
+}
+
+// renderUpdate renders an in-place update as its changed attributes and
+// triggers, old => new, then a count of the declared attributes left as they
+// are, as Terraform does.
+func renderUpdate(c Change) string {
+	var b strings.Builder
+	sensitive := map[string]bool{}
+	for _, k := range c.Sensitive {
+		sensitive[k] = true
+	}
+	changed := map[string]bool{}
+	for _, d := range c.AttrDiffs {
+		changed[d.Name] = true
+		if sensitive[d.Name] {
+			fmt.Fprintf(&b, "    %s: (sensitive value) => (sensitive value)\n", d.Name)
+			continue
+		}
+		fmt.Fprintf(&b, "    %s: %s => %s\n", d.Name, ctyString(d.Old), ctyString(d.New))
+	}
+	unchanged := map[string]bool{}
+	for k := range c.Desired {
+		if !changed[k] {
+			unchanged[k] = true
+		}
+	}
+	for k := range c.Refs {
+		if !changed[k] {
+			unchanged[k] = true
+		}
+	}
+	if n := len(unchanged); n > 0 {
+		fmt.Fprintf(&b, "    # (%d unchanged attribute(s) hidden)\n", n)
+	}
 	return b.String()
 }
 

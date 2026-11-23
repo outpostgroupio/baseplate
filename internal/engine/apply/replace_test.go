@@ -159,7 +159,7 @@ func TestReplaceUpdatesDependentReferenceInSameApply(t *testing.T) {
 	if len(dep.AttrDiffs) != 1 || dep.AttrDiffs[0].Name != "target" || dep.AttrDiffs[0].New.IsKnown() {
 		t.Fatalf("want target => (known after apply), got %+v", dep.AttrDiffs)
 	}
-	if out := pl.RenderText(false); !strings.Contains(out, "target = (known after apply)") {
+	if out := pl.RenderText(false); !strings.Contains(out, "target: mock_replace/1 => (known after apply)") {
 		t.Fatalf("render should show the pending reference:\n%s", out)
 	}
 	if err := Apply(f.ctx, f.p, f.b, f.s, pl); err != nil {

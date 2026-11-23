@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/zclconf/go-cty/cty"
 	ctyjson "github.com/zclconf/go-cty/cty/json"
@@ -52,6 +53,9 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 			if err != nil {
 				return err
 			}
+			// Plan diffed unreadable triggers against "unverified", so an
+			// update follows and records the real values.
+			trigs, _ = markUnverified(r, trigs)
 			if err := commit(b, s, state.Resource{
 				Type: c.Type, Name: c.Name, Key: c.Key, ID: c.ImportID,
 				Attributes: encodeValues(actual), Triggers: trigs, Dependencies: c.DependsOn,
@@ -447,11 +451,71 @@ func stateResource(c plan.Change, id string, attrs provider.Attributes, triggers
 	}
 }
 
+// ImportOptions tunes Import and ImportAll.
+type ImportOptions struct {
+	// AssumeCurrent records the config's values for triggers the platform
+	// can't report (provider.UnreadableTriggers), as if the live object were
+	// known to match the config, instead of marking them unverified.
+	AssumeCurrent bool
+}
+
 // Import adopts an existing remote resource into state: it reads the resource by
 // id and writes a state entry, so plan/apply reconcile it instead of creating a
 // duplicate. The address must be declared in the desired config. It never mutates
 // the remote. The caller holds the state lock.
 func Import(ctx context.Context, p provider.Provider, b backend.Backend, s *state.State, address, id string, desired []plan.DesiredResource) error {
+	return ImportWithOptions(ctx, p, b, s, address, id, desired, ImportOptions{})
+}
+
+// ImportWithOptions is Import with options.
+func ImportWithOptions(ctx context.Context, p provider.Provider, b backend.Backend, s *state.State, address, id string, desired []plan.DesiredResource, opts ImportOptions) error {
+	r, err := adopt(ctx, p, s, address, id, desired, opts)
+	if err != nil {
+		return err
+	}
+	return commit(b, s, r)
+}
+
+// ImportAll runs every import block whose target isn't in state yet, as
+// Import does for one address, and writes state once at the end: either every
+// pending import is recorded or none is. It returns the blocks it imported. It
+// never mutates the remote. The caller holds the state lock.
+func ImportAll(ctx context.Context, p provider.Provider, b backend.Backend, s *state.State, imports []plan.ImportBlock, desired []plan.DesiredResource, opts ImportOptions) ([]plan.ImportBlock, error) {
+	seen := map[string]bool{}
+	var done []plan.ImportBlock
+	for _, imp := range imports {
+		if seen[imp.Address] {
+			return nil, fmt.Errorf("duplicate import block for %q", imp.Address)
+		}
+		seen[imp.Address] = true
+		if st, ok := s.Find(imp.Address); ok {
+			if st.ID != imp.ID {
+				return nil, fmt.Errorf("import %s: already in state with id %s, not %s", imp.Address, st.ID, imp.ID)
+			}
+			continue // already imported
+		}
+		r, err := adopt(ctx, p, s, imp.Address, imp.ID, desired, opts)
+		if err != nil {
+			return nil, fmt.Errorf("import %s: %w", imp.Address, err)
+		}
+		// Upsert now so a later block that reuses this id is caught as a
+		// collision; nothing is written unless every block succeeds.
+		s.Upsert(r)
+		done = append(done, imp)
+	}
+	if len(done) == 0 {
+		return nil, nil
+	}
+	s.Serial++
+	if err := b.Put(s); err != nil {
+		return nil, err
+	}
+	return done, nil
+}
+
+// adopt reads the remote object id for the declared address and returns the
+// state entry an import records for it, without writing state.
+func adopt(ctx context.Context, p provider.Provider, s *state.State, address, id string, desired []plan.DesiredResource, opts ImportOptions) (state.Resource, error) {
 	var d plan.DesiredResource
 	found := false
 	for _, cand := range desired {
@@ -463,33 +527,39 @@ func Import(ctx context.Context, p provider.Provider, b backend.Backend, s *stat
 	if !found {
 		for _, cand := range desired {
 			if cand.Key != "" && addr.Format(cand.Type, cand.Name, "") == address {
-				return fmt.Errorf("%s has for_each; import a specific instance, e.g. %s", address, addr.Format(cand.Type, cand.Name, cand.Key))
+				return state.Resource{}, fmt.Errorf("%s has for_each; import a specific instance, e.g. %s", address, addr.Format(cand.Type, cand.Name, cand.Key))
 			}
 		}
-		return fmt.Errorf("resource %q is not declared in the configuration", address)
+		return state.Resource{}, fmt.Errorf("resource %q is not declared in the configuration", address)
 	}
 	if existing, ok := s.Find(address); ok {
-		return fmt.Errorf("resource %q is already in state (id %s)", address, existing.ID)
+		return state.Resource{}, fmt.Errorf("resource %q is already in state (id %s)", address, existing.ID)
 	}
 	if err := plan.ImportCollision(s, d.Type, address, id); err != nil {
-		return err
+		return state.Resource{}, err
 	}
 	r := p.Resources()[d.Type]
 	if r == nil {
-		return fmt.Errorf("unknown resource type %q", d.Type)
+		return state.Resource{}, fmt.Errorf("unknown resource type %q", d.Type)
 	}
 	actual, err := r.Read(ctx, id)
 	if err != nil {
 		if errors.Is(err, provider.ErrNotFound) {
-			return fmt.Errorf("no %s found with id %q", d.Type, id)
+			return state.Resource{}, fmt.Errorf("no %s found with id %q", d.Type, id)
 		}
-		return err
+		return state.Resource{}, err
 	}
 	trigs, err := triggersKeeping(r, d.Attributes, nil)
 	if err != nil {
-		return err
+		return state.Resource{}, err
 	}
-	return commit(b, s, state.Resource{
+	if !opts.AssumeCurrent {
+		var unverified []string
+		if trigs, unverified = markUnverified(r, trigs); len(unverified) > 0 {
+			provider.Warn(ctx, fmt.Sprintf("%s: %s can't be read back from the platform, so it is recorded as unverified and the next apply updates the object from the config. If the live object already matches the config, import with --assume-current instead.", address, strings.Join(unverified, ", ")))
+		}
+	}
+	return state.Resource{
 		Type:         d.Type,
 		Name:         d.Name,
 		Key:          d.Key,
@@ -497,7 +567,33 @@ func Import(ctx context.Context, p provider.Provider, b backend.Backend, s *stat
 		Attributes:   encodeValues(actual),
 		Triggers:     trigs,
 		Dependencies: d.DependsOn,
-	})
+	}, nil
+}
+
+// markUnverified replaces an import's unreadable triggers
+// (provider.UnreadableTriggers) with provider.UnverifiedTrigger, so the next
+// plan updates the object rather than assuming the live content matches the
+// config. It returns the names it marked.
+func markUnverified(r provider.Resource, trigs map[string]json.RawMessage) (map[string]json.RawMessage, []string) {
+	u, ok := r.(provider.UnreadableTriggers)
+	if !ok {
+		return trigs, nil
+	}
+	names := u.UnreadableTriggers()
+	if len(names) == 0 {
+		return trigs, nil
+	}
+	vals := provider.Attributes{}
+	for _, k := range names {
+		vals[k] = cty.StringVal(provider.UnverifiedTrigger)
+	}
+	if trigs == nil {
+		trigs = map[string]json.RawMessage{}
+	}
+	for k, v := range encodeValues(vals) {
+		trigs[k] = v
+	}
+	return trigs, names
 }
 
 // sameSet reports whether a and b hold the same strings, ignoring order.

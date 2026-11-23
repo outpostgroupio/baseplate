@@ -30,9 +30,8 @@ $ export ROBLOX_API_KEY="..."
 
 You can also keep it in a gitignored `.env` file and load it with `set -a; . ./.env; set +a`.
 
-Without `ROBLOX_API_KEY`, the CLI falls back to an internal mock provider that's only used for
-Baseplate's own tests. It doesn't know the `roblox_*` resource types, so an
-`unknown resource type` error usually means the key isn't set.
+`baseplate validate` doesn't need the key: it checks the config offline. `plan`, `apply`,
+`destroy` and `import` do, and fail with `ROBLOX_API_KEY is not set` without it.
 
 ## 3. Write a config
 

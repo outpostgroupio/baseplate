@@ -73,7 +73,7 @@ func TestRenderStructuralValuesAsJSON(t *testing.T) {
 		AttrDiffs: []AttrDiff{{Name: "entries", Old: cty.EmptyObjectVal, New: entries}},
 	}}}
 	want := `{"on":true,"shop":{"items":["a"]}}`
-	if got := pl.RenderText(false); !strings.Contains(got, "entries = "+want) {
+	if got := pl.RenderText(false); !strings.Contains(got, "entries: {} => "+want) {
 		t.Fatalf("text render missing JSON value:\n%s", got)
 	}
 	jc := pl.JSONChanges()

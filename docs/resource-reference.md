@@ -231,7 +231,7 @@ Publishes a place file (`.rbxl`/`.rbxlx`) to an existing place and re-publishes 
 | `universe_id` | string | required, create-only | The universe the place belongs to. |
 | `version_type` | string | optional, trigger | `Published` (default) or `Saved`. |
 
-Place content isn't remotely readable, so change detection is by file content hash. `destroy` is a no-op (a place can't be unpublished).
+Place content isn't remotely readable, so change detection is by file content hash. For the same reason an import can't tell whether the live place matches `file`: it records the content as unverified, and the next plan publishes the file. If you know the live place already matches, `baseplate import --assume-current` records the file's hash instead. `destroy` is a no-op (a place can't be unpublished).
 
 Requires the `universe-places:write` [scope](how-to/api-key-scopes.md).
 

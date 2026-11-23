@@ -88,6 +88,7 @@ func (p *Provider) Resources() map[string]provider.Resource {
 		"mock_secret":   &res{p: p, typ: "mock_secret"},
 		"mock_replace":  &replaceRes{res: res{p: p, typ: "mock_replace"}},
 		"mock_abandon":  &replaceRes{res: res{p: p, typ: "mock_abandon"}, abandon: true},
+		"mock_publish":  &publishRes{res: res{p: p, typ: "mock_publish"}},
 	}
 }
 
@@ -110,7 +111,7 @@ func (r *res) DecodeSpec() hcldec.Spec {
 		// reference (unknown until apply) still decodes cleanly.
 		spec["target"] = &hcldec.AttrSpec{Name: "target", Type: cty.String, Required: true}
 	}
-	if r.typ == "mock_trigger" || r.typ == "mock_replace" || r.typ == "mock_abandon" {
+	if r.typ == "mock_trigger" || r.typ == "mock_publish" || r.typ == "mock_replace" || r.typ == "mock_abandon" {
 		spec["rev"] = &hcldec.AttrSpec{Name: "rev", Type: cty.String, Required: false}
 	}
 	if r.typ == "mock_replace" || r.typ == "mock_abandon" {
@@ -167,7 +168,7 @@ func (r *res) Computed() []string {
 	if r.typ == "mock_computed" {
 		return []string{"server_id"}
 	}
-	if r.typ == "mock_trigger" || r.typ == "mock_replace" || r.typ == "mock_abandon" {
+	if r.typ == "mock_trigger" || r.typ == "mock_publish" || r.typ == "mock_replace" || r.typ == "mock_abandon" {
 		return []string{"rev"}
 	}
 	return nil
@@ -182,7 +183,7 @@ func (r *res) Sensitive() []string {
 }
 
 func (r *res) Triggers(desired provider.Attributes) (map[string]cty.Value, error) {
-	if r.typ != "mock_trigger" && r.typ != "mock_replace" && r.typ != "mock_abandon" {
+	if r.typ != "mock_trigger" && r.typ != "mock_publish" && r.typ != "mock_replace" && r.typ != "mock_abandon" {
 		return nil, nil
 	}
 	out := map[string]cty.Value{}
@@ -206,6 +207,14 @@ func (r *res) Dependencies(desired provider.Attributes) []provider.Ref {
 	}
 	return nil
 }
+
+// publishRes is mock_publish: mock_trigger whose "rev" trigger can't be read
+// back from the platform (like roblox_place's content_hash).
+var _ provider.UnreadableTriggers = (*publishRes)(nil)
+
+type publishRes struct{ res }
+
+func (r *publishRes) UnreadableTriggers() []string { return []string{"rev"} }
 
 // replaceRes is mock_replace (and mock_abandon, which leaves the old object in
 // place on replace instead of deleting it). A change to "kind" (an attribute)
