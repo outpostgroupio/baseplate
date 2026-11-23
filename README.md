@@ -42,7 +42,8 @@ $ baseplate destroy   # remove what Baseplate manages
 - `for_each`, `moved` blocks and `lifecycle { prevent_destroy = true }` work much as they do in
   Terraform.
 - State is a local file with a lock, or a remote HTTP backend (the same protocol as Terraform's
-  `http` backend).
+  `http` backend). A [reference state server](docs/how-to/remote-state-cloudflare.md) for
+  Cloudflare keeps it in R2, with GitHub sign-in (`baseplate login`) and GitHub Actions OIDC.
 - `roblox_universe_secret` values are encrypted on your machine before they're sent, never written
   to state, and redacted from plans. Other attributes are not treated as secret: a value read with
   `env()` anywhere else is stored in state and shown in plans like any other value.
@@ -158,6 +159,8 @@ $ gh attestation verify baseplate_*_linux_amd64.tar.gz --repo outpostgroupio/bas
   references, `env()` and functions
 - [Resource reference](docs/resource-reference.md)
 - [State](docs/state.md): the state file, locking and the HTTP backend
+- [Remote state on Cloudflare](docs/how-to/remote-state-cloudflare.md): deploying the reference
+  state server
 - Guides: [API key scopes](docs/how-to/api-key-scopes.md),
   [importing existing resources](docs/how-to/importing-existing-resources.md),
   [managing many assets](docs/how-to/many-assets.md),

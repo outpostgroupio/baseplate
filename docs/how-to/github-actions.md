@@ -97,7 +97,20 @@ doesn't stop anyone deleting the resource in Creator Hub.
 ## State and secrets in CI
 
 A local state file doesn't survive between CI runs. For CI, use the
-[HTTP state backend](../state.md#remote-state-http-backend) and store its password as a repository
-secret.
+[HTTP state backend](../state.md#remote-state-http-backend).
+
+With the [Cloudflare state server](remote-state-cloudflare.md), the workflow needs no state secret:
+grant the job `id-token: write` and list the repository in the server's `OIDC_REPOSITORIES`.
+Baseplate gets a short-lived token from GitHub for each run:
+
+```yaml
+permissions:
+  contents: read
+  id-token: write
+```
+
+With another backend, store its password as a repository secret.
 
 The workflows need `ROBLOX_API_KEY` as a secret, plus the backend password if you use one.
+Pull requests from forks get neither secrets nor `id-token: write`, so run `validate` for them; it
+needs no API key and no state.

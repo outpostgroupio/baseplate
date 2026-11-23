@@ -13,13 +13,15 @@ Feature requests and bug reports go in [GitHub issues](https://github.com/outpos
 - `import`, `moved` and `lifecycle { prevent_destroy }` blocks, `for_each`, `locals` and file
   functions, and `plan --generate-config` for imported resources.
 - Local state with locking, and a remote HTTP backend compatible with Terraform's.
+- A reference state server for Cloudflare (R2 storage, Durable Object locks), with
+  `baseplate login` through GitHub and GitHub Actions OIDC for CI, plus `force-unlock`.
 - A GitHub Action with example plan-on-PR and apply-on-merge workflows.
 - Installing with Rokit, Homebrew or Scoop, and Sigstore-signed release checksums.
 
 ## Planned
 
 - `lifecycle { replace_triggered_by }`, to force a replace on demand.
-- More state backends (S3, Cloudflare R2).
+- An S3-compatible state backend, for teams that already have S3 or R2 credentials.
 - A `--debug` flag that logs Open Cloud requests with credentials redacted.
 - Managed pricing for game passes.
 - Possibly: collaborators and permissions, Creator Store products, localization tables, and

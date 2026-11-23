@@ -13,7 +13,8 @@ baseplate <command> [flags]
 | `--target` | *(none)* | Limit `plan`/`apply`/`destroy` to one resource (`roblox_asset.icon`; for a `for_each` resource, every instance) or one instance (`'roblox_asset.sprites["ui/gem.png"]'`). See [Addresses](#addresses). A malformed address is an error. |
 | `--json` | `false` | Emit machine-readable output. Works on every command. Results are a versioned envelope `{ "format_version": 1, "command": ..., "result": ... }` on stdout; errors are `{ "format_version": 1, "command": ..., "error": { "message": ... } }` on stderr. |
 
-State can also be stored remotely with a `backend "http"` block; see [State](state.md).
+State can also be stored remotely with a `backend "http"` block; see [State](state.md). `--state`
+is refused when the config has one.
 
 ### Approval flags (`apply` / `destroy` / `restart-servers`)
 
@@ -51,6 +52,10 @@ this form, so you can copy them.
 
 ## Environment
 
+`BASEPLATE_STATE_TOKEN`, when set, is sent as the bearer token to a remote state server, ahead of
+a GitHub Actions OIDC token or the token stored by `login`. `BASEPLATE_CREDENTIALS_FILE` overrides
+where `login` stores tokens.
+
 `ROBLOX_API_KEY` is the Open Cloud API key. It's needed to manage `roblox_*` resources; read it in
 the config with `env("ROBLOX_API_KEY")`. `validate` and `show` work without it. `plan`, `apply`,
 `destroy` and `import` fail with `ROBLOX_API_KEY is not set` when the config has `roblox_*`
@@ -83,7 +88,9 @@ Configuration is valid.
 ### `plan`
 
 Show the changes `apply` would make, as a colorized diff. Read-only: it reads state and queries the
-provider but mutates nothing (and takes no lock). Exits `2` if there are changes, `0` if converged.
+provider but mutates nothing. It holds the state lock while it runs, so it never reads state that
+an `apply` is rewriting; `--lock=false` skips the lock. Exits `2` if there are changes, `0` if
+converged.
 
 ```console
 $ baseplate plan
@@ -270,6 +277,39 @@ the same apply.
 | Flag | Default | Description |
 |---|---|---|
 | `--assume-current` | `false` | Record content that can't be read back (a place's `file`) as already matching the config, so the next plan doesn't publish it. |
+
+### `force-unlock <id>`
+
+Release a remote state lock left behind by a run that is no longer active, such as a cancelled CI
+job. The id is in the error a blocked command prints. Releasing the lock of a run that is still
+going lets two runs write state at once, so check first. Prompts for confirmation on a terminal;
+`--force` skips the prompt.
+
+```console
+$ baseplate force-unlock 5c1a3e0e-1e1b-4a5e-9e5a-0c3b9d1f2a77
+Released the state lock 5c1a3e0e-1e1b-4a5e-9e5a-0c3b9d1f2a77.
+```
+
+The server only releases the lock if the id matches. Local state needs no force-unlock: the
+operating system releases its lock when the process exits.
+
+### `login [host]` / `logout [host]`
+
+Sign in to a remote state server in your browser, and store the token it issues. Without a host,
+`login` uses the host of the config's `backend "http"` address. The server must support sign-in
+(see [State server protocol](state-server-protocol.md#loginv1-baseplate-login)), as the
+[Cloudflare state server](how-to/remote-state-cloudflare.md) does.
+
+```console
+$ baseplate login
+Opening your browser to sign in to state.example.com. If it doesn't open, visit:
+...
+Signed in to state.example.com. The token is stored in ~/.config/baseplate/credentials.json.
+```
+
+The browser hands the sign-in back to a port on `127.0.0.1`, so it must run on the same machine.
+Where there's no browser (over SSH, say), set `BASEPLATE_STATE_TOKEN` instead. `logout` deletes
+the stored token.
 
 ### `restart-servers`
 

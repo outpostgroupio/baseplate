@@ -151,7 +151,7 @@ func TestHTTPLockLifecycleAndConflict(t *testing.T) {
 	cfg := HTTPConfig{Address: srv.URL, LockAddress: srv.URL + "/lock", UnlockAddress: srv.URL + "/unlock",
 		LockMethod: "POST", UnlockMethod: "DELETE", Version: "test"}
 	h1, _ := NewHTTP(cfg)
-	unlock, err := h1.Lock()
+	unlock, err := h1.Lock("test")
 	if err != nil {
 		t.Fatalf("first lock should succeed: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestHTTPLockLifecycleAndConflict(t *testing.T) {
 	}
 	// second client can't lock
 	h2, _ := NewHTTP(cfg)
-	if _, err := h2.Lock(); err == nil {
+	if _, err := h2.Lock("test"); err == nil {
 		t.Fatal("second lock should conflict")
 	}
 	// put carries the lock ID
@@ -174,7 +174,7 @@ func TestHTTPLockLifecycleAndConflict(t *testing.T) {
 		t.Fatalf("custom unlock method not used: %q", fs.sawUnlockMethod)
 	}
 	// now a fresh lock works again
-	if _, err := (func() (func() error, error) { h3, _ := NewHTTP(cfg); return h3.Lock() })(); err != nil {
+	if _, err := (func() (func() error, error) { h3, _ := NewHTTP(cfg); return h3.Lock("test") })(); err != nil {
 		t.Fatalf("lock after unlock should succeed: %v", err)
 	}
 }
@@ -184,7 +184,7 @@ func TestHTTPLockingDisabledWhenNoLockAddress(t *testing.T) {
 	srv := httptest.NewServer(fs.handler())
 	defer srv.Close()
 	h, _ := NewHTTP(HTTPConfig{Address: srv.URL}) // no LockAddress
-	unlock, err := h.Lock()
+	unlock, err := h.Lock("test")
 	if err != nil || unlock == nil {
 		t.Fatalf("lock with no address should be a no-op success: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestHTTPPutRejectedUnderForeignLock(t *testing.T) {
 	defer srv.Close()
 	cfg := HTTPConfig{Address: srv.URL, LockAddress: srv.URL + "/lock", LockMethod: "POST", Version: "test"}
 	holder, _ := NewHTTP(cfg)
-	if _, err := holder.Lock(); err != nil {
+	if _, err := holder.Lock("test"); err != nil {
 		t.Fatal(err)
 	}
 	other, _ := NewHTTP(cfg)
@@ -231,5 +231,68 @@ func TestHTTPRequiresTLSExceptForLoopback(t *testing.T) {
 		if _, err := NewHTTP(HTTPConfig{Address: addr}); err != nil {
 			t.Errorf("NewHTTP(%q): %v", addr, err)
 		}
+	}
+}
+
+func TestHTTPBearerToken(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	h, _ := NewHTTP(HTTPConfig{Address: srv.URL, Token: "tok"})
+	if _, err := h.Get(); err != nil {
+		t.Fatal(err)
+	}
+	if got != "Bearer tok" {
+		t.Fatalf("Authorization = %q, want a bearer token", got)
+	}
+	h, _ = NewHTTP(HTTPConfig{Address: srv.URL, Token: "tok", Username: "u", Password: "pw"})
+	h.Get()
+	if !strings.HasPrefix(got, "Basic ") {
+		t.Fatalf("basic auth must win over a token, got %q", got)
+	}
+}
+
+func TestHTTPLockConflictNamesHolderAndOperation(t *testing.T) {
+	fs := &fakeTFServer{}
+	srv := httptest.NewServer(fs.handler())
+	defer srv.Close()
+	cfg := HTTPConfig{Address: srv.URL, LockAddress: srv.URL + "/lock", LockMethod: "POST", Version: "test"}
+	holder, _ := NewHTTP(cfg)
+	if _, err := holder.Lock("apply"); err != nil {
+		t.Fatal(err)
+	}
+	other, _ := NewHTTP(cfg)
+	_, err := other.Lock("plan")
+	if err == nil {
+		t.Fatal("second lock should conflict")
+	}
+	for _, want := range []string{"state locked by " + fs.lockWho, "ID " + fs.lockID, "baseplate force-unlock " + fs.lockID} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("lock error missing %q: %v", want, err)
+		}
+	}
+}
+
+func TestHTTPForceUnlockSendsTheID(t *testing.T) {
+	var body map[string]any
+	var method string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method = r.Method
+		json.NewDecoder(r.Body).Decode(&body)
+	}))
+	defer srv.Close()
+	h, _ := NewHTTP(HTTPConfig{Address: srv.URL, LockAddress: srv.URL})
+	if err := h.ForceUnlock("abc"); err != nil {
+		t.Fatal(err)
+	}
+	if method != "UNLOCK" || body["ID"] != "abc" {
+		t.Fatalf("force-unlock sent %s %v, want UNLOCK with ID abc", method, body)
+	}
+	h, _ = NewHTTP(HTTPConfig{Address: srv.URL})
+	if err := h.ForceUnlock("abc"); err == nil {
+		t.Fatal("force-unlock without a lock address should fail")
 	}
 }

@@ -13,6 +13,8 @@ internal/engine/graph         topological sort, cycle and unknown-dependency che
 internal/engine/plan          diffing and plan rendering
 internal/engine/apply         apply, state write-back, apply-time reference resolution
 internal/state[/backend]      state model (serial, lineage, version) and the local/http backends
+internal/auth                 state server tokens: baseplate login, stored credentials, GitHub Actions OIDC
+workers/state                 the reference state server (Cloudflare Worker, TypeScript); see its README
 internal/provider             Provider and Resource interfaces, plus optional capabilities
 internal/provider/mock        in-memory provider used by the engine tests
 internal/provider/resourcedocs  generates docs/resource-reference.md
