@@ -1,0 +1,20 @@
+{
+  "name": "baseplate-state-worker",
+  "private": true,
+  "description": "Reference Baseplate remote state server for Cloudflare Workers: state in R2, locks in a Durable Object, GitHub sign-in.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.5.0",
+    "@cloudflare/workers-types": "5.20261102.1",
+    "typescript": "6.0.3",
+    "vitest": "4.1.12",
+    "wrangler": "4.156.2"
+  }
+}

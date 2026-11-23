@@ -18,6 +18,23 @@ jobs:
       # The race detector requires cgo, so tests run with the runner's default toolchain.
       - run: go test ./... -race
 
+  # The reference state server (workers/state): typecheck and run its tests in the Workers runtime.
+  worker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workers/state
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: workers/state/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
   # Exercise action.yml's install paths: the release download on each runner OS, and the build from
   # source that an unpinned local checkout gets.
   action:

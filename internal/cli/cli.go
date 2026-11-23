@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/zclconf/go-cty/cty"
 
 	"github.com/outpostgroupio/baseplate/internal/addr"
+	"github.com/outpostgroupio/baseplate/internal/auth"
 	"github.com/outpostgroupio/baseplate/internal/cli/output"
 	"github.com/outpostgroupio/baseplate/internal/config"
 	"github.com/outpostgroupio/baseplate/internal/config/configgen"
@@ -92,6 +94,15 @@ func openBackend(cfgPath, statePath string) (backend.Backend, bool, error) {
 			return nil, false, err
 		}
 		hc.Version = version.Version
+		if hc.Username == "" && hc.Password == "" {
+			host, err := auth.HostOf(hc.Address)
+			if err != nil {
+				return nil, false, err
+			}
+			if hc.Token, err = auth.Token(context.Background(), http.DefaultClient, host); err != nil {
+				return nil, false, fmt.Errorf("http backend: finding a token for %s: %w", host, err)
+			}
+		}
 		h, err := backend.NewHTTP(hc)
 		if err != nil {
 			return nil, false, err
@@ -182,12 +193,14 @@ type applyResult struct {
 var errCancelled = errors.New("cancelled at confirmation prompt")
 
 var confirmPrompts = map[string]string{
+	"force-unlock":    "Do you really want to force-unlock the state? Only do this if the run holding the lock is no longer active.",
 	"apply":           "Do you want to perform these actions?",
 	"destroy":         "Do you really want to destroy all resources?",
 	"restart-servers": "Do you want to restart these servers?",
 }
 
 var cancelLabel = map[string]string{
+	"force-unlock":    "Force-unlock",
 	"apply":           "Apply",
 	"destroy":         "Destroy",
 	"restart-servers": "Restart",
@@ -252,6 +265,9 @@ func run(args []string, s streams) int {
 	root.SetOut(s.out)
 	root.SetErr(s.err)
 	root.SetArgs(args)
+	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		return rejectStateWithBackend(cmd, cfgPath)
+	}
 
 	exit := 0
 	p := newProvider()
@@ -288,6 +304,15 @@ func run(args []string, s streams) int {
 		b, _, err := openBackend(cfgPath, statePath)
 		if err != nil {
 			return err
+		}
+		// plan holds the lock while it reads state and Roblox, as Terraform's
+		// does, so it never reports against state an apply is rewriting.
+		if lock, _ := cmd.Flags().GetBool("lock"); lock {
+			unlock, err := b.Lock("plan")
+			if err != nil {
+				return err
+			}
+			defer releaseLock(unlock, s)
 		}
 		st, err := b.Get()
 		if err != nil {
@@ -337,6 +362,7 @@ func run(args []string, s streams) int {
 		}
 		return nil
 	}}
+	planCmd.Flags().Bool("lock", true, "hold the state lock while planning (--lock=false to skip it)")
 	planCmd.Flags().StringVar(&generateConfigOut, "generate-config", "", "write generated HCL for undeclared import blocks to this file")
 	root.AddCommand(planCmd)
 
@@ -385,6 +411,9 @@ func run(args []string, s streams) int {
 	importCmd.Flags().Bool("assume-current", false, "treat content Roblox can't report back (a place's file) as already matching the config, instead of updating it on the next apply")
 	root.AddCommand(importCmd)
 	root.AddCommand(newRestartServersCmd(p, &cfgPath, &jsonOut, &cmdName, s))
+	root.AddCommand(newForceUnlockCmd(&cfgPath, &statePath, &jsonOut, &cmdName, s))
+	root.AddCommand(newLoginCmd(&cfgPath, &jsonOut, &cmdName, s))
+	root.AddCommand(newLogoutCmd(&cfgPath, &jsonOut, &cmdName, s))
 	root.AddCommand(&cobra.Command{
 		Use:   "show [address]",
 		Short: "Print the resources recorded in state",
@@ -468,15 +497,11 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 			fmt.Fprintf(s.err, "note: no config at %s; using local state backend at %s\n", cfgPath, statePath)
 		}
 	}
-	unlock, err := b.Lock()
+	unlock, err := b.Lock(verb)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if uerr := unlock(); uerr != nil {
-			fmt.Fprintf(s.err, "warning: failed to release state lock: %v\n", uerr)
-		}
-	}()
+	defer releaseLock(unlock, s)
 	st, err := b.Get()
 	if err != nil {
 		return err
@@ -569,15 +594,11 @@ func importRun(p provider.Provider, cfgPath, statePath, address, id string, opts
 	if err != nil {
 		return err
 	}
-	unlock, err := b.Lock()
+	unlock, err := b.Lock("import")
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if uerr := unlock(); uerr != nil {
-			fmt.Fprintf(s.err, "warning: failed to release state lock: %v\n", uerr)
-		}
-	}()
+	defer releaseLock(unlock, s)
 	st, err := b.Get()
 	if err != nil {
 		return err
@@ -602,6 +623,14 @@ func importRun(p provider.Provider, cfgPath, statePath, address, id string, opts
 		importResult{Address: address, ID: id, Warnings: warns.List()})
 }
 
+// releaseLock releases a state lock, warning (not failing) when that fails:
+// the command's own work is done by then.
+func releaseLock(unlock func() error, s streams) {
+	if err := unlock(); err != nil {
+		fmt.Fprintf(s.err, "warning: failed to release state lock: %v\n", err)
+	}
+}
+
 // importAllRun runs every import {} block whose target isn't in state yet,
 // under the state lock, recording them in one state write. Like importRun it
 // never mutates the remote, so a team adopting a live universe can fill state
@@ -618,15 +647,11 @@ func importAllRun(p provider.Provider, cfgPath, statePath string, opts apply.Imp
 	if err != nil {
 		return err
 	}
-	unlock, err := b.Lock()
+	unlock, err := b.Lock("import")
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if uerr := unlock(); uerr != nil {
-			fmt.Fprintf(s.err, "warning: failed to release state lock: %v\n", uerr)
-		}
-	}()
+	defer releaseLock(unlock, s)
 	st, err := b.Get()
 	if err != nil {
 		return err

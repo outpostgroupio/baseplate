@@ -1,0 +1,33 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "baseplate-state",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  // Create the bucket first: npx wrangler r2 bucket create baseplate-state
+  "r2_buckets": [{ "binding": "STATE_BUCKET", "bucket_name": "baseplate-state" }],
+  // One Durable Object per state name holds its lock and serialises its writes.
+  "durable_objects": {
+    "bindings": [{ "name": "STATE_OBJECTS", "class_name": "StateObject" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["StateObject"] }],
+  "vars": {
+    // GitHub sign-in (baseplate login): who may sign in. GITHUB_ORG is required for
+    // sign-in; GITHUB_TEAM (a team slug in that org) narrows it further.
+    "GITHUB_ORG": "",
+    "GITHUB_TEAM": "",
+    // For GitHub Enterprise Server, set GITHUB_URL (e.g. https://github.example.com)
+    // and GITHUB_API_URL (e.g. https://github.example.com/api/v3).
+    // GitHub Actions OIDC: comma-separated owner/repo list whose workflows may use
+    // the state without a stored secret. Empty disables OIDC.
+    "OIDC_REPOSITORIES": "",
+    // How long a token from baseplate login lasts.
+    "TOKEN_TTL_DAYS": "30",
+    // Keep a copy of every state version under history/ in the bucket.
+    "KEEP_HISTORY": "true"
+  }
+  // Secrets (npx wrangler secret put <NAME>):
+  //   SESSION_SECRET        required; a long random string that seals tokens
+  //   GITHUB_CLIENT_ID      GitHub OAuth app, for baseplate login
+  //   GITHUB_CLIENT_SECRET
+  //   ADMIN_TOKEN           optional emergency token with full access
+}

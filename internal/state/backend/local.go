@@ -45,7 +45,9 @@ func (l *Local) Put(s *state.State) error {
 	return os.Rename(tmp, l.path)
 }
 
-func (l *Local) Lock() (func() error, error) {
+// Lock takes an OS file lock on <state>.lock. The OS releases it when the
+// process exits, so a local lock never needs force-unlock.
+func (l *Local) Lock(string) (func() error, error) {
 	ok, err := l.lock.TryLock()
 	if err != nil {
 		return nil, err

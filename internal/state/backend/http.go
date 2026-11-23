@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,8 +30,11 @@ type HTTPConfig struct {
 	UnlockMethod  string
 	Username      string
 	Password      string
-	Version       string
-	Client        *http.Client
+	// Token, when set (and Username/Password are not), is sent as
+	// "Authorization: Bearer <token>".
+	Token   string
+	Version string
+	Client  *http.Client
 }
 
 // requireTLS rejects a plain-http address unless it points at this machine:
@@ -96,6 +100,8 @@ func (h *HTTP) request(method, url string, body []byte, extra map[string]string)
 	}
 	if h.cfg.Username != "" || h.cfg.Password != "" {
 		req.SetBasicAuth(h.cfg.Username, h.cfg.Password)
+	} else if h.cfg.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+h.cfg.Token)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -125,8 +131,7 @@ func (h *HTTP) Get() (*state.State, error) {
 	case http.StatusNoContent, http.StatusNotFound:
 		return state.New(), nil
 	default:
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("http backend: get state: %s: %s", resp.Status, strings.TrimSpace(string(b)))
+		return nil, statusError("get state", resp)
 	}
 }
 
@@ -155,8 +160,7 @@ func (h *HTTP) Put(s *state.State) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("http backend: put state: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		return statusError("put state", resp)
 	}
 	return nil
 }
@@ -173,12 +177,12 @@ type lockInfo struct {
 	Path      string
 }
 
-func (h *HTTP) Lock() (func() error, error) {
+func (h *HTTP) Lock(operation string) (func() error, error) {
 	if h.cfg.LockAddress == "" {
 		return func() error { return nil }, nil // locking disabled (TF semantics)
 	}
 	info := lockInfo{
-		ID: newLockID(), Operation: "baseplate", Who: who(),
+		ID: newLockID(), Operation: operation, Who: who(),
 		Version: h.cfg.Version, Created: time.Now().UTC(), Path: h.cfg.Address,
 	}
 	body, err := json.Marshal(info)
@@ -199,14 +203,9 @@ func (h *HTTP) Lock() (func() error, error) {
 		var held lockInfo
 		b, _ := io.ReadAll(resp.Body)
 		_ = json.Unmarshal(b, &held)
-		holder := held.Who
-		if holder == "" {
-			holder = "another process"
-		}
-		return nil, fmt.Errorf("http backend: state locked by %s (ID %s)", holder, held.ID)
+		return nil, lockedError(held)
 	default:
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("http backend: lock: %s: %s", resp.Status, strings.TrimSpace(string(b)))
+		return nil, statusError("lock", resp)
 	}
 }
 
@@ -224,11 +223,73 @@ func (h *HTTP) unlock() error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("http backend: unlock: %s: %s", resp.Status, strings.TrimSpace(string(b)))
+		return statusError("unlock", resp)
 	}
 	h.lockID = ""
 	h.lockBody = nil
+	return nil
+}
+
+// statusError reports an unexpected response. A 401 or 403 says how to
+// authenticate, since that's the usual cause.
+func statusError(op string, resp *http.Response) error {
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	err := fmt.Errorf("http backend: %s: %s: %s", op, resp.Status, strings.TrimSpace(string(b)))
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		err = fmt.Errorf("%w (sign in with `baseplate login`, set BASEPLATE_STATE_TOKEN, or set the backend's username and password)", err)
+	}
+	return err
+}
+
+// lockedError describes the lock that blocked this run: who holds it, for
+// what, since when, and how to release it if that run is gone.
+func lockedError(held lockInfo) error {
+	holder := held.Who
+	if holder == "" {
+		holder = "another process"
+	}
+	detail := "ID " + held.ID
+	if held.Operation != "" {
+		detail += ", operation " + held.Operation
+	}
+	if !held.Created.IsZero() {
+		detail += ", since " + held.Created.UTC().Format(time.RFC3339)
+	}
+	msg := fmt.Sprintf("http backend: state locked by %s (%s)", holder, detail)
+	if held.ID != "" {
+		msg += fmt.Sprintf(". If that run is no longer active, release the lock with: baseplate force-unlock %s", held.ID)
+	}
+	return errors.New(msg)
+}
+
+// ForceUnlock implements ForceUnlocker: it sends the unlock request for the
+// lock with the given id, as the Terraform http backend does for
+// force-unlock. The server decides whether the id matches the held lock.
+func (h *HTTP) ForceUnlock(id string) error {
+	addr := h.cfg.UnlockAddress
+	if addr == "" {
+		addr = h.cfg.LockAddress
+	}
+	if addr == "" {
+		return errors.New("http backend: locking is not configured (no lock_address), so there is no lock to release")
+	}
+	body, err := json.Marshal(lockInfo{ID: id})
+	if err != nil {
+		return err
+	}
+	resp, err := h.request(h.cfg.UnlockMethod, addr, body, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(resp.Body)
+		var held lockInfo
+		if json.Unmarshal(b, &held) == nil && held.ID != "" && held.ID != id {
+			return fmt.Errorf("http backend: force-unlock: the state is locked with ID %s, not %s", held.ID, id)
+		}
+		return fmt.Errorf("http backend: force-unlock: %s: %s", resp.Status, strings.TrimSpace(string(b)))
+	}
 	return nil
 }
 

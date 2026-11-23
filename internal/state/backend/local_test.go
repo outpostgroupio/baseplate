@@ -27,7 +27,7 @@ func TestLocalPutGetAndLock(t *testing.T) {
 		t.Fatal("state not persisted")
 	}
 
-	unlock, err := b.Lock()
+	unlock, err := b.Lock("test")
 	if err != nil {
 		t.Fatal(err)
 	}
