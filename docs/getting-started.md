@@ -5,9 +5,10 @@ experience you own.
 
 ## 1. Install
 
-Download the archive for your platform from the
+Install with Rokit, Homebrew or Scoop, or download the archive for your platform from the
 [releases page](https://github.com/outpostgroupio/baseplate/releases), extract it and put
-`baseplate` on your `PATH`. Or, with Go 1.24 or later:
+`baseplate` on your `PATH`. The [README](../README.md#install) has the command for each. Or, with
+Go 1.24 or later:
 
 ```console
 $ go install github.com/outpostgroupio/baseplate/cmd/baseplate@latest

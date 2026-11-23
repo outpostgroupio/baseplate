@@ -45,6 +45,18 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# A keyless Sigstore signature over checksums.txt, which covers every archive. The release workflow
+# installs cosign and grants the OIDC token it signs with.
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args:
+      - sign-blob
+      - --bundle=${signature}
+      - ${artifact}
+      - --yes
+    artifacts: checksum
+
 changelog:
   use: github
   sort: asc
@@ -70,6 +82,41 @@ changelog:
 
 release:
   prerelease: auto
+
+# Every release before 1.0 is a release candidate, so the tap and the bucket take them too. At
+# v1.0.0, set skip_upload: auto on both so they only follow full releases.
+homebrew_casks:
+  - name: baseplate
+    binaries:
+      - baseplate
+    homepage: https://github.com/outpostgroupio/baseplate
+    description: Infrastructure as code for Roblox
+    license: MIT
+    repository:
+      owner: outpostgroupio
+      name: homebrew-tap
+      git:
+        url: git@github.com:outpostgroupio/homebrew-tap.git
+        private_key: "{{ .Env.HOMEBREW_TAP_DEPLOY_KEY }}"
+    # The binary isn't notarized, so Gatekeeper won't run it from a cask with the quarantine flag set.
+    hooks:
+      post:
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/baseplate"]
+          end
+
+scoops:
+  - name: baseplate
+    homepage: https://github.com/outpostgroupio/baseplate
+    description: Infrastructure as code for Roblox
+    license: MIT
+    repository:
+      owner: outpostgroupio
+      name: scoop-bucket
+      git:
+        url: git@github.com:outpostgroupio/scoop-bucket.git
+        private_key: "{{ .Env.SCOOP_BUCKET_DEPLOY_KEY }}"
 
 snapshot:
   version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"

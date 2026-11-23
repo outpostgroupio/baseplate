@@ -73,8 +73,11 @@ badges are disabled, and assets that can't be archived are left behind.
 ## Releases
 
 Releases are built by [GoReleaser](https://goreleaser.com) when a `v*` tag is pushed
-(`.github/workflows/release.yml`). The workflow uses the default `GITHUB_TOKEN` and needs no other
-secrets.
+(`.github/workflows/release.yml`). Besides the default `GITHUB_TOKEN`, it uses two secrets:
+`HOMEBREW_TAP_DEPLOY_KEY` and `SCOOP_BUCKET_DEPLOY_KEY`, SSH deploy keys with write access to
+[outpostgroupio/homebrew-tap](https://github.com/outpostgroupio/homebrew-tap) and
+[outpostgroupio/scoop-bucket](https://github.com/outpostgroupio/scoop-bucket). GoReleaser pushes the
+cask and the Scoop manifest there with them.
 
 ```console
 $ git tag v0.1.0-rc.3
@@ -84,7 +87,13 @@ $ git push origin v0.1.0-rc.3
 A tag with a pre-release suffix (`-rc.N`, `-beta.N`) is published as a GitHub pre-release; a bare
 tag is a full release. Until 1.0, tag release candidates. Each release has archives for
 linux/darwin/windows on amd64 and arm64, `checksums.txt`, and a changelog built from the squashed
-PR titles.
+PR titles. `checksums.txt` is signed keylessly with cosign (`checksums.txt.sigstore.json`), and the
+workflow adds GitHub build provenance for the archives. Provenance is skipped while the repository
+is private, because GitHub only offers it for private repositories on Enterprise Cloud.
+
+The tap and the bucket take release candidates too, since there's no full release yet. At v1.0.0,
+set `skip_upload: auto` on `homebrew_casks` and `scoops` in `.goreleaser.yaml` so they only follow
+full releases. Rokit needs nothing from us: it finds the right archive by its name.
 
 The build stamps `internal/version` through `-ldflags -X`, which `baseplate version` prints. An
 unstamped `go build` reports `baseplate dev`.
@@ -93,8 +102,10 @@ To check the GoReleaser config without publishing, in a normal clone:
 
 ```console
 $ goreleaser check
-$ goreleaser release --snapshot --clean
+$ goreleaser release --snapshot --clean --skip=sign
 ```
+
+`--skip=sign` skips the cosign step, which only works in the release workflow.
 
 ## Open Cloud notes
 

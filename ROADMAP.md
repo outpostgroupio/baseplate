@@ -14,12 +14,12 @@ Feature requests and bug reports go in [GitHub issues](https://github.com/outpos
   functions, and `plan --generate-config` for imported resources.
 - Local state with locking, and a remote HTTP backend compatible with Terraform's.
 - A GitHub Action with example plan-on-PR and apply-on-merge workflows.
+- Installing with Rokit, Homebrew or Scoop, and Sigstore-signed release checksums.
 
 ## Planned
 
 - `lifecycle { replace_triggered_by }`, to force a replace on demand.
 - More state backends (S3, Cloudflare R2).
-- Installing through Rokit.
 - A `--debug` flag that logs Open Cloud requests with credentials redacted.
 - Managed pricing for game passes.
 - Possibly: collaborators and permissions, Creator Store products, localization tables, and

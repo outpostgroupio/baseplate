@@ -17,3 +17,49 @@ jobs:
       - run: go vet ./...
       # The race detector requires cgo, so tests run with the runner's default toolchain.
       - run: go test ./... -race
+
+  # Exercise action.yml's install paths: the release download on each runner OS, and the build from
+  # source that an unpinned local checkout gets.
+  action:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: pinned
+        uses: ./
+        with:
+          command: version
+          version: v0.1.0-rc.2
+      - shell: bash
+        env:
+          OUT: ${{ steps.pinned.outputs.output }}
+        run: |
+          echo "$OUT"
+          [[ "$OUT" == "baseplate 0.1.0-rc.2 "* ]]
+      - id: latest
+        uses: ./
+        with:
+          command: version
+          version: latest
+      - shell: bash
+        env:
+          OUT: ${{ steps.latest.outputs.output }}
+        run: |
+          echo "$OUT"
+          [[ "$OUT" == "baseplate "[0-9]* ]]
+      # A local `uses: ./` isn't pinned to a release, so this builds the checkout.
+      - id: source
+        if: matrix.os == 'ubuntu-latest'
+        uses: ./
+        with:
+          command: version
+      - if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        env:
+          OUT: ${{ steps.source.outputs.output }}
+        run: |
+          echo "$OUT"
+          [[ "$OUT" == "baseplate dev "* ]]
