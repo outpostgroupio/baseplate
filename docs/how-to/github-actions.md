@@ -22,9 +22,15 @@ Inputs:
 - `args`: extra arguments, such as `--config infra.bp.hcl --auto-approve`.
 - `api-key`: the Open Cloud key, exported as `ROBLOX_API_KEY`.
 - `working-directory`: where to run (default `.`).
-- `version`: which Baseplate to install. Leave it empty to build the version that matches the ref
-  you pinned the action to. You can also pass a tag, a commit SHA or `latest`. (In `v0.1.0-rc.2`
-  and earlier the default was `latest`, so set it explicitly there.)
+- `version`: which Baseplate to install. Leave it empty to install the version that matches the
+  ref you pinned the action to. You can also pass a tag, a commit SHA or `latest` (the newest full
+  release, or the newest release candidate while there's no full release). (In `v0.1.0-rc.2` and
+  earlier the default was `latest`, so set it explicitly there.)
+- `token`: the GitHub token used to download the release. Defaults to the workflow's token.
+
+When the version is a release, the action downloads the release binary for the runner (Linux, macOS
+or Windows, on x64 or arm64) and checks it against the release's `checksums.txt`, so the job doesn't
+need Go. Any other ref, such as a commit SHA, is built from source.
 
 Outputs: `output` (the command's output) and `changes` (`true` or `false`, for `plan`).
 

@@ -75,7 +75,28 @@ subscription products and the universe's age rating. The [roadmap](ROADMAP.md) h
 
 ## Install
 
-Download an archive for your platform from the
+With [Rokit](https://github.com/rojo-rbx/rokit), alongside your other Roblox tools:
+
+```console
+$ rokit add outpostgroupio/baseplate@0.1.0-rc.2
+```
+
+Rokit only picks full releases on its own, so give it a version until 1.0.
+
+With Homebrew on macOS or Linux:
+
+```console
+$ brew install --cask outpostgroupio/tap/baseplate
+```
+
+With Scoop on Windows:
+
+```console
+$ scoop bucket add outpostgroupio https://github.com/outpostgroupio/scoop-bucket
+$ scoop install outpostgroupio/baseplate
+```
+
+Or download an archive for your platform from the
 [releases page](https://github.com/outpostgroupio/baseplate/releases), extract it and put the binary
 on your `PATH`:
 
@@ -85,16 +106,37 @@ $ mv baseplate /usr/local/bin/
 $ baseplate version
 ```
 
-Each release has a `checksums.txt` you can check with `sha256sum -c checksums.txt`.
-
 Or build from source with Go 1.24 or later:
 
 ```console
 $ go install github.com/outpostgroupio/baseplate/cmd/baseplate@latest
 ```
 
+In GitHub Actions, use the [action](docs/how-to/github-actions.md), which installs the release
+binary for you.
+
 Baseplate is pre-1.0. Releases so far are release candidates (tags like `v0.1.0-rc.2`) and are
 marked as pre-releases on GitHub.
+
+### Checking a download
+
+Each release has a `checksums.txt`, signed with [Sigstore](https://www.sigstore.dev/) by the release
+workflow. The signature is in `checksums.txt.sigstore.json`. Check the signature with
+[cosign](https://docs.sigstore.dev/cosign/system_config/installation/), then the archive:
+
+```console
+$ cosign verify-blob checksums.txt \
+    --bundle checksums.txt.sigstore.json \
+    --certificate-identity-regexp '^https://github.com/outpostgroupio/baseplate/\.github/workflows/release\.yml@refs/tags/v' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com
+$ sha256sum --check --ignore-missing checksums.txt
+```
+
+Releases also have GitHub build provenance, which the `gh` CLI can check:
+
+```console
+$ gh attestation verify baseplate_*_linux_amd64.tar.gz --repo outpostgroupio/baseplate
+```
 
 ## Quick start
 

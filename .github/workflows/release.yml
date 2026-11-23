@@ -6,6 +6,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write # keyless cosign signing + build provenance
+  attestations: write
 
 jobs:
   goreleaser:
@@ -17,9 +19,22 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24"
+      - uses: sigstore/cosign-installer@v4
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Write deploy keys for outpostgroupio/homebrew-tap and outpostgroupio/scoop-bucket.
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          SCOOP_BUCKET_DEPLOY_KEY: ${{ secrets.SCOOP_BUCKET_DEPLOY_KEY }}
+      # GitHub only offers artifact attestations for private repos on Enterprise Cloud, so this
+      # starts running once the repo is public.
+      - uses: actions/attest-build-provenance@v4
+        if: ${{ !github.event.repository.private }}
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt

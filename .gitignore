@@ -19,3 +19,6 @@
 
 # Local agent notes (not published).
 CLAUDE.local.md
+
+# GoReleaser output.
+/dist/
