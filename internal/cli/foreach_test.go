@@ -12,6 +12,7 @@ import (
 	ctyjson "github.com/zclconf/go-cty/cty/json"
 
 	"github.com/outpostgroupio/baseplate/internal/cli/output"
+	"github.com/outpostgroupio/baseplate/internal/engine/apply"
 	"github.com/outpostgroupio/baseplate/internal/engine/plan"
 	"github.com/outpostgroupio/baseplate/internal/provider"
 	"github.com/outpostgroupio/baseplate/internal/provider/mock"
@@ -105,7 +106,7 @@ func TestImportKeyedInstanceAddress(t *testing.T) {
 	p := mock.New()
 	p.Seed("mock_thing/9", provider.Attributes{"name": cty.StringVal("a")})
 	var out bytes.Buffer
-	if err := importRun(p, cfg, st, `mock_thing.set["a"]`, "mock_thing/9", output.Text, applyStreams("", false, &out)); err != nil {
+	if err := importRun(p, cfg, st, `mock_thing.set["a"]`, "mock_thing/9", apply.ImportOptions{}, output.Text, applyStreams("", false, &out)); err != nil {
 		t.Fatal(err)
 	}
 	s, _ := backend.NewLocal(st).Get()
@@ -119,11 +120,11 @@ func TestImportRejectsMalformedAndUnindexedAddress(t *testing.T) {
 	_, cfg, st := writeKeyedCfg(t)
 	p := mock.New()
 	var out bytes.Buffer
-	err := importRun(p, cfg, st, "mock_thing.set[a]", "x", output.Text, applyStreams("", false, &out))
+	err := importRun(p, cfg, st, "mock_thing.set[a]", "x", apply.ImportOptions{}, output.Text, applyStreams("", false, &out))
 	if err == nil || !strings.Contains(err.Error(), "key must be a quoted string") {
 		t.Fatalf("malformed import address: %v", err)
 	}
-	err = importRun(p, cfg, st, "mock_thing.set", "x", output.Text, applyStreams("", false, &out))
+	err = importRun(p, cfg, st, "mock_thing.set", "x", apply.ImportOptions{}, output.Text, applyStreams("", false, &out))
 	if err == nil || !strings.Contains(err.Error(), "has for_each; import a specific instance") {
 		t.Fatalf("unindexed import of a for_each resource: %v", err)
 	}

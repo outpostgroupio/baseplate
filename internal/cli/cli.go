@@ -40,6 +40,40 @@ func defaultProvider() provider.Provider {
 	return mock.New()
 }
 
+// schemaSet is a provider made of resources used only for their schemas.
+type schemaSet map[string]provider.Resource
+
+func (s schemaSet) Resources() map[string]provider.Resource { return s }
+
+// withRobloxSchemas adds the Roblox resource schemas to p for every type p
+// doesn't already have. The added resources have no API client, so the result
+// may only be used to load config, never to plan or apply.
+func withRobloxSchemas(p provider.Provider) provider.Provider {
+	rs := schemaSet{}
+	for typ, r := range roblox.SchemaProvider().Resources() {
+		rs[typ] = r
+	}
+	for typ, r := range p.Resources() {
+		rs[typ] = r
+	}
+	return rs
+}
+
+// loadConfig is config.LoadConfig with a clear error when the config manages
+// roblox_* resources but ROBLOX_API_KEY is unset (the provider is then the mock,
+// which doesn't know those types). If the config doesn't load against the
+// Roblox schemas either, that error is the one reported.
+func loadConfig(path string, p provider.Provider) (*config.Config, error) {
+	cfg, err := config.LoadConfig(path, p)
+	if err == nil || os.Getenv("ROBLOX_API_KEY") != "" {
+		return cfg, err
+	}
+	if _, serr := config.LoadConfig(path, withRobloxSchemas(p)); serr != nil {
+		return nil, serr
+	}
+	return nil, errors.New("ROBLOX_API_KEY is not set: it is needed to plan or apply roblox_* resources (`baseplate validate` works without it)")
+}
+
 // openBackend selects the state backend from the config's `backend` block,
 // falling back to the local file backend when there is none. The bool is true
 // when the local fallback was used (so destroy can warn on a remote-shaped setup).
@@ -127,6 +161,11 @@ type importResult struct {
 	Address  string   `json:"address"`
 	ID       string   `json:"id"`
 	Warnings []string `json:"warnings,omitempty"`
+}
+
+type importAllResult struct {
+	Imported []importResult `json:"imported"`
+	Warnings []string       `json:"warnings,omitempty"`
 }
 
 type applyResult struct {
@@ -218,18 +257,24 @@ func run(args []string, s streams) int {
 	p := newProvider()
 
 	load := func() (*config.Config, error) {
-		return config.LoadConfig(cfgPath, p)
+		return loadConfig(cfgPath, p)
 	}
 
-	root.AddCommand(&cobra.Command{Use: "validate", RunE: func(cmd *cobra.Command, _ []string) error {
+	root.AddCommand(&cobra.Command{Use: "validate", Short: "Check the config offline, without contacting Roblox or reading state", RunE: func(cmd *cobra.Command, _ []string) error {
 		cmdName = cmd.Name()
-		if _, err := load(); err != nil {
+		// validate is offline: the Roblox schemas are built in, so it needs no
+		// ROBLOX_API_KEY (the provider is the mock without one).
+		vp := p
+		if os.Getenv("ROBLOX_API_KEY") == "" {
+			vp = withRobloxSchemas(p)
+		}
+		if _, err := config.LoadConfig(cfgPath, vp); err != nil {
 			return err
 		}
 		return output.Emit(s.out, fmtOf(jsonOut), "validate", "Configuration is valid.\n", validateResult{Valid: true})
 	}})
 
-	planCmd := &cobra.Command{Use: "plan", RunE: func(cmd *cobra.Command, _ []string) error {
+	planCmd := &cobra.Command{Use: "plan", Short: "Show the changes apply would make", RunE: func(cmd *cobra.Command, _ []string) error {
 		cmdName = cmd.Name()
 		tgt, err := parseTarget("--target", target)
 		if err != nil {
@@ -295,7 +340,7 @@ func run(args []string, s streams) int {
 	planCmd.Flags().StringVar(&generateConfigOut, "generate-config", "", "write generated HCL for undeclared import blocks to this file")
 	root.AddCommand(planCmd)
 
-	applyCmd := &cobra.Command{Use: "apply", RunE: func(cmd *cobra.Command, _ []string) error {
+	applyCmd := &cobra.Command{Use: "apply", Short: "Reconcile Roblox with the config and write state", RunE: func(cmd *cobra.Command, _ []string) error {
 		cmdName = cmd.Name()
 		restart, err := applyRestartFromFlags(cmd)
 		if err != nil {
@@ -308,22 +353,37 @@ func run(args []string, s streams) int {
 	addApplyRestartFlags(applyCmd)
 	root.AddCommand(applyCmd)
 
-	destroyCmd := &cobra.Command{Use: "destroy", RunE: func(cmd *cobra.Command, _ []string) error {
+	destroyCmd := &cobra.Command{Use: "destroy", Short: "Remove everything the state manages", RunE: func(cmd *cobra.Command, _ []string) error {
 		cmdName = cmd.Name()
 		return applyRun(p, cfgPath, statePath, target, true, autoApproved(cmd), fmtOf(jsonOut), s, nil)
 	}}
 	destroyCmd.Flags().Bool("auto-approve", false, "skip the interactive approval prompt")
 	destroyCmd.Flags().Bool("yes", false, "alias for --auto-approve")
 	root.AddCommand(destroyCmd)
-	root.AddCommand(&cobra.Command{
-		Use:   "import <address> <id>",
-		Short: "Adopt an existing resource into state",
-		Args:  cobra.ExactArgs(2),
+	importCmd := &cobra.Command{
+		Use:   "import [<address> <id>]",
+		Short: "Adopt existing resources into state",
+		Long: "Adopt existing resources into state without changing anything on Roblox.\n\n" +
+			"With <address> <id>, imports that one resource. With no arguments, runs every\n" +
+			"import {} block in the config whose target isn't in state yet, and writes state once.",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 0 && len(args) != 2 {
+				return fmt.Errorf("import takes an <address> and an <id>, or no arguments to run the config's import blocks (got %d argument(s))", len(args))
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmdName = cmd.Name()
-			return importRun(p, cfgPath, statePath, args[0], args[1], fmtOf(jsonOut), s)
+			assume, _ := cmd.Flags().GetBool("assume-current")
+			opts := apply.ImportOptions{AssumeCurrent: assume}
+			if len(args) == 0 {
+				return importAllRun(p, cfgPath, statePath, opts, fmtOf(jsonOut), s)
+			}
+			return importRun(p, cfgPath, statePath, args[0], args[1], opts, fmtOf(jsonOut), s)
 		},
-	})
+	}
+	importCmd.Flags().Bool("assume-current", false, "treat content Roblox can't report back (a place's file) as already matching the config, instead of updating it on the next apply")
+	root.AddCommand(importCmd)
 	root.AddCommand(newRestartServersCmd(p, &cfgPath, &jsonOut, &cmdName, s))
 	root.AddCommand(&cobra.Command{
 		Use:   "show [address]",
@@ -379,7 +439,7 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 	var emptyForEach, protected []string
 	var moved []plan.MovedBlock
 	if !destroy {
-		cfg, err := config.LoadConfig(cfgPath, p)
+		cfg, err := loadConfig(cfgPath, p)
 		if err != nil {
 			return err
 		}
@@ -389,7 +449,7 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 		// config (when there is one) for lifecycle.prevent_destroy. As in
 		// Terraform, the protection lives only in config. Moves apply too, so
 		// a protected resource is checked under its current address.
-		cfg, err := config.LoadConfig(cfgPath, p)
+		cfg, err := loadConfig(cfgPath, p)
 		if err != nil {
 			return err
 		}
@@ -495,13 +555,13 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 
 // importRun adopts an existing resource (declared in config) into state by id,
 // under the state lock. It never mutates the remote.
-func importRun(p provider.Provider, cfgPath, statePath, address, id string, format output.Format, s streams) error {
+func importRun(p provider.Provider, cfgPath, statePath, address, id string, opts apply.ImportOptions, format output.Format, s streams) error {
 	typ, name, key, _, err := addr.Parse(address)
 	if err != nil {
 		return fmt.Errorf("import: %w", err)
 	}
 	address = addr.Format(typ, name, key)
-	cfg, err := config.LoadConfig(cfgPath, p)
+	cfg, err := loadConfig(cfgPath, p)
 	if err != nil {
 		return err
 	}
@@ -531,7 +591,7 @@ func importRun(p provider.Provider, cfgPath, statePath, address, id string, form
 		return err
 	}
 	ctx, warns := provider.WithWarnings(context.Background())
-	if err := apply.Import(ctx, p, b, st, address, id, cfg.Resources); err != nil {
+	if err := apply.ImportWithOptions(ctx, p, b, st, address, id, cfg.Resources, opts); err != nil {
 		return err
 	}
 	text := fmt.Sprintf("Imported %s (id %s).\n", address, id)
@@ -540,6 +600,61 @@ func importRun(p provider.Provider, cfgPath, statePath, address, id string, form
 	}
 	return output.Emit(s.out, format, "import", text,
 		importResult{Address: address, ID: id, Warnings: warns.List()})
+}
+
+// importAllRun runs every import {} block whose target isn't in state yet,
+// under the state lock, recording them in one state write. Like importRun it
+// never mutates the remote, so a team adopting a live universe can fill state
+// without an apply.
+func importAllRun(p provider.Provider, cfgPath, statePath string, opts apply.ImportOptions, format output.Format, s streams) error {
+	cfg, err := loadConfig(cfgPath, p)
+	if err != nil {
+		return err
+	}
+	if len(cfg.Imports) == 0 {
+		return fmt.Errorf("import: %s has no import blocks; pass an <address> and an <id> to import one resource", cfgPath)
+	}
+	b, _, err := openBackend(cfgPath, statePath)
+	if err != nil {
+		return err
+	}
+	unlock, err := b.Lock()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if uerr := unlock(); uerr != nil {
+			fmt.Fprintf(s.err, "warning: failed to release state lock: %v\n", uerr)
+		}
+	}()
+	st, err := b.Get()
+	if err != nil {
+		return err
+	}
+	// As in importRun: moves first, persisted with the imports.
+	if _, err := plan.ApplyMoves(st, cfg.Moved); err != nil {
+		return err
+	}
+	ctx, warns := provider.WithWarnings(context.Background())
+	done, err := apply.ImportAll(ctx, p, b, st, cfg.Imports, cfg.Resources, opts)
+	if err != nil {
+		return err
+	}
+	res := importAllResult{Imported: []importResult{}, Warnings: warns.List()}
+	var text strings.Builder
+	if len(done) == 0 {
+		text.WriteString("Nothing to import: every import block's target is already in state.\n")
+	} else {
+		fmt.Fprintf(&text, "Imported %d resource(s):\n", len(done))
+	}
+	for _, imp := range done {
+		fmt.Fprintf(&text, "  %s (id %s)\n", imp.Address, imp.ID)
+		res.Imported = append(res.Imported, importResult{Address: imp.Address, ID: imp.ID})
+	}
+	for _, w := range res.Warnings {
+		fmt.Fprintf(&text, "Warning: %s\n", w)
+	}
+	return output.Emit(s.out, format, "import", text.String(), res)
 }
 
 // targetAddr is a parsed --target: a whole resource (every instance, when key is

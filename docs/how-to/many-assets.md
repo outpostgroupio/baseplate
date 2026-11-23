@@ -254,8 +254,8 @@ model), the next plan updates that asset in place and its id stays the same:
 ```console
 $ baseplate plan
 ~ roblox_asset.sprites["ui/gem.png"] (update)
-    display_name = ui/gem.png
-    ...
+    content_hash: 6843b53e… => abeeb0b9…
+    # (3 unchanged attribute(s) hidden)
 
 Plan: 0 to import, 0 to add, 1 to change, 0 to destroy.
 ```

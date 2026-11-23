@@ -11,6 +11,7 @@ import (
 	"github.com/zclconf/go-cty/cty"
 
 	"github.com/outpostgroupio/baseplate/internal/cli/output"
+	"github.com/outpostgroupio/baseplate/internal/engine/apply"
 	"github.com/outpostgroupio/baseplate/internal/engine/plan"
 	"github.com/outpostgroupio/baseplate/internal/provider"
 	"github.com/outpostgroupio/baseplate/internal/provider/mock"
@@ -43,7 +44,7 @@ func TestImportRunWritesStateAndReports(t *testing.T) {
 	p.Seed("mock_thing/9", provider.Attributes{"name": cty.StringVal("root")})
 
 	var out bytes.Buffer
-	if err := importRun(p, cfg, statePath, "mock_thing.a", "mock_thing/9", output.Text, streams{
+	if err := importRun(p, cfg, statePath, "mock_thing.a", "mock_thing/9", apply.ImportOptions{}, output.Text, streams{
 		in: strings.NewReader(""), out: &out, err: &out, isTTY: func() bool { return false },
 	}); err != nil {
 		t.Fatal(err)

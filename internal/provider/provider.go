@@ -101,6 +101,21 @@ type Replacer interface {
 	ReplaceAbandons() bool
 }
 
+// UnreadableTriggers is an optional Triggerable capability. It names the
+// triggers that stand for content the platform can't report back (e.g. a place
+// file's content hash). An import can't tell whether the live object matches
+// the config for these, so instead of adopting the config's values as the
+// baseline it records them as UnverifiedTrigger, and the next plan updates the
+// object (for a place, a publish). `baseplate import --assume-current` adopts
+// the config's values instead.
+type UnreadableTriggers interface {
+	UnreadableTriggers() []string
+}
+
+// UnverifiedTrigger is the value an import records for an unreadable trigger
+// (see UnreadableTriggers). It never equals a computed trigger, so it diffs.
+const UnverifiedTrigger = "(unverified: imported)"
+
 // TriggerUnavailableError is returned by Triggerable.Triggers when an input a
 // trigger is computed from is missing (e.g. a source file not present on this
 // machine, as in a CI checkout without the images). Triggers may return the

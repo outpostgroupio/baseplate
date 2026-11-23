@@ -31,6 +31,16 @@ roblox_experience.main will be imported (id 1234567890)
 Plan: 1 to import, 0 to add, 0 to change, 0 to destroy.
 ```
 
+`plan` exits `2` while any import is pending. `apply` runs the imports, or, to fill state without
+applying anything else, run `baseplate import` with no arguments: it runs every pending `import`
+block, changes nothing on Roblox, and writes state once.
+
+```console
+$ baseplate import
+Imported 1 resource(s):
+  roblox_experience.main (id 1234567890)
+```
+
 Once the resource is in state the block does nothing, so you can delete it or leave it.
 
 `import` blocks take `for_each`, which is the easiest way to adopt a set of assets from a JSON map
@@ -62,6 +72,22 @@ $ baseplate import 'roblox_asset.sprites["ui/gem.png"]' 1234567890
 
 It reads the remote object and writes it to state. It never changes anything on Roblox. Run `plan`
 afterwards to see how the object differs from your config.
+
+## Places
+
+Roblox doesn't let Baseplate download a published place, so an import can't tell whether the live
+place matches your local `file`. Importing a `roblox_place` records its content as unverified and
+prints a warning, and the next `plan` shows an update that publishes the file:
+
+```console
+$ baseplate plan
+~ roblox_place.lobby (update)
+    content_hash: (unverified: imported) => 9f2c41d0…
+    # (3 unchanged attribute(s) hidden)
+```
+
+If you know the live place already matches the file, import it with `--assume-current` (either
+form of `baseplate import` takes it) to record the file's hash instead, and the plan stays clean.
 
 ## Import ids
 

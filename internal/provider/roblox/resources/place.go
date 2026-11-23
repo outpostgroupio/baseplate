@@ -31,7 +31,7 @@ func (p *place) Doc() provider.ResourceDoc {
 			"file":         "Path to the `.rbxl`/`.rbxlx`. Change detected via content hash.",
 			"version_type": "`Published` (default) or `Saved`.",
 		},
-		Notes:        "Place content isn't remotely readable, so change detection is by file content hash. `destroy` is a no-op (a place can't be unpublished).",
+		Notes:        "Place content isn't remotely readable, so change detection is by file content hash. For the same reason an import can't tell whether the live place matches `file`: it records the content as unverified, and the next plan publishes the file. If you know the live place already matches, `baseplate import --assume-current` records the file's hash instead. `destroy` is a no-op (a place can't be unpublished).",
 		Scopes:       []string{"universe-places:write"},
 		TriggerAttrs: []string{"file", "version_type"},
 	}
@@ -67,6 +67,11 @@ func (p *place) Triggers(desired provider.Attributes) (map[string]cty.Value, err
 	out["content_hash"] = cty.StringVal(sum)
 	return out, nil
 }
+
+// UnreadableTriggers implements provider.UnreadableTriggers: published place
+// content can't be downloaded through Open Cloud, so an import can't know
+// whether the live place matches the local file.
+func (p *place) UnreadableTriggers() []string { return []string{"content_hash"} }
 
 func (p *place) Create(ctx context.Context, desired provider.Attributes) (string, provider.Attributes, error) {
 	universeID := desired["universe_id"].AsString()

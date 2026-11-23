@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/zclconf/go-cty/cty"
+
 	"github.com/outpostgroupio/baseplate/internal/addr"
 	"github.com/outpostgroupio/baseplate/internal/provider"
 	"github.com/outpostgroupio/baseplate/internal/state"
@@ -25,7 +27,10 @@ type ImportBlock struct {
 // asset_type) is imported and then replaced, as in Terraform. Triggers are
 // intentionally not diffed here: the adopt step (apply) sets the trigger
 // baseline from config, so a triggerable resource imports cleanly and an
-// import never replaces on content.
+// import never replaces on content. The exception is a trigger the platform
+// can't report (provider.UnreadableTriggers, e.g. a place's content): adopting
+// the config's value would claim the live object matches it, so the import is
+// followed by an update.
 //
 // Build planned each import target as a create, so their dependents were
 // planned against an unknown id. Once each import is resolved, dependents are
@@ -107,6 +112,11 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 		}
 		effective := withPendingRefs(resolved, c.Refs, pending)
 		diffs := diffAttrs(actual, effective, r.Computed())
+		ud, err := unverifiedDiffs(r, resolved)
+		if err != nil {
+			return err
+		}
+		diffs = append(diffs, ud...)
 		c.ImportID = id
 		c.ID = id
 		c.Actual = actual
@@ -123,6 +133,30 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 		}
 	}
 	return pl.replanDependents(resources, s, flipped, importIDs)
+}
+
+// unverifiedDiffs returns, for an import, a diff from provider.UnverifiedTrigger
+// to the config's value for each trigger the platform can't report back. A
+// trigger whose input is missing (provider.TriggerUnavailableError) is skipped;
+// apply records it as unverified anyway, so a later plan catches it up.
+func unverifiedDiffs(r provider.Resource, desired provider.Attributes) ([]AttrDiff, error) {
+	u, ok := r.(provider.UnreadableTriggers)
+	t, isTriggerable := r.(provider.Triggerable)
+	if !ok || !isTriggerable {
+		return nil, nil
+	}
+	want, err := t.Triggers(desired)
+	var unavailable *provider.TriggerUnavailableError
+	if err != nil && !errors.As(err, &unavailable) {
+		return nil, err
+	}
+	var diffs []AttrDiff
+	for _, k := range u.UnreadableTriggers() {
+		if v, ok := want[k]; ok {
+			diffs = append(diffs, AttrDiff{Name: k, Old: cty.StringVal(provider.UnverifiedTrigger), New: v})
+		}
+	}
+	return diffs, nil
 }
 
 // ImportCollision returns an error when a state entry other than address
