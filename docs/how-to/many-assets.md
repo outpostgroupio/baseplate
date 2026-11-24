@@ -281,7 +281,7 @@ Plan: 0 to import, 1 to add, 0 to change, 0 to destroy.
 ```
 
 `apply` uploads a new asset and records its new id in state. The old asset is left in place
-on Roblox (it is never archived, not even audio) and is no longer managed: servers that are still
+on Roblox and recorded in state for `baseplate cleanup` (below): servers that are still
 running keep loading `rbxassetid://<old id>` until you republish the place. Anything that
 references the asset's `id` is updated in the same apply, and `baseplate show --json` reports the
 new id, so regenerating the Luau module after `apply` picks it up. Each replace counts against

@@ -31,7 +31,7 @@ Stores a value in state, for `lifecycle { replace_triggered_by }`. The equivalen
 | `triggers_replace` | any | optional, diffable | Any value. A change replaces this resource (with a new `id`). |
 | `output` | any | computed | The value of `input`. |
 
-To replace a resource whenever a value changes, store the value in a `baseplate_data` and list it in the resource's `lifecycle { replace_triggered_by = [...] }`; with `for_each`, give both the same keys and reference `baseplate_data.<name>[each.key]`. Creating a `baseplate_data` doesn't trigger a replace, so adding one for existing resources replaces nothing. It can't be imported.
+To replace a resource whenever a value changes, store the value in a `baseplate_data` and list it in the resource's `lifecycle { replace_triggered_by = [...] }`; with `for_each`, give both the same keys and reference `baseplate_data.<name>[each.key]`. Creating a `baseplate_data` doesn't trigger a replace, so adding one for existing resources replaces nothing. Importing one is optional, and only keeps an adoption plan from listing an add for each: there is nothing remote to read, so the import takes the values from config and plans no change, and the import id (any string no other `baseplate_data` uses) becomes its `id`. One whose `input` refers to a resource that isn't created yet can't be imported until that resource is applied.
 
 ---
 

@@ -112,9 +112,26 @@ type Archiver interface {
 
 // StateOnly is an optional Resource capability, for a resource that exists
 // only in Baseplate's state (baseplate_data). The engine never reads it from a
-// platform: plan compares the config with state, and it can't be imported.
+// platform: plan compares the config with state.
 type StateOnly interface {
 	StateOnly()
+}
+
+// StateImporter is an optional capability of a StateOnly resource that can be
+// imported. With no remote object to read, ImportState returns the attributes
+// an import records under id, taken from the config's values (desired), so
+// the import plans no change.
+type StateImporter interface {
+	ImportState(id string, desired Attributes) (Attributes, error)
+}
+
+// ReadForImport returns the object an import adopts: from the resource's
+// StateImporter when it has one, otherwise read from the platform.
+func ReadForImport(ctx context.Context, r Resource, id string, desired Attributes) (Attributes, error) {
+	if si, ok := r.(StateImporter); ok {
+		return si.ImportState(id, desired)
+	}
+	return r.Read(ctx, id)
 }
 
 // Censoring is an optional Resource capability, for a platform that filters

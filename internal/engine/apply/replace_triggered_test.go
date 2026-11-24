@@ -68,3 +68,49 @@ func TestReplaceTriggeredByIgnoresCreate(t *testing.T) {
 		t.Fatalf("creating the trigger must not replace, got %s", c.Action)
 	}
 }
+
+// Adopting maps whose hashes aren't in state yet: importing the baseplate_data
+// takes its values from config, so it plans no change and nothing is replaced,
+// and later hash changes trigger as usual.
+func TestImportData(t *testing.T) {
+	f := newReplaceFixture(t)
+	d := triggeredDesired("h1")
+	f.apply(t, []plan.DesiredResource{{Type: d[1].Type, Name: d[1].Name, Key: d[1].Key, Attributes: d[1].Attributes}})
+
+	pl := f.plan(t, d)
+	if err := plan.ResolveImports(f.ctx, f.p, f.s, pl, []plan.ImportBlock{{Address: `baseplate_data.hash["m"]`, ID: "maps/m"}}); err != nil {
+		t.Fatal(err)
+	}
+	if c := changeFor(pl, `baseplate_data.hash["m"]`); c.Action != provider.ActionNoop || c.ImportID != "maps/m" {
+		t.Fatalf("want an import with no change, got %s %q", c.Action, c.ImportID)
+	}
+	if got, want := pl.Summary().Applied(), "1 imported, 0 added, 0 changed, 0 destroyed"; got != want {
+		t.Fatalf("Applied() = %q, want %q", got, want)
+	}
+	if err := Apply(f.ctx, f.p, f.b, f.s, pl); err != nil {
+		t.Fatal(err)
+	}
+	if id := f.id(t, `baseplate_data.hash["m"]`); id != "maps/m" {
+		t.Fatalf("the import id must be the id, got %q", id)
+	}
+	if pl := f.plan(t, d); pl.HasChanges() {
+		t.Fatalf("must converge after the import:\n%s", pl.RenderText(false))
+	}
+	if c := changeFor(f.plan(t, triggeredDesired("h2")), `mock_abandon.map["m"]`); c.Action != provider.ActionReplace {
+		t.Fatalf("an imported data must still trigger, got %s", c.Action)
+	}
+}
+
+func TestImportDataCommand(t *testing.T) {
+	f := newReplaceFixture(t)
+	if err := Import(f.ctx, f.p, f.b, f.s, `baseplate_data.hash["m"]`, "maps/m", triggeredDesired("h1")); err != nil {
+		t.Fatal(err)
+	}
+	r, ok := f.s.Find(`baseplate_data.hash["m"]`)
+	if !ok || r.ID != "maps/m" {
+		t.Fatalf("want baseplate_data imported as maps/m, got %+v", r)
+	}
+	if pl := f.plan(t, triggeredDesired("h1")[:1]); pl.HasChanges() {
+		t.Fatalf("an imported data must match config:\n%s", pl.RenderText(false))
+	}
+}

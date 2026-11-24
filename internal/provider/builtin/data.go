@@ -27,10 +27,11 @@ func Data() provider.Resource { return data{} }
 type data struct{}
 
 var (
-	_ provider.StateOnly  = data{}
-	_ provider.Replacer   = data{}
-	_ provider.Outputter  = data{}
-	_ provider.Documented = data{}
+	_ provider.StateOnly     = data{}
+	_ provider.StateImporter = data{}
+	_ provider.Replacer      = data{}
+	_ provider.Outputter     = data{}
+	_ provider.Documented    = data{}
 )
 
 func (data) Type() string { return DataType }
@@ -47,7 +48,7 @@ func (data) Doc() provider.ResourceDoc {
 		Outputs: map[string]string{
 			"output": "The value of `input`.",
 		},
-		Notes: "To replace a resource whenever a value changes, store the value in a `baseplate_data` and list it in the resource's `lifecycle { replace_triggered_by = [...] }`; with `for_each`, give both the same keys and reference `baseplate_data.<name>[each.key]`. Creating a `baseplate_data` doesn't trigger a replace, so adding one for existing resources replaces nothing. It can't be imported.",
+		Notes: "To replace a resource whenever a value changes, store the value in a `baseplate_data` and list it in the resource's `lifecycle { replace_triggered_by = [...] }`; with `for_each`, give both the same keys and reference `baseplate_data.<name>[each.key]`. Creating a `baseplate_data` doesn't trigger a replace, so adding one for existing resources replaces nothing. Importing one is optional, and only keeps an adoption plan from listing an add for each: there is nothing remote to read, so the import takes the values from config and plans no change, and the import id (any string no other `baseplate_data` uses) becomes its `id`. One whose `input` refers to a resource that isn't created yet can't be imported until that resource is applied.",
 	}
 }
 
@@ -82,9 +83,19 @@ func (data) Create(_ context.Context, desired provider.Attributes) (string, prov
 }
 
 // Read is never called: the engine uses state for a provider.StateOnly
-// resource.
+// resource, and ImportState for an import.
 func (data) Read(context.Context, string) (provider.Attributes, error) {
-	return nil, errors.New("baseplate_data exists only in state, so it can't be read or imported")
+	return nil, errors.New("baseplate_data exists only in state, so it can't be read")
+}
+
+// ImportState records the config's values under id, as Create would.
+func (data) ImportState(_ string, desired provider.Attributes) (provider.Attributes, error) {
+	for k, v := range desired {
+		if !v.IsWhollyKnown() {
+			return nil, fmt.Errorf("%s isn't known until apply, so this baseplate_data can't be imported yet; apply the resources it refers to first, or let apply create it", k)
+		}
+	}
+	return attrs(desired), nil
 }
 
 func (data) Update(_ context.Context, _ string, desired provider.Attributes) (provider.Attributes, error) {

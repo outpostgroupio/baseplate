@@ -348,6 +348,13 @@ func run(args []string, s streams) int {
 		}
 		if keyless {
 			for _, imp := range toResolve {
+				typ, _, _, _, err := addr.Parse(imp.Address)
+				if err != nil {
+					return err
+				}
+				if _, fromConfig := p.Resources()[typ].(provider.StateImporter); fromConfig {
+					continue
+				}
 				if _, inState := st.Find(imp.Address); !inState {
 					return fmt.Errorf("import %s: reading the resource to import needs ROBLOX_API_KEY, even with --refresh=false", imp.Address)
 				}

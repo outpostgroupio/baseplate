@@ -46,7 +46,7 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 			if err != nil {
 				return err
 			}
-			actual, err := r.Read(ctx, c.ImportID)
+			actual, err := provider.ReadForImport(ctx, r, c.ImportID, desired)
 			if err != nil {
 				return provider.ResourceError(c.Address, c.Type, r, err)
 			}
@@ -551,7 +551,7 @@ func adopt(ctx context.Context, p provider.Provider, s *state.State, address, id
 	if r == nil {
 		return state.Resource{}, fmt.Errorf("unknown resource type %q", d.Type)
 	}
-	actual, err := r.Read(ctx, id)
+	actual, err := provider.ReadForImport(ctx, r, id, d.Attributes)
 	if err != nil {
 		if errors.Is(err, provider.ErrNotFound) {
 			return state.Resource{}, fmt.Errorf("no %s found with id %q", d.Type, id)

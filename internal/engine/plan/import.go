@@ -73,6 +73,10 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 		if c.Action != provider.ActionCreate {
 			continue // already in state → import already satisfied
 		}
+		pendingImports[imp.Address] = imp.ID
+		if _, fromConfig := resources[c.Type].(provider.StateImporter); fromConfig {
+			continue // taken from the resolved config below
+		}
 		actual, err := resources[c.Type].Read(ctx, imp.ID)
 		if err != nil {
 			if errors.Is(err, provider.ErrNotFound) {
@@ -80,7 +84,6 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 			}
 			return provider.ResourceError(imp.Address, c.Type, resources[c.Type], err)
 		}
-		pendingImports[imp.Address] = imp.ID
 		actuals[imp.Address] = actual
 	}
 	if len(pendingImports) == 0 {
@@ -111,6 +114,11 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 			return err
 		}
 		effective := withPendingRefs(resolved, c.Refs, pending)
+		if si, ok := r.(provider.StateImporter); ok {
+			if actual, err = si.ImportState(id, effective); err != nil {
+				return fmt.Errorf("import %s: %w", c.Address, err)
+			}
+		}
 		diffs, censored := dropCensored(r, diffAttrs(actual, effective, r.Computed()))
 		ud, err := unverifiedDiffs(r, resolved)
 		if err != nil {

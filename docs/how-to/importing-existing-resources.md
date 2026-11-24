@@ -59,6 +59,19 @@ import {
 
 See [managing many assets](many-assets.md#2-adopt-assets-youve-already-uploaded).
 
+A `baseplate_data` has nothing on Roblox to read, so importing one takes its values from config and
+plans no change. That's optional, but it keeps an adoption plan from listing an add for each one
+(the hashes in a `replace_triggered_by` setup, say). The id can be any string no other
+`baseplate_data` uses:
+
+```hcl
+import {
+  for_each = local.maps
+  to       = baseplate_data.map_hash[each.key]
+  id       = "map_hash/${each.key}"
+}
+```
+
 If you don't want to write the `resource` block by hand, `baseplate plan --generate-config=FILE`
 writes one for each `import` block whose target isn't declared yet. It doesn't support `for_each`
 targets.
