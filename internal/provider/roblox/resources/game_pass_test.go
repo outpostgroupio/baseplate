@@ -3,6 +3,8 @@ package resources
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/zclconf/go-cty/cty"
@@ -14,6 +16,7 @@ import (
 type fakeGamePass struct {
 	created         opencloud.GamePassCreate
 	createdUniverse string
+	updates         []opencloud.GamePassUpdate
 	store           map[string]opencloud.GamePass
 	getErr          error
 }
@@ -35,6 +38,7 @@ func (f *fakeGamePass) Get(_ context.Context, _, id string) (opencloud.GamePass,
 	return f.store[id], nil
 }
 func (f *fakeGamePass) Update(_ context.Context, _, id string, p opencloud.GamePassUpdate) error {
+	f.updates = append(f.updates, p)
 	gp := f.store[id]
 	gp.Name, gp.PriceInRobux = p.Name, p.Price
 	f.store[id] = gp
@@ -83,5 +87,54 @@ func TestGamePassReadMapsNotFound(t *testing.T) {
 	r := GamePass(&fakeGamePass{getErr: &opencloud.APIError{Status: 404}})
 	if _, err := r.Read(context.Background(), "10/555"); !errors.Is(err, provider.ErrNotFound) {
 		t.Fatalf("want provider.ErrNotFound, got %v", err)
+	}
+}
+
+func TestGamePassIconUploadedOnlyWhenChanged(t *testing.T) {
+	fp := filepath.Join(t.TempDir(), "icon.png")
+	if err := os.WriteFile(fp, []byte("PNG1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeGamePass{store: map[string]opencloud.GamePass{"555": {ID: "555"}}}
+	r := GamePass(f).(*gamePass)
+	desired := provider.Attributes{
+		"universe_id": cty.StringVal("42"),
+		"name":        cty.StringVal("VIP"),
+		"price":       cty.NumberIntVal(100),
+		"icon_file":   cty.StringVal(fp),
+	}
+	trig, err := r.Triggers(desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Same hash as recorded: a metadata-only edit sends no icon.
+	if _, err := r.UpdateWithTriggers(context.Background(), "42/555", desired, trig); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.updates[0].IconData) != 0 {
+		t.Fatal("unchanged icon must not be re-uploaded")
+	}
+
+	// New content: the icon goes in the same PATCH.
+	if err := os.WriteFile(fp, []byte("PNG2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.UpdateWithTriggers(context.Background(), "42/555", desired, trig); err != nil {
+		t.Fatal(err)
+	}
+	if u := f.updates[1]; string(u.IconData) != "PNG2" || u.IconFile != "icon.png" || u.IconType != "image/png" {
+		t.Fatalf("changed icon must be uploaded; got %q %q %q", u.IconData, u.IconFile, u.IconType)
+	}
+
+	// A missing file can't have been checked, so nothing is uploaded.
+	if err := os.Remove(fp); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.UpdateWithTriggers(context.Background(), "42/555", desired, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.updates[2].IconData) != 0 {
+		t.Fatal("missing icon file must not be uploaded")
 	}
 }

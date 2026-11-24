@@ -33,47 +33,59 @@ func (d *developerProduct) Doc() provider.ResourceDoc {
 	return provider.ResourceDoc{
 		Summary: "Manages a developer product (an in-experience consumable purchase).",
 		Attributes: map[string]string{
-			"universe_id": "The universe. Often a reference to an experience.",
-			"name":        "Product name.",
-			"price":       "Price in Robux.",
-			"description": "Product description.",
-			"icon_file":   "Path to an icon image (direct upload).",
-			"is_for_sale": "On sale (default `true`).",
+			"universe_id":                 "The universe. Often a reference to an experience.",
+			"name":                        "Product name.",
+			"price":                       "Price in Robux.",
+			"description":                 "Product description.",
+			"icon_file":                   "Path to an icon image (uploaded directly). Change detected via content hash.",
+			"is_for_sale":                 "On sale (default `true`).",
+			"is_regional_pricing_enabled": "Whether Roblox adjusts the price for buyers in different regions. When omitted, Baseplate leaves the setting as it is (Roblox's default for a new product).",
 		},
-		Notes:       "Developer products can't be hard-deleted, so `destroy` sets `is_for_sale = false` and unmanages it.",
-		Scopes:      []string{"developer-product:read", "developer-product:write"},
-		ExampleFile: "examples/baseplate.bp.hcl",
+		Notes:        "Developer products can't be hard-deleted, so `destroy` sets `is_for_sale = false` and unmanages it. The icon is reconciled via a content-hash trigger and re-uploaded only when its content changes, including when `icon_file` is added to an existing product. Removing `icon_file` leaves the current icon in place.",
+		Scopes:       []string{"developer-product:read", "developer-product:write"},
+		TriggerAttrs: []string{"icon_file"},
+		ExampleFile:  "examples/baseplate.bp.hcl",
 	}
 }
 
 func (d *developerProduct) DecodeSpec() hcldec.Spec {
 	return hcldec.ObjectSpec{
-		"universe_id": &hcldec.AttrSpec{Name: "universe_id", Type: cty.String, Required: true},
-		"name":        &hcldec.AttrSpec{Name: "name", Type: cty.String, Required: true},
-		"price":       &hcldec.AttrSpec{Name: "price", Type: cty.Number, Required: true},
-		"description": &hcldec.AttrSpec{Name: "description", Type: cty.String, Required: false},
-		"icon_file":   &hcldec.AttrSpec{Name: "icon_file", Type: cty.String, Required: false},
-		"is_for_sale": &hcldec.AttrSpec{Name: "is_for_sale", Type: cty.Bool, Required: false},
+		"universe_id":                 &hcldec.AttrSpec{Name: "universe_id", Type: cty.String, Required: true},
+		"name":                        &hcldec.AttrSpec{Name: "name", Type: cty.String, Required: true},
+		"price":                       &hcldec.AttrSpec{Name: "price", Type: cty.Number, Required: true},
+		"description":                 &hcldec.AttrSpec{Name: "description", Type: cty.String, Required: false},
+		"icon_file":                   &hcldec.AttrSpec{Name: "icon_file", Type: cty.String, Required: false},
+		"is_for_sale":                 &hcldec.AttrSpec{Name: "is_for_sale", Type: cty.Bool, Required: false},
+		"is_regional_pricing_enabled": &hcldec.AttrSpec{Name: "is_regional_pricing_enabled", Type: cty.Bool, Required: false},
 	}
 }
 
 // Computed excludes from diff: the state id; universe_id (create-only: a product
-// can't move universes, and it's often a resolved reference); and icon_file (a
-// create/update-only upload the API doesn't echo back). name/price/description/
-// is_for_sale remain diffable.
+// can't move universes, and it's often a resolved reference); and icon_file
+// (reconciled via the content_hash trigger, not readable back). name/price/
+// description/is_for_sale/is_regional_pricing_enabled remain diffable.
 func (d *developerProduct) Computed() []string {
 	return []string{"id", "universe_id", "icon_file"}
 }
 
 func (d *developerProduct) Dependencies(provider.Attributes) []provider.Ref { return nil }
 
+// Triggers forces an Update (icon re-upload) when the icon file content changes.
+// A product without icon_file records an empty content_hash rather than none,
+// so adding icon_file to an existing product diffs (and uploads) instead of
+// being adopted as the baseline.
+func (d *developerProduct) Triggers(desired provider.Attributes) (map[string]cty.Value, error) {
+	return iconTriggers("roblox_developer_product", desired)
+}
+
 func (d *developerProduct) Create(ctx context.Context, desired provider.Attributes) (string, provider.Attributes, error) {
 	universeID := desired["universe_id"].AsString()
 	create := opencloud.DeveloperProductCreate{
-		Name:        desired["name"].AsString(),
-		Price:       numOr(desired, "price"),
-		Description: stringOr(desired, "description"),
-		IsForSale:   boolOr(desired, "is_for_sale", true),
+		Name:            desired["name"].AsString(),
+		Price:           numOr(desired, "price"),
+		Description:     stringOr(desired, "description"),
+		IsForSale:       boolOr(desired, "is_for_sale", true),
+		RegionalPricing: boolPtr(desired, "is_regional_pricing_enabled"),
 	}
 	if p, ok := desired["icon_file"]; ok && !p.IsNull() {
 		path := p.AsString()
@@ -103,25 +115,40 @@ func (d *developerProduct) Read(ctx context.Context, id string) (provider.Attrib
 		return nil, err
 	}
 	return provider.Attributes{
-		"universe_id": cty.StringVal(uid),
-		"name":        cty.StringVal(got.Name),
-		"price":       cty.NumberIntVal(got.PriceInRobux),
-		"description": cty.StringVal(got.Description),
-		"is_for_sale": cty.BoolVal(got.IsForSale),
+		"universe_id":                 cty.StringVal(uid),
+		"name":                        cty.StringVal(got.Name),
+		"price":                       cty.NumberIntVal(got.PriceInRobux),
+		"description":                 cty.StringVal(got.Description),
+		"is_for_sale":                 cty.BoolVal(got.IsForSale),
+		"is_regional_pricing_enabled": cty.BoolVal(got.RegionalPricingEnabled),
 	}, nil
 }
 
+// Update is UpdateWithTriggers without the prior icon hash, so it re-uploads
+// the icon.
 func (d *developerProduct) Update(ctx context.Context, id string, desired provider.Attributes) (provider.Attributes, error) {
+	return d.UpdateWithTriggers(ctx, id, desired, nil)
+}
+
+// UpdateWithTriggers updates the product's settings and sends the icon in the
+// same request only when its content changed (see changedIcon).
+func (d *developerProduct) UpdateWithTriggers(ctx context.Context, id string, desired provider.Attributes, prior map[string]cty.Value) (provider.Attributes, error) {
 	uid, pid, ok := splitProductID(id)
 	if !ok {
 		return nil, fmt.Errorf("roblox_developer_product: invalid id %q", id)
 	}
-	if _, err := d.pc.Update(ctx, uid, pid, opencloud.DeveloperProductUpdate{
-		Name:        desired["name"].AsString(),
-		Price:       numOr(desired, "price"),
-		Description: stringOr(desired, "description"),
-		IsForSale:   boolOr(desired, "is_for_sale", true),
-	}); err != nil {
+	update := opencloud.DeveloperProductUpdate{
+		Name:            desired["name"].AsString(),
+		Price:           numOr(desired, "price"),
+		Description:     stringOr(desired, "description"),
+		IsForSale:       boolOr(desired, "is_for_sale", true),
+		RegionalPricing: boolPtr(desired, "is_regional_pricing_enabled"),
+	}
+	var err error
+	if update.IconData, update.IconFile, update.IconType, err = changedIcon("roblox_developer_product", desired, prior); err != nil {
+		return nil, err
+	}
+	if _, err := d.pc.Update(ctx, uid, pid, update); err != nil {
 		return nil, err
 	}
 	return d.stateAttrs(uid, desired), nil
@@ -141,7 +168,7 @@ func (d *developerProduct) stateAttrs(universeID string, desired provider.Attrib
 		"name":        desired["name"],
 		"price":       desired["price"],
 	}
-	for _, k := range []string{"description", "is_for_sale", "icon_file"} {
+	for _, k := range []string{"description", "is_for_sale", "is_regional_pricing_enabled", "icon_file"} {
 		if v, ok := desired[k]; ok && !v.IsNull() {
 			out[k] = v
 		}
@@ -162,6 +189,15 @@ func stringOr(desired provider.Attributes, k string) string {
 		return v.AsString()
 	}
 	return ""
+}
+
+// boolPtr returns the bool at k, or nil when it isn't set.
+func boolPtr(desired provider.Attributes, k string) *bool {
+	if v, ok := desired[k]; ok && !v.IsNull() {
+		b := v.True()
+		return &b
+	}
+	return nil
 }
 
 func boolOr(desired provider.Attributes, k string, def bool) bool {

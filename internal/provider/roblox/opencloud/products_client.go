@@ -15,6 +15,9 @@ type DeveloperProduct struct {
 	UniverseID   string
 	IconAssetID  string
 	IsForSale    bool
+	// RegionalPricingEnabled is whether RegionalPricing is among the product's
+	// enabled pricing features.
+	RegionalPricingEnabled bool
 }
 
 // DeveloperProductCreate is the input for creating a product. The icon, if any,
@@ -24,16 +27,25 @@ type DeveloperProductCreate struct {
 	Description string
 	Price       int64
 	IsForSale   bool
-	IconData    []byte
-	IconFile    string
-	IconType    string
+	// RegionalPricing is sent only when set; nil leaves Roblox's default.
+	RegionalPricing *bool
+	IconData        []byte
+	IconFile        string
+	IconType        string
 }
 
+// DeveloperProductUpdate is the input for updating a product. The PATCH only
+// changes the fields it sends, so a nil RegionalPricing or empty IconData
+// leaves that setting as it is.
 type DeveloperProductUpdate struct {
-	Name        string
-	Description string
-	Price       int64
-	IsForSale   bool
+	Name            string
+	Description     string
+	Price           int64
+	IsForSale       bool
+	RegionalPricing *bool
+	IconData        []byte
+	IconFile        string
+	IconType        string
 }
 
 type DeveloperProductClient interface {
@@ -48,7 +60,8 @@ func NewDeveloperProductClient(c *Client) DeveloperProductClient { return &produ
 type productClient struct{ c *Client }
 
 type dpPriceInfo struct {
-	DefaultPriceInRobux *int64 `json:"defaultPriceInRobux"`
+	DefaultPriceInRobux *int64   `json:"defaultPriceInRobux"`
+	EnabledFeatures     []string `json:"enabledFeatures"`
 }
 
 type dpConfigWire struct {
@@ -69,8 +82,15 @@ func (w dpConfigWire) toDomain() DeveloperProduct {
 		IsForSale:   w.IsForSale,
 		UniverseID:  strconv.FormatInt(w.UniverseId, 10),
 	}
-	if w.PriceInformation != nil && w.PriceInformation.DefaultPriceInRobux != nil {
-		dp.PriceInRobux = *w.PriceInformation.DefaultPriceInRobux
+	if w.PriceInformation != nil {
+		if w.PriceInformation.DefaultPriceInRobux != nil {
+			dp.PriceInRobux = *w.PriceInformation.DefaultPriceInRobux
+		}
+		for _, f := range w.PriceInformation.EnabledFeatures {
+			if f == "RegionalPricing" {
+				dp.RegionalPricingEnabled = true
+			}
+		}
 	}
 	if w.IconImageAssetId != nil {
 		dp.IconAssetID = strconv.FormatInt(*w.IconImageAssetId, 10)
@@ -91,9 +111,8 @@ func (pc *productClient) Create(ctx context.Context, universeID string, p Develo
 	if p.Description != "" {
 		parts = append(parts, Part{Name: "description", Data: []byte(p.Description)})
 	}
-	if len(p.IconData) > 0 {
-		parts = append(parts, Part{Name: "imageFile", Filename: p.IconFile, ContentType: p.IconType, Data: p.IconData})
-	}
+	parts = appendRegionalPricing(parts, p.RegionalPricing)
+	parts = appendIcon(parts, p.IconData, p.IconFile, p.IconType)
 	var w dpConfigWire
 	if _, err := pc.c.DoMultipart(ctx, http.MethodPost, productsBase(universeID), parts, &w); err != nil {
 		return DeveloperProduct{}, err
@@ -119,12 +138,28 @@ func (pc *productClient) Update(ctx context.Context, universeID, productID strin
 	if p.Description != "" {
 		parts = append(parts, Part{Name: "description", Data: []byte(p.Description)})
 	}
+	parts = appendRegionalPricing(parts, p.RegionalPricing)
+	parts = appendIcon(parts, p.IconData, p.IconFile, p.IconType)
 	var w dpConfigWire
 	path := productsBase(universeID) + "/" + productID
 	if _, err := pc.c.DoMultipart(ctx, http.MethodPatch, path, parts, &w); err != nil {
 		return DeveloperProduct{}, err
 	}
 	return w.toDomain(), nil
+}
+
+func appendRegionalPricing(parts []Part, enabled *bool) []Part {
+	if enabled == nil {
+		return parts
+	}
+	return append(parts, Part{Name: "isRegionalPricingEnabled", Data: []byte(strconv.FormatBool(*enabled))})
+}
+
+func appendIcon(parts []Part, data []byte, filename, contentType string) []Part {
+	if len(data) == 0 {
+		return parts
+	}
+	return append(parts, Part{Name: "imageFile", Filename: filename, ContentType: contentType, Data: data})
 }
 
 // Delete deactivates the product (developer products cannot be hard-deleted) by

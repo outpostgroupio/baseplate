@@ -28,11 +28,16 @@ type GamePassCreate struct {
 	IconType    string
 }
 
+// GamePassUpdate is the input for updating a game pass. Empty IconData leaves
+// the icon as it is.
 type GamePassUpdate struct {
 	Name        string
 	Description string
 	Price       int64
 	IsForSale   bool
+	IconData    []byte
+	IconFile    string
+	IconType    string
 }
 
 type GamePassClient interface {
@@ -88,9 +93,7 @@ func (gc *gamePassClient) Create(ctx context.Context, universeID string, p GameP
 	if p.Description != "" {
 		parts = append(parts, Part{Name: "description", Data: []byte(p.Description)})
 	}
-	if len(p.IconData) > 0 {
-		parts = append(parts, Part{Name: "imageFile", Filename: p.IconFile, ContentType: p.IconType, Data: p.IconData})
-	}
+	parts = appendIcon(parts, p.IconData, p.IconFile, p.IconType)
 	var w gpConfigWire
 	if _, err := gc.c.DoMultipart(ctx, http.MethodPost, gamePassesBase(universeID), parts, &w); err != nil {
 		return GamePass{}, err
@@ -116,6 +119,7 @@ func (gc *gamePassClient) Update(ctx context.Context, universeID, gamePassID str
 	if p.Description != "" {
 		parts = append(parts, Part{Name: "description", Data: []byte(p.Description)})
 	}
+	parts = appendIcon(parts, p.IconData, p.IconFile, p.IconType)
 	path := gamePassesBase(universeID) + "/" + gamePassID
 	// PATCH returns an empty body; we ignore it (the resource rebuilds state from desired).
 	_, err := gc.c.DoMultipart(ctx, http.MethodPatch, path, parts, nil)

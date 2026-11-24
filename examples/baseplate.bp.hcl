@@ -50,4 +50,6 @@ resource "roblox_developer_product" "gems_100" {
   name        = "100 Gems"
   price       = 25
   description = "Buy 100 gems"
+
+  is_regional_pricing_enabled = true
 }
