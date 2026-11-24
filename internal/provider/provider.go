@@ -101,6 +101,15 @@ type Replacer interface {
 	ReplaceAbandons() bool
 }
 
+// Censoring is an optional Resource capability, for a platform that filters
+// text after it's written (Roblox replaces each character of a word its text
+// filter rejects with '#'). Censored reports whether actual is desired as the
+// platform filtered it. Plan then treats the attribute as unchanged, because
+// writing the config's text again would be filtered the same way, and warns.
+type Censoring interface {
+	Censored(attr string, desired, actual cty.Value) bool
+}
+
 // UnreadableTriggers is an optional Triggerable capability. It names the
 // triggers that stand for content the platform can't report back (e.g. a place
 // file's content hash). An import can't tell whether the live object matches

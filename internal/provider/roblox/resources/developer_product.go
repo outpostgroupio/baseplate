@@ -15,6 +15,7 @@ import (
 )
 
 type developerProduct struct {
+	filteredText
 	pc opencloud.DeveloperProductClient
 }
 

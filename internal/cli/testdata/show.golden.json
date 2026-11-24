@@ -33,6 +33,9 @@
         "attributes": {
           "asset_type": "Image",
           "display_name": "sprite/ui/gem"
+        },
+        "triggers": {
+          "content_hash": "9f86d081"
         }
       }
     ]

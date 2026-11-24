@@ -79,7 +79,11 @@ func loadConfig(path string, p provider.Provider) (*config.Config, error) {
 // openBackend selects the state backend from the config's `backend` block,
 // falling back to the local file backend when there is none. The bool is true
 // when the local fallback was used (so destroy can warn on a remote-shaped setup).
+// With --state overriding a backend (localStateOverride), it is the local file.
 func openBackend(cfgPath, statePath string) (backend.Backend, bool, error) {
+	if localStateOverride {
+		return backend.NewLocal(statePath), false, nil
+	}
 	bc, err := config.LoadBackend(cfgPath)
 	if err != nil {
 		return nil, false, err
@@ -268,16 +272,14 @@ func run(args []string, s streams) int {
 	root.SetOut(s.out)
 	root.SetErr(s.err)
 	root.SetArgs(args)
+	localStateOverride = false
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
-		return rejectStateWithBackend(cmd, cfgPath)
+		return stateWithBackend(cmd, cfgPath, statePath, s.err)
 	}
 
 	exit := 0
 	p := newProvider()
 
-	load := func() (*config.Config, error) {
-		return loadConfig(cfgPath, p)
-	}
 
 	root.AddCommand(&cobra.Command{Use: "validate", Short: "Check the config offline, without contacting Roblox or reading state", RunE: func(cmd *cobra.Command, _ []string) error {
 		cmdName = cmd.Name()
@@ -299,7 +301,16 @@ func run(args []string, s streams) int {
 		if err != nil {
 			return err
 		}
-		cfg, err := load()
+		refresh, _ := cmd.Flags().GetBool("refresh")
+		// Without refreshing, plan makes no Roblox requests except to read
+		// import targets, so it works without ROBLOX_API_KEY (e.g. a PR from a
+		// fork) as long as there are none (checked below).
+		p := p
+		keyless := !refresh && os.Getenv("ROBLOX_API_KEY") == ""
+		if keyless {
+			p = withRobloxSchemas(p)
+		}
+		cfg, err := loadConfig(cfgPath, p)
 		if err != nil {
 			return err
 		}
@@ -334,8 +345,18 @@ func run(args []string, s streams) int {
 		if err != nil {
 			return err
 		}
+		if keyless {
+			for _, imp := range toResolve {
+				if _, inState := st.Find(imp.Address); !inState {
+					return fmt.Errorf("import %s: reading the resource to import needs ROBLOX_API_KEY, even with --refresh=false", imp.Address)
+				}
+			}
+			if generateConfigOut != "" {
+				return errors.New("--generate-config needs ROBLOX_API_KEY, to read the imported resources")
+			}
+		}
 		ctx, warns := provider.WithWarnings(context.Background())
-		pl, err := plan.Build(ctx, p, st, desired)
+		pl, err := plan.BuildWithOptions(ctx, p, st, desired, plan.BuildOptions{SkipRefresh: !refresh})
 		if err != nil {
 			return err
 		}
@@ -366,6 +387,7 @@ func run(args []string, s streams) int {
 		return nil
 	}}
 	planCmd.Flags().Bool("lock", true, "hold the state lock while planning (--lock=false to skip it)")
+	planCmd.Flags().Bool("refresh", true, "read each resource from Roblox (--refresh=false compares the config with state only: faster, needs no API key, but can't see changes made outside Baseplate)")
 	planCmd.Flags().StringVar(&generateConfigOut, "generate-config", "", "write generated HCL for undeclared import blocks to this file")
 	root.AddCommand(planCmd)
 

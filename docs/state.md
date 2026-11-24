@@ -50,8 +50,12 @@ backend "http" {
   and `::1`.
 
 Commands that read state find the backend through `--config`. If you run `destroy` with a remote
-backend, pass `--config` too; otherwise it falls back to local state and prints a note. `--state`
-is refused when the config has a backend block, since the backend holds the state.
+backend, pass `--config` too; otherwise it falls back to local state and prints a note.
+
+To try something without touching the shared state, such as a trial `import`, pass `--state` with
+a local file. `plan`, `import` and `show` then use that file instead of the backend, and print a
+note saying so. `apply` and `destroy` refuse `--state` when the config has a backend block, because
+applying against a different copy of the state would create duplicates of everything it lacks.
 
 ### Locks
 

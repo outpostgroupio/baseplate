@@ -15,6 +15,7 @@ import (
 )
 
 type gamePass struct {
+	filteredText
 	gc opencloud.GamePassClient
 }
 

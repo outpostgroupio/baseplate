@@ -295,6 +295,20 @@ Roblox's upload limits (watch the monthly audio cap).
   that says so (nothing is changed); Baseplate then needs an update to replace that type instead.
 - If the source files aren't on the machine running `plan` (e.g. CI), assets already in state keep
   their recorded hashes and `plan` warns that content changes can't be detected.
+- If the uploaded files are generated (PNGs rendered from SVGs, say), set `source_hash` to a hash of
+  the source, so that only a change to the source counts as a content change:
+
+  ```hcl
+  resource "roblox_asset" "icons" {
+    for_each    = fileset("art", "**/*.svg")
+    file        = "build/icons/${trimsuffix(each.key, ".svg")}.png"
+    source_hash = filesha256("art/${each.key}")
+    # ...
+  }
+  ```
+
+  Then a new converter version that produces different bytes doesn't upload anything, and `plan`
+  doesn't need the generated files. Adding `source_hash` to existing assets uploads nothing either.
 - Moving or renaming a file without changing its bytes doesn't change the hash. (It can still
   change the `for_each` key, which is covered next.)
 - `lifecycle { prevent_destroy = true }` blocks a replace, as in Terraform.

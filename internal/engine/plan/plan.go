@@ -64,9 +64,14 @@ type Change struct {
 	// BackfillTriggers names triggers with no value recorded in state that
 	// plan adopted as a baseline instead of diffing; apply records them.
 	BackfillTriggers []string
-	// Warning, when set, is a plan warning about this change (e.g. a trigger
-	// input that is missing, so changes to it can't be detected).
-	Warning string
+	// Unavailable, when set, says why a trigger input is missing (e.g. a
+	// source file absent on this machine), so changes to it can't be
+	// detected. Warnings reports it, once per resource block.
+	Unavailable string
+	// Censored lists attributes that read back as the platform filtered the
+	// config's text (provider.Censoring). They aren't diffed; Warnings
+	// reports them.
+	Censored []AttrDiff
 }
 
 type Plan struct {
@@ -104,7 +109,20 @@ func (p *Plan) HasChanges() bool {
 	return p.Count() > 0
 }
 
+// BuildOptions tunes Build.
+type BuildOptions struct {
+	// SkipRefresh compares the config with the attributes state recorded at
+	// the last apply, instead of reading each resource from the platform. It
+	// makes a plan quick and cheap, but it can't see changes made outside
+	// Baseplate. Import targets are still read.
+	SkipRefresh bool
+}
+
 func Build(ctx context.Context, p provider.Provider, s *state.State, desired []DesiredResource) (*Plan, error) {
+	return BuildWithOptions(ctx, p, s, desired, BuildOptions{})
+}
+
+func BuildWithOptions(ctx context.Context, p provider.Provider, s *state.State, desired []DesiredResource, opts BuildOptions) (*Plan, error) {
 	resources := p.Resources()
 	if err := checkMixedKeys(desired); err != nil {
 		return nil, err
@@ -172,8 +190,14 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 			})
 			continue
 		}
-		actual, err := resources[d.Type].Read(ctx, st.ID)
-		err = provider.ResourceError(addr, d.Type, resources[d.Type], err)
+		var actual provider.Attributes
+		var err error
+		if opts.SkipRefresh {
+			actual = decodeAttrs(st.Attributes)
+		} else {
+			actual, err = resources[d.Type].Read(ctx, st.ID)
+			err = provider.ResourceError(addr, d.Type, resources[d.Type], err)
+		}
 		if errors.Is(err, provider.ErrNotFound) {
 			newID[addr] = true
 			pl.Changes = append(pl.Changes, Change{
@@ -256,6 +280,23 @@ func mergeRefs(d DesiredResource, s *state.State, importIDs map[string]string) p
 // a resource's many optional/unset fields don't produce spurious drift. Drift
 // on a declared attribute is still detected (it's in desired). Computed attrs
 // are excluded even if present in desired (e.g. after an import round-trip).
+// dropCensored removes the diffs whose remote value is the config's text as the
+// platform filtered it (provider.Censoring), and returns them separately.
+func dropCensored(res provider.Resource, diffs []AttrDiff) (kept, censored []AttrDiff) {
+	c, ok := res.(provider.Censoring)
+	if !ok {
+		return diffs, nil
+	}
+	for _, d := range diffs {
+		if c.Censored(d.Name, d.New, d.Old) {
+			censored = append(censored, d)
+			continue
+		}
+		kept = append(kept, d)
+	}
+	return kept, censored
+}
+
 func diffAttrs(actual, desired provider.Attributes, computed []string) []AttrDiff {
 	skip := map[string]bool{}
 	for _, c := range computed {

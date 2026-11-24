@@ -22,7 +22,10 @@ var placeConfigWire = map[string]string{
 	"server_size":  "serverSize",
 }
 
-type placeConfig struct{ pc opencloud.PlaceConfigClient }
+type placeConfig struct {
+	filteredText
+	pc opencloud.PlaceConfigClient
+}
 
 // PlaceConfig returns the roblox_place_config resource. Its state id is
 // "<universeID>/<placeID>". It configures an existing place and is independent of

@@ -281,6 +281,7 @@ in plans like any other value.
 | `env(name)` | The environment variable `name`, or `""` if unset. Read when the config loads. |
 | `fileset(dir, pattern)` | Set of files (not directories) under `dir` matching a glob; `**` crosses directories. Paths are relative to `dir` and use `/`. A missing `dir` is an error. |
 | `file(path)` | The file's contents as a string. The file must be UTF-8. |
+| `filesha256(path)` | The hex SHA-256 of the file's contents, for `roblox_asset`'s `source_hash`. |
 | `basename(path)` | Last element of a `/`-separated path: `basename("ui/gem.png")` is `"gem.png"`. |
 | `dirname(path)` | Everything but the last element: `dirname("ui/gem.png")` is `"ui"`. |
 | `jsondecode(str)`, `jsonencode(value)` | Parse or produce JSON. |

@@ -13,8 +13,9 @@ baseplate <command> [flags]
 | `--target` | *(none)* | Limit `plan`/`apply`/`destroy` to one resource (`roblox_asset.icon`; for a `for_each` resource, every instance) or one instance (`'roblox_asset.sprites["ui/gem.png"]'`). See [Addresses](#addresses). A malformed address is an error. |
 | `--json` | `false` | Emit machine-readable output. Works on every command. Results are a versioned envelope `{ "format_version": 1, "command": ..., "result": ... }` on stdout; errors are `{ "format_version": 1, "command": ..., "error": { "message": ... } }` on stderr. |
 
-State can also be stored remotely with a `backend "http"` block; see [State](state.md). `--state`
-is refused when the config has one.
+State can also be stored remotely with a `backend "http"` block; see [State](state.md). With one,
+`--state` makes `plan`, `import` and `show` use that local file instead, without touching the
+backend, and `apply` and `destroy` refuse it.
 
 ### Approval flags (`apply` / `destroy` / `restart-servers`)
 
@@ -91,6 +92,12 @@ Show the changes `apply` would make, as a colorized diff. Read-only: it reads st
 provider but mutates nothing. It holds the state lock while it runs, so it never reads state that
 an `apply` is rewriting; `--lock=false` skips the lock. Exits `2` if there are changes, `0` if
 converged.
+
+`--refresh=false` compares the config with what state recorded at the last apply, instead of
+reading every resource from Roblox. It's much faster for a config with many assets, and needs no
+`ROBLOX_API_KEY`, but it can't see changes made outside Baseplate (in Creator Hub, say), and an
+`import` block whose target isn't in state yet still needs the key. `apply` always reads from
+Roblox first.
 
 ```console
 $ baseplate plan
@@ -169,6 +176,10 @@ with an example `moved` block that keeps the existing object instead.
 When a `for_each` resource declares zero instances while state still holds some, it warns that all
 of them will be destroyed. `--json` lists both under `result.warnings`. See
 [managing many assets](how-to/many-assets.md#renaming-or-moving-a-file).
+Roblox's text filter replaces each character of a word it rejects with `#`. When a name or
+description reads back as the config's text with only that change, `plan` treats it as unchanged,
+since writing it again would be filtered the same way, and prints a `Warning:` with the filtered
+text.
 Resources can add warnings of their own, about something that didn't stop the plan (for example a
 `roblox_asset` Decal whose `texture_id` lookup failed). They're printed and listed the same way.
 `apply` prints those reported while it runs after `Apply complete:`, and `apply --json` and
@@ -388,7 +399,9 @@ roblox_asset.sprites["ui/gem.png"]
 ```
 
 `--json` returns the inventory sorted by address. `key` is present only for `for_each` instances,
-and `attributes` are plain JSON values. Sensitive attributes are never included.
+and `attributes` are plain JSON values. Sensitive attributes are never included. `triggers` holds
+the values Baseplate records to detect changes it can't read back from Roblox, such as a file's
+`content_hash`; it's left out for resources that have none.
 
 ```json
 {
@@ -404,7 +417,8 @@ and `attributes` are plain JSON values. Sensitive attributes are never included.
         "name": "sprites",
         "key": "ui/gem.png",
         "id": "2233445566",
-        "attributes": { "asset_type": "Image", "display_name": "sprite/ui/gem", "texture_id": "2233445566" }
+        "attributes": { "asset_type": "Image", "display_name": "sprite/ui/gem", "texture_id": "2233445566" },
+        "triggers": { "content_hash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08" }
       }
     ]
   }

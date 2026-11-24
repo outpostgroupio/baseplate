@@ -2,6 +2,7 @@ package plan
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -164,12 +165,51 @@ func (p *Plan) Warnings() []string {
 				"e.g. moved { from = %s  to = %s } (moved blocks also take for_each, to move many keys at once).",
 			b, n.del, n.add, from, to))
 	}
+	out = append(out, p.unavailableWarnings()...)
 	for _, c := range p.Changes {
-		if c.Warning != "" {
-			out = append(out, c.Warning)
+		for _, d := range c.Censored {
+			if slices.Contains(c.Sensitive, d.Name) {
+				continue
+			}
+			out = append(out, fmt.Sprintf("%s: %s reads back as %q, which is the config's text with words hidden by the platform's text filter. It's treated as matching the config; reword it, or set it to the filtered text, to stop this warning.", c.Address, d.Name, d.Old.AsString()))
 		}
 	}
 	out = append(out, p.ProviderWarnings...)
+	return out
+}
+
+// unavailableWarnings reports trigger inputs that are missing (Change.
+// Unavailable), one warning per resource block: a for_each over hundreds of
+// files that CI doesn't have would otherwise print hundreds of lines.
+func (p *Plan) unavailableWarnings() []string {
+	type group struct {
+		n           int
+		first, why string
+	}
+	var order []string
+	groups := map[string]*group{}
+	for _, c := range p.Changes {
+		if c.Unavailable == "" {
+			continue
+		}
+		base := addr.Format(c.Type, c.Name, "")
+		g := groups[base]
+		if g == nil {
+			g = &group{first: c.Address, why: c.Unavailable}
+			groups[base] = g
+			order = append(order, base)
+		}
+		g.n++
+	}
+	out := make([]string, 0, len(order))
+	for _, base := range order {
+		g := groups[base]
+		if g.n == 1 {
+			out = append(out, fmt.Sprintf("%s: %s; content changes can't be detected until it is available.", g.first, g.why))
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s: inputs are missing for %d instances (the first, %s: %s); content changes can't be detected for them until they are available.", base, g.n, g.first, g.why))
+	}
 	return out
 }
 

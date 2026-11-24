@@ -36,6 +36,7 @@ var (
 )
 
 type experienceEvent struct {
+	filteredText
 	ec opencloud.GameEventClient
 }
 

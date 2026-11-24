@@ -66,3 +66,48 @@ func TestCountAndAppliedLeaveOutUnchanged(t *testing.T) {
 		t.Fatalf("Applied() = %q, want %q", got, want)
 	}
 }
+
+// A missing trigger input is reported once per resource block, not once per
+// instance (a for_each over hundreds of files CI doesn't have).
+func TestUnavailableWarningsGroupByResource(t *testing.T) {
+	pl := &Plan{Changes: []Change{
+		{Address: `roblox_asset.maps["a"]`, Type: "roblox_asset", Name: "maps", Key: "a", Unavailable: `file "maps/a.png" not found`},
+		{Address: `roblox_asset.maps["b"]`, Type: "roblox_asset", Name: "maps", Key: "b", Unavailable: `file "maps/b.png" not found`},
+		{Address: `roblox_asset.maps["c"]`, Type: "roblox_asset", Name: "maps", Key: "c", Unavailable: `file "maps/c.png" not found`},
+		{Address: "roblox_asset.logo", Type: "roblox_asset", Name: "logo", Unavailable: `file "logo.png" not found`},
+	}}
+	want := []string{
+		`roblox_asset.maps: inputs are missing for 3 instances (the first, roblox_asset.maps["a"]: file "maps/a.png" not found); content changes can't be detected for them until they are available.`,
+		`roblox_asset.logo: file "logo.png" not found; content changes can't be detected until it is available.`,
+	}
+	got := pl.Warnings()
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+type censoringThing struct{ provider.Resource }
+
+func (censoringThing) Censored(attr string, desired, actual cty.Value) bool {
+	return attr == "description" && actual.AsString() == "####"
+}
+
+// Text the platform filtered isn't a change, but is reported.
+func TestCensoredTextIsNotAChange(t *testing.T) {
+	diffs := []AttrDiff{
+		{Name: "description", Old: cty.StringVal("####"), New: cty.StringVal("darn")},
+		{Name: "name", Old: cty.StringVal("a"), New: cty.StringVal("b")},
+	}
+	kept, censored := dropCensored(censoringThing{}, diffs)
+	if len(kept) != 1 || kept[0].Name != "name" || len(censored) != 1 || censored[0].Name != "description" {
+		t.Fatalf("kept %v, censored %v", kept, censored)
+	}
+	pl := &Plan{Changes: []Change{{Address: "x_thing.a", Censored: censored}}}
+	if w := strings.Join(pl.Warnings(), "\n"); !strings.Contains(w, `x_thing.a: description reads back as "####"`) {
+		t.Fatalf("missing the filtered-text warning: %s", w)
+	}
+	pl.Changes[0].Sensitive = []string{"description"}
+	if w := pl.Warnings(); len(w) != 0 {
+		t.Fatalf("a sensitive value must not be printed: %v", w)
+	}
+}

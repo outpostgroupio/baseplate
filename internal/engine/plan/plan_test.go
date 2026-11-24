@@ -2,11 +2,13 @@ package plan
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/hashicorp/hcl/v2/hcldec"
 	"github.com/zclconf/go-cty/cty"
+	ctyjson "github.com/zclconf/go-cty/cty/json"
 
 	"github.com/outpostgroupio/baseplate/internal/provider"
 	"github.com/outpostgroupio/baseplate/internal/provider/mock"
@@ -266,4 +268,49 @@ func TestBuildPopulatesSensitive(t *testing.T) {
 	if len(pl.Changes) != 1 || len(pl.Changes[0].Sensitive) != 1 || pl.Changes[0].Sensitive[0] != "value" {
 		t.Fatalf("Change.Sensitive not populated: %+v", pl.Changes)
 	}
+}
+
+// SkipRefresh compares the config with state, without reading the resource:
+// a change made outside Baseplate isn't seen, a config change is.
+func TestBuildSkipRefresh(t *testing.T) {
+	p := mock.New()
+	p.Seed("mock_thing/1", provider.Attributes{"name": cty.StringVal("changed outside")})
+	s := state.New()
+	s.Upsert(state.Resource{Type: "mock_thing", Name: "a", ID: "mock_thing/1",
+		Attributes: encodeTestAttrs(t, provider.Attributes{"name": cty.StringVal("root")})})
+	desired := func(name string) []DesiredResource {
+		return []DesiredResource{{Type: "mock_thing", Name: "a", Attributes: provider.Attributes{"name": cty.StringVal(name)}}}
+	}
+	ctx := context.Background()
+
+	pl, err := BuildWithOptions(ctx, p, s, desired("root"), BuildOptions{SkipRefresh: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pl.HasChanges() {
+		t.Fatalf("without refreshing, the outside change must not show: %+v", pl.Changes)
+	}
+	if pl, _ := Build(ctx, p, s, desired("root")); !pl.HasChanges() {
+		t.Fatal("a refreshing plan must see the outside change")
+	}
+	pl, err = BuildWithOptions(ctx, p, s, desired("renamed"), BuildOptions{SkipRefresh: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pl.HasChanges() || pl.Changes[0].Action != provider.ActionUpdate {
+		t.Fatalf("a config change must show without refreshing: %+v", pl.Changes)
+	}
+}
+
+func encodeTestAttrs(t *testing.T, attrs provider.Attributes) map[string]json.RawMessage {
+	t.Helper()
+	out := map[string]json.RawMessage{}
+	for k, v := range attrs {
+		b, err := ctyjson.Marshal(v, cty.DynamicPseudoType)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[k] = b
+	}
+	return out
 }

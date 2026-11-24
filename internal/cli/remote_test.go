@@ -132,13 +132,35 @@ func TestBackendSendsTokenFromEnv(t *testing.T) {
 	}
 }
 
-func TestStateFlagRejectedWithBackend(t *testing.T) {
-	srv := httptest.NewServer(&stateServer{})
+// --state with a backend: apply and destroy refuse it, and other commands use
+// the local file instead of the backend, without contacting it.
+func TestStateFlagWithBackend(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("the backend must not be contacted, got %s %s", r.Method, r.URL)
+	}))
 	defer srv.Close()
+	cfg := remoteCfg(t, srv)
+	st := filepath.Join(t.TempDir(), "local.bpstate")
+
+	for _, cmd := range []string{"apply", "destroy"} {
+		var out bytes.Buffer
+		code := runOut([]string{cmd, "--auto-approve", "--config", cfg, "--state", st}, &out)
+		if code != 1 || !strings.Contains(out.String(), "--state can't be used with "+cmd) {
+			t.Fatalf("%s --state with a backend must be refused, exit %d:\n%s", cmd, code, out.String())
+		}
+	}
+
 	var out bytes.Buffer
-	code := runOut([]string{"plan", "--config", remoteCfg(t, srv), "--state", "x.bpstate"}, &out)
-	if code != 1 || !strings.Contains(out.String(), "--state can't be used") {
-		t.Fatalf("--state with a backend must be refused, exit %d:\n%s", code, out.String())
+	if code := runOut([]string{"plan", "--config", cfg, "--state", st}, &out); code == 1 {
+		t.Fatalf("plan --state: exit %d\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "note: using the local state "+st) {
+		t.Fatalf("missing the override note:\n%s", out.String())
+	}
+	writeShowState(t, st)
+	out.Reset()
+	if code := runOut([]string{"show", "--config", cfg, "--state", st}, &out); code != 0 || !strings.Contains(out.String(), "mock_thing.solo") {
+		t.Fatalf("show --state should read the local file: exit %d\n%s", code, out.String())
 	}
 }
 
@@ -149,5 +171,40 @@ func TestForceUnlockLocalBackendExplains(t *testing.T) {
 	code := runOut([]string{"force-unlock", "x", "--force", "--config", cfg, "--state", st}, &out)
 	if code != 1 || !strings.Contains(out.String(), "nothing to force-unlock") {
 		t.Fatalf("exit %d:\n%s", code, out.String())
+	}
+}
+
+// plan --refresh=false reads nothing from Roblox, so it runs without
+// ROBLOX_API_KEY, unless an import target has to be read.
+func TestPlanWithoutRefreshNeedsNoKey(t *testing.T) {
+	t.Setenv("ROBLOX_API_KEY", "")
+	dir := t.TempDir()
+	png := filepath.Join(dir, "logo.png")
+	os.WriteFile(png, []byte("png"), 0o644)
+	cfg := filepath.Join(dir, "baseplate.bp.hcl")
+	body := `
+resource "roblox_asset" "logo" {
+  file             = "` + png + `"
+  display_name     = "Logo"
+  description      = "Logo"
+  creator_user_id  = 1
+}
+`
+	os.WriteFile(cfg, []byte(body), 0o644)
+	st := filepath.Join(dir, "s.bpstate")
+
+	var out bytes.Buffer
+	if code := runOut([]string{"plan", "--refresh=false", "--config", cfg, "--state", st}, &out); code != 2 || !strings.Contains(out.String(), "roblox_asset.logo") {
+		t.Fatalf("plan --refresh=false without a key: exit %d\n%s", code, out.String())
+	}
+	out.Reset()
+	if code := runOut([]string{"plan", "--config", cfg, "--state", st}, &out); code != 1 || !strings.Contains(out.String(), "ROBLOX_API_KEY is not set") {
+		t.Fatalf("a refreshing plan still needs the key: exit %d\n%s", code, out.String())
+	}
+
+	os.WriteFile(cfg, []byte(body+"import {\n  to = roblox_asset.logo\n  id = \"123\"\n}\n"), 0o644)
+	out.Reset()
+	if code := runOut([]string{"plan", "--refresh=false", "--config", cfg, "--state", st}, &out); code != 1 || !strings.Contains(out.String(), "needs ROBLOX_API_KEY, even with --refresh=false") {
+		t.Fatalf("an import must still need the key: exit %d\n%s", code, out.String())
 	}
 }

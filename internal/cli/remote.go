@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os/exec"
 	"runtime"
@@ -29,10 +30,18 @@ var openBrowser = func(url string) error {
 	}
 }
 
-// rejectStateWithBackend refuses --state when the config has a backend block:
-// state lives in the backend then, and silently ignoring the flag would leave
-// someone thinking they'd pointed the command at a different file.
-func rejectStateWithBackend(cmd *cobra.Command, cfgPath string) error {
+// localStateOverride is set for one run when --state is given with a config
+// that has a backend block: the command uses that local file instead of the
+// backend (see stateWithBackend). run resets it.
+var localStateOverride bool
+
+// stateWithBackend decides what --state means when the config has a backend
+// block. For apply and destroy it's refused: they change real resources based
+// on the state, and applying against a stray local copy creates duplicates.
+// Other commands (plan, import, show) use the local file instead of the
+// backend, for trying things out without touching the shared state, and say
+// so on stderr.
+func stateWithBackend(cmd *cobra.Command, cfgPath, statePath string, stderr io.Writer) error {
 	f := cmd.Flags().Lookup("state")
 	if f == nil || !f.Changed {
 		return nil
@@ -41,7 +50,12 @@ func rejectStateWithBackend(cmd *cobra.Command, cfgPath string) error {
 	if err != nil || bc == nil {
 		return nil // no backend (or a config error, reported by the command)
 	}
-	return fmt.Errorf("--state can't be used with the %q backend in %s, which stores the state; remove --state", bc.Type, cfgPath)
+	if cmd.Name() == "apply" || cmd.Name() == "destroy" {
+		return fmt.Errorf("--state can't be used with %s: the %q backend in %s stores the state, and applying against another copy would create duplicates. Remove --state", cmd.Name(), bc.Type, cfgPath)
+	}
+	localStateOverride = true
+	fmt.Fprintf(stderr, "note: using the local state %s instead of the %q backend in %s\n", statePath, bc.Type, cfgPath)
+	return nil
 }
 
 type forceUnlockResult struct {
