@@ -272,6 +272,24 @@ Example: [`examples/baseplate.bp.hcl`](../examples/baseplate.bp.hcl).
 
 ---
 
+## `roblox_place_media`
+
+Manages a place's icon and detail-page thumbnails. On the root place these are the experience's icon and thumbnails. Adopts the place; it does not create places.
+
+| Attribute | Type | Kind | Description |
+|---|---|---|---|
+| `icon` | string | optional, diffable | Image asset id of the icon (square). `""` removes the icon. |
+| `place_id` | string | required, create-only | The place. Use the root place for the experience's icon and thumbnails. |
+| `thumbnails` | list of object | optional, diffable | Ordered list of `{ asset_id, alt_text }` (alt text optional), the order shown on the game page. Image asset ids; at most 10, no duplicates. `[]` removes them all. |
+
+Only declared attributes are managed; omit `icon` or `thumbnails` to leave it as it is. Each apply replaces the whole thumbnail list. `icon` can be a reference (`roblox_asset.icon.id`); `thumbnails` takes literal ids for now, because references inside a list aren't supported yet. An image still in moderation review is accepted. Uses the Assets API's place-asset `icon` and `previews` fields (beta). Roblox's reads lag behind its writes, and an update can report done without being applied, so apply waits until the place reads back as written, re-sends the update (with a warning) if it doesn't, and fails after three tries. For a minute or two after an apply, a plan can still read the old values and show them as a change; applying again is harmless. Video thumbnails aren't supported: Roblox's docs only describe image entries, uploading a Video asset through Open Cloud costs Robux, and a video added in Creator Dashboard hasn't been tested with this API. Homepage thumbnails (thumbnail personalization) and translated icons and thumbnails are separate APIs that this resource doesn't manage. `destroy` unmanages the place (the icon and thumbnails are left as they are). Import by place id.
+
+Requires the `asset:read`, `asset:write` [scopes](how-to/api-key-scopes.md).
+
+Example: [`examples/place-media.bp.hcl`](../examples/place-media.bp.hcl).
+
+---
+
 ## `roblox_universe_secret`
 
 Manages an Open Cloud secret for a universe. Secrets can be created, updated and deleted. The value is encrypted client-side (LibSodium sealed box) before upload and is never written to state or printed in a plan.

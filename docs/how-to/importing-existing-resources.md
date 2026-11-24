@@ -97,6 +97,7 @@ form of `baseplate import` takes it) to record the file's hash instead, and the 
 | `roblox_asset` | `<assetId>` |
 | `roblox_place` | `<universeId>/<placeId>` |
 | `roblox_place_config` | `<universeId>/<placeId>` |
+| `roblox_place_media` | `<placeId>` |
 | `roblox_developer_product` | `<universeId>/<productId>` |
 | `roblox_game_pass` | `<universeId>/<gamePassId>` |
 | `roblox_badge` | `<universeId>/<badgeId>` |

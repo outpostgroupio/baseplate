@@ -66,6 +66,10 @@ type APIError struct {
 
 func (e *APIError) Error() string {
 	s := fmt.Sprintf("Roblox API %d", e.Status)
+	if e.Status == 0 {
+		// Reported inside a long-running operation, which has no HTTP status.
+		s = "Roblox API operation failed"
+	}
 	if e.Request != "" {
 		s += " on " + e.Request
 	}
@@ -181,8 +185,8 @@ func (c *Client) PollOperation(ctx context.Context, opPath string, out any) erro
 		if _, err := c.Do(ctx, http.MethodGet, opPath, nil, &op); err != nil {
 			return err
 		}
-		if op.Error != nil {
-			return op.Error
+		if err := op.failure(); err != nil {
+			return err
 		}
 		if op.Done {
 			if out != nil && len(op.Response) > 0 {
@@ -199,6 +203,33 @@ type operation struct {
 	Done     bool            `json:"done"`
 	Response json.RawMessage `json:"response"`
 	Error    *APIError       `json:"error"`
+	Metadata struct {
+		Errors []struct {
+			Error APIError `json:"error"`
+		} `json:"errors"`
+	} `json:"metadata"`
+}
+
+// failure returns the operation's error, or nil. A failed asset PATCH reports a
+// generic error ("Error occured during operation, check metadata for
+// specifics.") and puts the real one in metadata.errors (e.g. "Icon asset ID 1
+// is not found."), so those messages replace the generic one.
+func (op operation) failure() error {
+	if op.Error == nil {
+		return nil
+	}
+	var msgs []string
+	for _, e := range op.Metadata.Errors {
+		if e.Error.Message != "" {
+			msgs = append(msgs, e.Error.Message)
+		}
+	}
+	if len(msgs) == 0 {
+		return op.Error
+	}
+	e := *op.Error
+	e.Message = strings.Join(msgs, "; ")
+	return &e
 }
 
 func backoff(attempt int) time.Duration {

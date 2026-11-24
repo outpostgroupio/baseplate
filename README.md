@@ -58,6 +58,7 @@ $ baseplate destroy   # remove what Baseplate manages
 | `roblox_experience` | A universe's writable settings: voice chat, devices (including console and VR), private servers, social links, public/private. |
 | `roblox_place` | Publishes a `.rbxl`/`.rbxlx` file to an existing place, and republishes when the file changes. |
 | `roblox_place_config` | A place's name, description and server size. The root place's name and description are the experience's. |
+| `roblox_place_media` | A place's icon and detail-page thumbnails. The root place's are the experience's. |
 | `roblox_asset` | User- or group-owned Image, Decal, Audio and Model assets. Images and Models take new content in place (same id); other types are re-uploaded. |
 | `roblox_developer_product` | Developer products: name, price, description, icon, on sale. |
 | `roblox_game_pass` | Game passes: name, price, description, icon, on sale. |

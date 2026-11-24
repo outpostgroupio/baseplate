@@ -5,9 +5,10 @@ Feature requests and bug reports go in [GitHub issues](https://github.com/outpos
 
 ## Supported now
 
-- Resources: `roblox_experience`, `roblox_place`, `roblox_place_config`, `roblox_asset`,
-  `roblox_developer_product`, `roblox_game_pass`, `roblox_badge`, `roblox_experience_event`,
-  `roblox_universe_secret`, `roblox_analytics_alert` and `roblox_experience_config`.
+- Resources: `roblox_experience`, `roblox_place`, `roblox_place_config`, `roblox_place_media`,
+  `roblox_asset`, `roblox_developer_product`, `roblox_game_pass`, `roblox_badge`,
+  `roblox_experience_event`, `roblox_universe_secret`, `roblox_analytics_alert` and
+  `roblox_experience_config`.
 - `plan`, `apply`, `destroy`, `import`, `show`, `validate`, `restart-servers` and `cleanup`, with
   `--json` output and `--target`.
 - `import` and `moved` blocks, `lifecycle { prevent_destroy, replace_triggered_by }` with
@@ -24,6 +25,9 @@ Feature requests and bug reports go in [GitHub issues](https://github.com/outpos
 - An S3-compatible state backend, for teams that already have S3 or R2 credentials.
 - A `--debug` flag that logs Open Cloud requests with credentials redacted.
 - Managed pricing for game passes.
+- References inside lists and objects (e.g. `thumbnails = [{ asset_id = roblox_asset.hero.id }]`).
+- Possibly: homepage thumbnails (thumbnail personalization) and translated icons and thumbnails,
+  which have their own API-key endpoints.
 - Possibly: collaborators and permissions, Creator Store products, localization tables, and
   restarts through the beta server-management API once it's stable.
 - A docs site.
@@ -35,7 +39,8 @@ These have no write API that an API key can use, so Baseplate can't manage them:
 - Subscription products (read-only).
 - The universe's age rating. Its name and description are read-only on the universe too, but they
   follow the root place, which `roblox_place_config` manages.
-- Experience thumbnails and icons (the write API needs first-party OAuth).
+- Video thumbnails. Uploading a Video asset through Open Cloud costs 2000 Robux and needs a public
+  experience, and Roblox only documents images for the thumbnail list.
 - Place settings such as streaming and allowed gear.
 
 Some resources exist but can't be deleted, so `destroy` disables them or stops managing them:
