@@ -171,7 +171,7 @@ of them will be destroyed. `--json` lists both under `result.warnings`. See
 [managing many assets](how-to/many-assets.md#renaming-or-moving-a-file).
 Resources can add warnings of their own, about something that didn't stop the plan (for example a
 `roblox_asset` Decal whose `texture_id` lookup failed). They're printed and listed the same way.
-`apply` prints those reported while it runs after `Apply complete.`, and `apply --json` and
+`apply` prints those reported while it runs after `Apply complete:`, and `apply --json` and
 `import --json` list them under `result.warnings`.
 
 `--generate-config=FILE` writes resource blocks for `import {}` blocks whose target isn't declared.
@@ -186,8 +186,13 @@ blocks to state first (written even if nothing else changes), then resolves `imp
 
 ```console
 $ baseplate apply
-Apply complete. 1 change(s).
+Apply complete: 0 imported, 1 added, 0 changed, 0 destroyed.
 ```
+
+The counts match the plan's `Plan:` line; resources that were already up to date aren't counted.
+`--json` gives the same counts as `result.summary`, and the number of resources that changed as
+`result.applied`.
+`result.changes` lists every declared resource, including unchanged ones (`"action": "noop"`).
 
 On a terminal it prompts before mutating; pass `--auto-approve` (or `--yes`) to skip the prompt in
 scripts. CI (no TTY) skips it automatically.
@@ -218,7 +223,7 @@ left as they are. Secrets, experience events and analytics alerts are deleted. T
 
 ```console
 $ baseplate destroy
-Apply complete. 1 change(s).
+Destroy complete: 0 imported, 0 added, 0 changed, 1 destroyed.
 ```
 
 On a terminal it prompts before mutating; pass `--auto-approve` (or `--yes`) to skip the prompt in

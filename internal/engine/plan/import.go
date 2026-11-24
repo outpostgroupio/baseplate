@@ -78,7 +78,7 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 			if errors.Is(err, provider.ErrNotFound) {
 				return fmt.Errorf("import %s: no %s found with id %q", imp.Address, c.Type, imp.ID)
 			}
-			return err
+			return provider.ResourceError(imp.Address, c.Type, resources[c.Type], err)
 		}
 		pendingImports[imp.Address] = imp.ID
 		actuals[imp.Address] = actual

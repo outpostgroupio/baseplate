@@ -84,13 +84,17 @@ func TestDoReturnsAPIErrorOnPersistent4xx(t *testing.T) {
 	defer srv.Close()
 
 	c := New("k", srv.URL, WithSleeper(func(time.Duration) {}))
-	_, err := c.Do(context.Background(), http.MethodGet, "/x", nil, nil)
+	_, err := c.Do(context.Background(), http.MethodGet, "/x?pageToken=abc", nil, nil)
 	apiErr, ok := err.(*APIError)
 	if !ok {
 		t.Fatalf("expected *APIError, got %T (%v)", err, err)
 	}
-	if apiErr.Status != 403 || apiErr.Message != "missing scope" {
+	if apiErr.Status != 403 || apiErr.Message != "missing scope" || !apiErr.AccessDenied() {
 		t.Fatalf("got %+v", apiErr)
+	}
+	// The message names the request, without its query.
+	if got, want := err.Error(), "Roblox API 403 on GET /x: missing scope"; got != want {
+		t.Fatalf("Error() = %q, want %q", got, want)
 	}
 }
 

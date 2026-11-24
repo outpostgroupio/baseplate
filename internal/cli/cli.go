@@ -180,7 +180,10 @@ type importAllResult struct {
 }
 
 type applyResult struct {
+	// Applied counts the changes that did something, as the plan summary
+	// does; Changes also lists the resources that were already up to date.
 	Applied int               `json:"applied"`
+	Summary plan.Summary      `json:"summary"`
 	Moves   []plan.JSONMove   `json:"moves,omitempty"`
 	Changes []plan.JSONChange `json:"changes"`
 	// Restarts lists the server restarts requested by apply --restart-servers.
@@ -553,7 +556,7 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 	if err := apply.Apply(ctx, p, b, st, pl); err != nil {
 		return err
 	}
-	text := fmt.Sprintf("Apply complete. %d change(s).\n", len(pl.Changes))
+	text := fmt.Sprintf("%s complete: %s.\n", cancelLabel[verb], pl.Summary().Applied())
 	for _, w := range warns.List() {
 		if !shown[w] {
 			text += fmt.Sprintf("Warning: %s\n", w)
@@ -575,7 +578,7 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 		text += restartText(restarts)
 	}
 	return output.Emit(s.out, format, verb, text,
-		applyResult{Applied: len(pl.Changes), Moves: pl.JSONMoves(), Changes: pl.JSONChanges(), Restarts: restarts, Warnings: warns.List()})
+		applyResult{Applied: pl.Count(), Summary: pl.Summary(), Moves: pl.JSONMoves(), Changes: pl.JSONChanges(), Restarts: restarts, Warnings: warns.List()})
 }
 
 // importRun adopts an existing resource (declared in config) into state by id,
@@ -772,7 +775,7 @@ func generateConfig(ctx context.Context, p provider.Provider, imports []plan.Imp
 			if errors.Is(err, provider.ErrNotFound) {
 				return fmt.Errorf("generate %s: no %s found with id %q", imp.Address, typ, imp.ID)
 			}
-			return err
+			return provider.ResourceError(imp.Address, typ, r, err)
 		}
 		block, err := configgen.Generate(r, name, imp.ID, actual)
 		if err != nil {

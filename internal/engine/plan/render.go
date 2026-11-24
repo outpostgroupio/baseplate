@@ -203,6 +203,28 @@ func (p *Plan) Summary() Summary {
 	return s
 }
 
+// Applied describes the summary after an apply, in the plan line's order:
+// "1 imported, 2 added, 4 changed, 0 destroyed".
+func (s Summary) Applied() string {
+	t := fmt.Sprintf("%d imported, %d added, %d changed, %d destroyed", s.Import, s.Add, s.Change, s.Destroy)
+	if s.Move > 0 {
+		t += fmt.Sprintf(", %d moved", s.Move)
+	}
+	return t
+}
+
+// Count is the number of changes that do something: those that aren't no-ops,
+// and imports. It leaves out the unchanged resources Changes also holds.
+func (p *Plan) Count() int {
+	n := 0
+	for _, c := range p.Changes {
+		if c.Action != provider.ActionNoop || c.ImportID != "" {
+			n++
+		}
+	}
+	return n
+}
+
 func (p *Plan) RenderText(color bool) string {
 	var b strings.Builder
 	for _, m := range p.Moves {

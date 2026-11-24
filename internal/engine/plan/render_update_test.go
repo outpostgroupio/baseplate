@@ -47,3 +47,22 @@ func TestRenderUpdateRedactsSensitive(t *testing.T) {
 		t.Fatalf("sensitive values leaked:\n%s", got)
 	}
 }
+
+func TestCountAndAppliedLeaveOutUnchanged(t *testing.T) {
+	pl := &Plan{
+		Moves: []Move{{From: "mock_thing.old", To: "mock_thing.new"}},
+		Changes: []Change{
+			{Address: "mock_thing.a", Action: provider.ActionNoop},
+			{Address: "mock_thing.b", Action: provider.ActionNoop},
+			{Address: "mock_thing.c", Action: provider.ActionUpdate},
+			{Address: "mock_thing.d", Action: provider.ActionCreate},
+			{Address: "mock_thing.e", Action: provider.ActionNoop, ImportID: "5"},
+		},
+	}
+	if got := pl.Count(); got != 3 {
+		t.Fatalf("Count() = %d, want 3 (unchanged resources aren't changes)", got)
+	}
+	if got, want := pl.Summary().Applied(), "1 imported, 1 added, 1 changed, 0 destroyed, 1 moved"; got != want {
+		t.Fatalf("Applied() = %q, want %q", got, want)
+	}
+}

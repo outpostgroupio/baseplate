@@ -101,12 +101,7 @@ func (p *Plan) HasChanges() bool {
 	if len(p.Moves) > 0 {
 		return true
 	}
-	for _, c := range p.Changes {
-		if c.Action != provider.ActionNoop || c.ImportID != "" {
-			return true
-		}
-	}
-	return false
+	return p.Count() > 0
 }
 
 func Build(ctx context.Context, p provider.Provider, s *state.State, desired []DesiredResource) (*Plan, error) {
@@ -178,6 +173,7 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 			continue
 		}
 		actual, err := resources[d.Type].Read(ctx, st.ID)
+		err = provider.ResourceError(addr, d.Type, resources[d.Type], err)
 		if errors.Is(err, provider.ErrNotFound) {
 			newID[addr] = true
 			pl.Changes = append(pl.Changes, Change{

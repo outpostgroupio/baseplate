@@ -19,6 +19,13 @@ manage.
 | `roblox_experience_config` | `universe:read`, `universe:write` |
 | `restart-servers`, `apply --restart-servers` | `universe:write` |
 
+When Roblox refuses the key, the error names the resource, the request that failed, and the scopes
+that resource needs:
+
+```
+Error: roblox_place.main: Roblox API 403 on POST /universes/v1/123/places/456/versions: Scope not authorized. Check that the API key has the scopes roblox_place needs: universe-places:write (see …)
+```
+
 ## Scopes are per universe
 
 In [Creator Dashboard → Credentials](https://create.roblox.com/dashboard/credentials), scopes are

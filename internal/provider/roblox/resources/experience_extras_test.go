@@ -272,6 +272,10 @@ func TestExperiencePublicScopeError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "legacy-universe:manage") || !errors.As(err, &apiErr) {
 		t.Fatalf("want an actionable scope error wrapping the API error, got %v", err)
 	}
+	// The engine must not add roblox_experience's general scopes to it.
+	if got := provider.ResourceError("roblox_experience.main", "roblox_experience", Experience(f), err).Error(); strings.Contains(got, "Check that the API key") {
+		t.Fatalf("explained error got the generic scope hint: %v", got)
+	}
 }
 
 func TestExperiencePublicEligibilityError(t *testing.T) {

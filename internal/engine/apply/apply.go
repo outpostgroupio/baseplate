@@ -47,7 +47,7 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 			}
 			actual, err := r.Read(ctx, c.ImportID)
 			if err != nil {
-				return err
+				return provider.ResourceError(c.Address, c.Type, r, err)
 			}
 			trigs, err := triggersKeeping(r, desired, nil)
 			if err != nil {
@@ -118,7 +118,7 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 			}
 			id, out, err := r.Create(ctx, desired)
 			if err != nil {
-				return err
+				return provider.ResourceError(c.Address, c.Type, r, err)
 			}
 			outputs[c.Address] = withID(out, id)
 			if err := commit(b, s, stateResource(c, id, out, trigs)); err != nil {
@@ -139,7 +139,7 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 			}
 			out, err := update(ctx, r, c.ID, desired, prior)
 			if err != nil {
-				return err
+				return provider.ResourceError(c.Address, c.Type, r, err)
 			}
 			if st, ok := s.Find(c.Address); ok {
 				out = keepOutputs(r, out, st)
@@ -154,7 +154,7 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 			}
 		case provider.ActionDelete:
 			if err := r.Delete(ctx, c.ID); err != nil {
-				return err
+				return provider.ResourceError(c.Address, c.Type, r, err)
 			}
 			delete(outputs, c.Address)
 			s.Remove(c.Address)
@@ -191,7 +191,7 @@ func replace(ctx context.Context, r provider.Resource, b backend.Backend, s *sta
 	}
 	id, out, err := r.Create(ctx, desired)
 	if err != nil {
-		return fmt.Errorf("%s: replace: creating the new object (the current one, id %s, is unchanged): %w", c.Address, c.ID, err)
+		return provider.ResourceError(c.Address, c.Type, r, fmt.Errorf("replace: creating the new object (the current one, id %s, is unchanged): %w", c.ID, err))
 	}
 	outputs[c.Address] = withID(out, id)
 	if err := commit(b, s, stateResource(c, id, out, trigs)); err != nil {
@@ -201,7 +201,7 @@ func replace(ctx context.Context, r provider.Resource, b backend.Backend, s *sta
 		return nil // the old object stays on the platform, no longer managed
 	}
 	if err := r.Delete(ctx, c.ID); err != nil && !errors.Is(err, provider.ErrNotFound) {
-		return fmt.Errorf("%s: replaced by id %s, but deleting the old object (id %s) failed; it is no longer managed and must be removed by hand: %w", c.Address, id, c.ID, err)
+		return provider.ResourceError(c.Address, c.Type, r, fmt.Errorf("replaced by id %s, but deleting the old object (id %s) failed; it is no longer managed and must be removed by hand: %w", id, c.ID, err))
 	}
 	return nil
 }
@@ -547,7 +547,7 @@ func adopt(ctx context.Context, p provider.Provider, s *state.State, address, id
 		if errors.Is(err, provider.ErrNotFound) {
 			return state.Resource{}, fmt.Errorf("no %s found with id %q", d.Type, id)
 		}
-		return state.Resource{}, err
+		return state.Resource{}, provider.ResourceError(address, d.Type, r, err)
 	}
 	trigs, err := triggersKeeping(r, d.Attributes, nil)
 	if err != nil {

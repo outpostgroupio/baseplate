@@ -268,8 +268,8 @@ func TestApplyPromptAcceptsYes(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d\n%s", code, out.String())
 	}
-	if !strings.Contains(out.String(), "Apply complete") {
-		t.Fatalf("apply should have run: %s", out.String())
+	if !strings.Contains(out.String(), "Apply complete: 0 imported, 1 added, 0 changed, 0 destroyed.") {
+		t.Fatalf("apply should have run and summarized like the plan: %s", out.String())
 	}
 	if _, err := backend.NewLocal(st).Get(); err != nil {
 		t.Fatalf("state should exist: %v", err)
@@ -334,7 +334,7 @@ func TestApplyJSONResultEnvelope(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d\n%s", code, out.String())
 	}
-	if !strings.Contains(out.String(), `"command": "apply"`) || !strings.Contains(out.String(), `"applied"`) {
+	if !strings.Contains(out.String(), `"command": "apply"`) || !strings.Contains(out.String(), `"applied": 1`) || !strings.Contains(out.String(), `"add": 1`) {
 		t.Fatalf("apply --json envelope wrong: %s", out.String())
 	}
 }

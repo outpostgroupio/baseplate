@@ -221,6 +221,11 @@ func TestAlertClientTranslatesNotEnrolledOnEveryCall(t *testing.T) {
 		if !IsAlertsNotEligible(err) {
 			t.Fatalf("%s: want a not-eligible error, got %v", name, err)
 		}
+		// It explains the 403 itself, so the engine must not add a scope hint.
+		var ad interface{ AccessDenied() bool }
+		if !errors.As(err, &ad) || ad.AccessDenied() {
+			t.Fatalf("%s: AccessDenied must be false for a not-eligible error", name)
+		}
 		msg := err.Error()
 		for _, want := range []string{"universe 100", "not eligible for analytics alerts", "100+ daily active users", "PerformanceMonitoringV2"} {
 			if !strings.Contains(msg, want) {
