@@ -9,6 +9,7 @@ manage.
 | `roblox_experience` | `universe:write`, plus `legacy-universe:manage` if you set `public` |
 | `roblox_place` | `universe-places:write` |
 | `roblox_place_config` | `universe.place:read`, `universe.place:write` |
+| `roblox_place_media` | `asset:read`, `asset:write` |
 | `roblox_asset` | `asset:read`, `asset:write`, and optionally `creator-store-product:read` for a Decal's `texture_id` |
 | `roblox_developer_product` | `developer-product:read`, `developer-product:write` |
 | `roblox_game_pass` | `game-pass:read`, `game-pass:write` |

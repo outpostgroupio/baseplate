@@ -122,8 +122,8 @@ func (ac *assetClient) await(ctx context.Context, what string, op operation) (as
 	var res assetResponse
 	switch {
 	case op.Done:
-		if op.Error != nil {
-			return res, op.Error
+		if err := op.failure(); err != nil {
+			return res, err
 		}
 		if len(op.Response) > 0 {
 			if err := json.Unmarshal(op.Response, &res); err != nil {

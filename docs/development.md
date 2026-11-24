@@ -61,6 +61,8 @@ BASEPLATE_LIVE=1 go test ./internal/provider/roblox/ -run Live -v
 Narrow the run with `-run`, for example `-run LiveSecret`, `-run LiveExperienceEvent`,
 `-run LiveAssetTextureID` or `-run LiveAnalyticsAlert`. Some tests need extra scopes or settings:
 
+- The place media test changes `BASEPLATE_TEST_PLACE`'s icon and thumbnails and restores them. It
+  uploads three images unless `BASEPLATE_TEST_MEDIA_IMAGES` lists three existing image ids.
 - The experience event test needs `universe.event:read`/`write` and skips without them.
   `BASEPLATE_TEST_EVENT_THUMBNAIL` (an image asset id) also exercises thumbnails.
 - The texture id test needs `creator-store-product:read`. A new decal takes about a minute to
@@ -175,6 +177,30 @@ APIs, and several are marked experimental or beta.
   `asset.textureId`, even for a private decal. That endpoint 404s for about a minute after a
   decal is uploaded, and for archived decals.
 
+### Place icon and thumbnails (`roblox_place_media`)
+
+- The experience's icon and detail-page thumbnails are the root place asset's `icon` and
+  `previews`: `GET /assets/v1/assets/{placeId}?readMask=icon,previews` and a multipart PATCH with
+  `updateMask=icon,previews` (both masks in one request work). An API key with
+  `asset:read`/`asset:write` is enough; the old belief that this needs first-party OAuth is out of
+  date. Entries are `{"asset":"assets/{id}","altText":"..."}`. An unset icon and an empty alt text
+  are absent from the read; `"icon":""` removes the icon. An image still in moderation review is
+  accepted, and the uploads don't need `assetPrivacy: OpenUse` despite the guide.
+- Reading a non-place asset with the same mask returns `{"previews":[]}`, so the resource checks
+  `assetType`.
+- A failed PATCH completes its operation with a generic `error` ("check metadata for specifics")
+  and the real message in `metadata.errors` ("Icon asset ID 1 is not found."). The client reports
+  the metadata messages.
+- A list that repeats an asset completes without error but is stored as `[]`.
+- For a minute or two after a write, about one read in ten returns the previous values; a
+  cache-busting query parameter or `Cache-Control: no-cache` doesn't help. Two PATCHes a few
+  seconds apart merged once in three tries (`[A,B]` then `[B,A]` left `[A,B,A,B]`) and stayed
+  that way until the next write. So apply waits for three consecutive matching reads and re-sends
+  the PATCH (up to three times) when they don't come.
+- Uploading a Video asset through Open Cloud returns `Actual price (2000 Robux) is larger than
+  expected price (0 Robux)`, and video thumbnails can only be added for a public experience, so
+  video in `previews` is untested.
+
 ### Developer products, game passes, badges
 
 - Developer products and game passes are created and updated with multipart form fields. Icons
@@ -250,7 +276,6 @@ APIs, and several are marked experimental or beta.
 
 ### No write API
 
-Subscription products, universe age rating, collaborators and experience thumbnails have no
-API-key write endpoint (thumbnail writes need first-party OAuth). Notifications, translation,
+Subscription products, universe age rating and collaborators have no API-key write endpoint. Notifications, translation,
 messaging and server restarts are one-off actions rather than state; `restart-servers` is a CLI
 command for that reason.
