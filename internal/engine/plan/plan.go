@@ -31,6 +31,11 @@ type DesiredResource struct {
 	// known only from config (never persisted to state), so removing the block
 	// or its lifecycle setting removes the protection, as in Terraform.
 	PreventDestroy bool
+	// ReplaceTriggeredBy is lifecycle.replace_triggered_by: the resource is
+	// replaced when one of these is updated or replaced in the same plan (a
+	// reference with no Attr), or when the referenced attribute changes. The
+	// referenced addresses are also in DependsOn, so they're planned first.
+	ReplaceTriggeredBy []provider.Ref
 }
 
 func (d DesiredResource) Address() string { return addr.Format(d.Type, d.Name, d.Key) }
@@ -72,6 +77,9 @@ type Change struct {
 	// config's text (provider.Censoring). They aren't diffed; Warnings
 	// reports them.
 	Censored []AttrDiff
+	// TriggeredBy lists the replace_triggered_by references that made this a
+	// replace.
+	TriggeredBy []string
 }
 
 type Plan struct {
@@ -192,7 +200,7 @@ func BuildWithOptions(ctx context.Context, p provider.Provider, s *state.State, 
 		}
 		var actual provider.Attributes
 		var err error
-		if opts.SkipRefresh {
+		if _, stateOnly := resources[d.Type].(provider.StateOnly); stateOnly || opts.SkipRefresh {
 			actual = decodeAttrs(st.Attributes)
 		} else {
 			actual, err = resources[d.Type].Read(ctx, st.ID)
@@ -213,6 +221,7 @@ func BuildWithOptions(ctx context.Context, p provider.Provider, s *state.State, 
 		if err != nil {
 			return nil, err
 		}
+		pl.applyReplaceTriggers(resources[d.Type], d, &c)
 		if c.Action == provider.ActionReplace {
 			newID[addr] = true
 		}
@@ -221,6 +230,56 @@ func BuildWithOptions(ctx context.Context, p provider.Provider, s *state.State, 
 	// deletes must run in reverse dependency order; re-sort delete block.
 	reorderDeletes(pl)
 	return pl, nil
+}
+
+// applyReplaceTriggers turns an update or no-op of d into a replace when one
+// of its replace_triggered_by references fires (see firedTriggers). As in
+// Terraform, a referenced resource that is being created doesn't fire, so
+// adding a new trigger resource to existing objects replaces nothing.
+func (p *Plan) applyReplaceTriggers(res provider.Resource, d DesiredResource, c *Change) {
+	if c.Action != provider.ActionNoop && c.Action != provider.ActionUpdate {
+		return
+	}
+	fired := p.firedTriggers(d.ReplaceTriggeredBy)
+	if len(fired) == 0 {
+		return
+	}
+	c.Action = provider.ActionReplace
+	c.TriggeredBy = fired
+	c.AbandonsOld = abandons(res)
+}
+
+// firedTriggers returns the references, formatted, whose target is updated or
+// replaced in the plan so far, or, for an attribute reference, whose attribute
+// changes.
+func (p *Plan) firedTriggers(refs []provider.Ref) []string {
+	var fired []string
+	for _, ref := range refs {
+		for i := range p.Changes {
+			c := &p.Changes[i]
+			if c.Address != ref.Address || (c.Action != provider.ActionUpdate && c.Action != provider.ActionReplace) {
+				continue
+			}
+			name := ref.Address
+			if ref.Attr != "" {
+				name += "." + ref.Attr
+				if c.Action != provider.ActionReplace && !hasDiff(c.AttrDiffs, ref.Attr) {
+					continue
+				}
+			}
+			fired = append(fired, name)
+		}
+	}
+	return fired
+}
+
+func hasDiff(diffs []AttrDiff, name string) bool {
+	for _, d := range diffs {
+		if d.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // checkMixedKeys rejects a desired set in which the same type.name is both a

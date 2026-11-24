@@ -8,10 +8,11 @@ Feature requests and bug reports go in [GitHub issues](https://github.com/outpos
 - Resources: `roblox_experience`, `roblox_place`, `roblox_place_config`, `roblox_asset`,
   `roblox_developer_product`, `roblox_game_pass`, `roblox_badge`, `roblox_experience_event`,
   `roblox_universe_secret`, `roblox_analytics_alert` and `roblox_experience_config`.
-- `plan`, `apply`, `destroy`, `import`, `show`, `validate` and `restart-servers`, with `--json`
-  output and `--target`.
-- `import`, `moved` and `lifecycle { prevent_destroy }` blocks, `for_each`, `locals` and file
-  functions, and `plan --generate-config` for imported resources.
+- `plan`, `apply`, `destroy`, `import`, `show`, `validate`, `restart-servers` and `cleanup`, with
+  `--json` output and `--target`.
+- `import` and `moved` blocks, `lifecycle { prevent_destroy, replace_triggered_by }` with
+  `baseplate_data`, `for_each`, `locals` and file functions, and `plan --generate-config` for
+  imported resources.
 - Local state with locking, and a remote HTTP backend compatible with Terraform's.
 - A reference state server for Cloudflare (R2 storage, Durable Object locks), with
   `baseplate login` through GitHub and GitHub Actions OIDC for CI, plus `force-unlock`.
@@ -20,7 +21,6 @@ Feature requests and bug reports go in [GitHub issues](https://github.com/outpos
 
 ## Planned
 
-- `lifecycle { replace_triggered_by }`, to force a replace on demand.
 - An S3-compatible state backend, for teams that already have S3 or R2 credentials.
 - A `--debug` flag that logs Open Cloud requests with credentials redacted.
 - Managed pricing for game passes.

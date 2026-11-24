@@ -182,7 +182,10 @@ Load-time errors:
 ## `lifecycle`
 
 A `lifecycle` block inside a `resource` block changes how Baseplate plans that resource. It works
-like Terraform's, but only `prevent_destroy` is supported so far:
+like Terraform's. `prevent_destroy` and `replace_triggered_by` are supported.
+
+### `prevent_destroy`
+
 
 ```hcl
 resource "roblox_experience" "prod" {
@@ -216,12 +219,50 @@ Error: Instance cannot be destroyed: roblox_experience.prod has lifecycle.preven
   A `destroy` run without a config file has nothing to read the setting from, so nothing is
   protected.
 - It only guards Baseplate's own plans. It doesn't stop anyone deleting the resource on Roblox.
-- Terraform's other lifecycle arguments (`ignore_changes`, `create_before_destroy`,
-  `replace_triggered_by`, which is planned as the general way to force a replace) and the
-  `precondition`/`postcondition` blocks aren't supported yet and
-  are rejected at load time, as is a second `lifecycle` block.
 
 See [protecting production](how-to/github-actions.md#protecting-production).
+
+### `replace_triggered_by`
+
+`replace_triggered_by` replaces the resource when something it lists changes. Each element is a
+reference to another resource or instance, which fires when that resource is updated or replaced
+in the same plan, or to one of its attributes (`type.name.attr`), which fires when that attribute
+changes.
+
+A resource can't list itself. To replace a resource when a value changes, such as a hash of its
+source, store the value in a [`baseplate_data`](resource-reference.md#baseplate_data), Baseplate's
+equivalent of Terraform's `terraform_data`, and list that:
+
+```hcl
+resource "baseplate_data" "map_hash" {
+  for_each = local.maps
+  input    = each.value.sha256
+}
+
+resource "roblox_asset" "maps" {
+  for_each    = local.maps
+  file        = "build/maps/${each.key}.rbxm"
+  source_hash = each.value.sha256
+  # ...
+
+  lifecycle {
+    replace_triggered_by = [baseplate_data.map_hash[each.key]]
+  }
+}
+```
+
+- `each.key` and `each.value` work, so each instance can follow its own trigger.
+- A referenced resource that is being created doesn't fire, as in Terraform. Adding a
+  `baseplate_data` for resources that already exist replaces nothing.
+- The plan says which reference triggered a replace (`# replace_triggered_by: … changed`, and
+  `triggered_by` in `plan --json`).
+- Baseplate always creates the new object before removing the old one. For `roblox_asset`, the old
+  asset is left in place, because servers on an older build may still load it, and recorded for
+  [`baseplate cleanup`](cli-reference.md#cleanup).
+- `prevent_destroy` blocks a triggered replace like any other.
+
+Terraform's other lifecycle arguments (`ignore_changes`, `create_before_destroy`) and the
+`precondition`/`postcondition` blocks are rejected at load time, as is a second `lifecycle` block.
 
 ## References
 

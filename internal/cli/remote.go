@@ -36,8 +36,9 @@ var openBrowser = func(url string) error {
 var localStateOverride bool
 
 // stateWithBackend decides what --state means when the config has a backend
-// block. For apply and destroy it's refused: they change real resources based
-// on the state, and applying against a stray local copy creates duplicates.
+// block. For apply, destroy and cleanup it's refused: they change real
+// resources based on the state, and applying against a stray local copy
+// creates duplicates.
 // Other commands (plan, import, show) use the local file instead of the
 // backend, for trying things out without touching the shared state, and say
 // so on stderr.
@@ -50,8 +51,11 @@ func stateWithBackend(cmd *cobra.Command, cfgPath, statePath string, stderr io.W
 	if err != nil || bc == nil {
 		return nil // no backend (or a config error, reported by the command)
 	}
-	if cmd.Name() == "apply" || cmd.Name() == "destroy" {
+	switch cmd.Name() {
+	case "apply", "destroy":
 		return fmt.Errorf("--state can't be used with %s: the %q backend in %s stores the state, and applying against another copy would create duplicates. Remove --state", cmd.Name(), bc.Type, cfgPath)
+	case "cleanup":
+		return fmt.Errorf("--state can't be used with cleanup: the %q backend in %s records the objects to clean up. Remove --state", bc.Type, cfgPath)
 	}
 	localStateOverride = true
 	fmt.Fprintf(stderr, "note: using the local state %s instead of the %q backend in %s\n", statePath, bc.Type, cfgPath)

@@ -49,7 +49,7 @@ func TestAbandonReplaceLeavesOldObject(t *testing.T) {
 		t.Fatalf("want an abandoning replace, got %s abandons=%v", c.Action, c.AbandonsOld)
 	}
 	out := pl.RenderText(false)
-	if !strings.Contains(out, "# old object (id "+oldID+") is left in place, no longer managed") ||
+	if !strings.Contains(out, "# old object (id "+oldID+") is left in place and recorded for `baseplate cleanup`") ||
 		!strings.Contains(out, "1 to add, 0 to change, 0 to destroy") {
 		t.Fatalf("plan must say the old object is left in place:\n%s", out)
 	}

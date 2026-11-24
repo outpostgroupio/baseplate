@@ -10,6 +10,7 @@ import (
 	"github.com/zclconf/go-cty/cty"
 
 	"github.com/outpostgroupio/baseplate/internal/provider"
+	"github.com/outpostgroupio/baseplate/internal/provider/builtin"
 )
 
 type Provider struct {
@@ -80,15 +81,16 @@ func (p *Provider) Deletes() int {
 
 func (p *Provider) Resources() map[string]provider.Resource {
 	return map[string]provider.Resource{
-		"mock_thing":    &res{p: p, typ: "mock_thing"},
-		"mock_child":    &res{p: p, typ: "mock_child"},
-		"mock_computed": &res{p: p, typ: "mock_computed"},
-		"mock_ref":      &res{p: p, typ: "mock_ref"},
-		"mock_trigger":  &res{p: p, typ: "mock_trigger"},
-		"mock_secret":   &res{p: p, typ: "mock_secret"},
-		"mock_replace":  &replaceRes{res: res{p: p, typ: "mock_replace"}},
-		"mock_abandon":  &replaceRes{res: res{p: p, typ: "mock_abandon"}, abandon: true},
-		"mock_publish":  &publishRes{res: res{p: p, typ: "mock_publish"}},
+		"mock_thing":     &res{p: p, typ: "mock_thing"},
+		"mock_child":     &res{p: p, typ: "mock_child"},
+		"mock_computed":  &res{p: p, typ: "mock_computed"},
+		"mock_ref":       &res{p: p, typ: "mock_ref"},
+		"mock_trigger":   &res{p: p, typ: "mock_trigger"},
+		"mock_secret":    &res{p: p, typ: "mock_secret"},
+		"mock_replace":   &replaceRes{res: res{p: p, typ: "mock_replace"}},
+		"mock_abandon":   &replaceRes{res: res{p: p, typ: "mock_abandon"}, abandon: true},
+		"mock_publish":   &publishRes{res: res{p: p, typ: "mock_publish"}},
+		builtin.DataType: builtin.Data(),
 	}
 }
 

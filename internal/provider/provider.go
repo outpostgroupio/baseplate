@@ -101,6 +101,22 @@ type Replacer interface {
 	ReplaceAbandons() bool
 }
 
+// Archiver is an optional Resource capability, used by `baseplate cleanup` to
+// remove an object a replace left in place (see Replacer.ReplaceAbandons).
+// archived is false when the platform can't remove that object, for example
+// a Roblox asset type that can't be archived through Open Cloud; cleanup then
+// reports it. Without Archiver, cleanup uses Delete.
+type Archiver interface {
+	Archive(ctx context.Context, id string) (archived bool, err error)
+}
+
+// StateOnly is an optional Resource capability, for a resource that exists
+// only in Baseplate's state (baseplate_data). The engine never reads it from a
+// platform: plan compares the config with state, and it can't be imported.
+type StateOnly interface {
+	StateOnly()
+}
+
 // Censoring is an optional Resource capability, for a platform that filters
 // text after it's written (Roblox replaces each character of a word its text
 // filter rejects with '#'). Censored reports whether actual is desired as the

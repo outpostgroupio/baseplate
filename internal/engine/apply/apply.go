@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/zclconf/go-cty/cty"
 	ctyjson "github.com/zclconf/go-cty/cty/json"
@@ -194,17 +195,25 @@ func replace(ctx context.Context, r provider.Resource, b backend.Backend, s *sta
 		return provider.ResourceError(c.Address, c.Type, r, fmt.Errorf("replace: creating the new object (the current one, id %s, is unchanged): %w", c.ID, err))
 	}
 	outputs[c.Address] = withID(out, id)
+	if c.AbandonsOld {
+		// The old object stays on the platform, no longer managed. Record it,
+		// in the same write as its successor, for `baseplate cleanup`.
+		s.Retired = append(s.Retired, state.Retired{Type: c.Type, ID: c.ID, Address: c.Address, ReplacedBy: id, RetiredAt: now().UTC()})
+	}
 	if err := commit(b, s, stateResource(c, id, out, trigs)); err != nil {
 		return err
 	}
 	if c.AbandonsOld {
-		return nil // the old object stays on the platform, no longer managed
+		return nil
 	}
 	if err := r.Delete(ctx, c.ID); err != nil && !errors.Is(err, provider.ErrNotFound) {
 		return provider.ResourceError(c.Address, c.Type, r, fmt.Errorf("replaced by id %s, but deleting the old object (id %s) failed; it is no longer managed and must be removed by hand: %w", id, c.ID, err))
 	}
 	return nil
 }
+
+// now is time.Now, replaceable in tests.
+var now = time.Now
 
 // update calls the resource's UpdateWithTriggers when it has one (passing the
 // triggers recorded before this update), else Update.

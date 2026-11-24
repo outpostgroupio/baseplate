@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/outpostgroupio/baseplate/internal/provider"
+	"github.com/outpostgroupio/baseplate/internal/provider/builtin"
 	"github.com/outpostgroupio/baseplate/internal/provider/roblox/opencloud"
 	"github.com/outpostgroupio/baseplate/internal/provider/roblox/resources"
 )
@@ -47,6 +48,7 @@ func New(apiKey string) (*Provider, error) {
 		"roblox_experience_event":  resources.ExperienceEvent(opencloud.NewGameEventClient(root)),
 		"roblox_analytics_alert":   resources.AnalyticsAlert(opencloud.NewAnalyticsAlertClient(root)),
 		"roblox_experience_config": resources.ExperienceConfig(opencloud.NewExperienceConfigClient(root)),
+		builtin.DataType:           builtin.Data(),
 	}, restarter: opencloud.NewServerRestartClient(root)}, nil
 }
 
@@ -69,5 +71,6 @@ func SchemaProvider() *Provider {
 		"roblox_experience_event":  resources.ExperienceEvent(nil),
 		"roblox_analytics_alert":   resources.AnalyticsAlert(nil),
 		"roblox_experience_config": resources.ExperienceConfig(nil),
+		builtin.DataType:           builtin.Data(),
 	}}
 }

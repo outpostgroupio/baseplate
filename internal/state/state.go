@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/outpostgroupio/baseplate/internal/addr"
 )
@@ -26,6 +27,21 @@ type State struct {
 	Serial    int        `json:"serial"`
 	Lineage   string     `json:"lineage"`
 	Resources []Resource `json:"resources"`
+	// Retired lists objects a replace left in place (provider.Replacer's
+	// ReplaceAbandons), no longer managed, for `baseplate cleanup` to remove
+	// once nothing uses them.
+	Retired []Retired `json:"retired,omitempty"`
+}
+
+// Retired is an object a replace left in place.
+type Retired struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+	// Address is where it was managed, and ReplacedBy the id of the object
+	// that replaced it there.
+	Address    string    `json:"address"`
+	ReplacedBy string    `json:"replaced_by"`
+	RetiredAt  time.Time `json:"retired_at"`
 }
 
 // CurrentVersion is the state-file format version this build writes and reads.
@@ -35,7 +51,10 @@ type State struct {
 // Version 2 added Resource.Key (`index_key`) for for_each instances. The bump
 // exists so an older binary refuses a state file that may hold keyed resources
 // (it would otherwise collapse every instance onto one `type.name` address).
-const CurrentVersion = 2
+//
+// Version 3 added Retired. An older binary would drop the list when it
+// rewrote the state, losing track of objects waiting for cleanup.
+const CurrentVersion = 3
 
 func New() *State {
 	return &State{Version: CurrentVersion, Lineage: newLineage()}
@@ -50,6 +69,8 @@ var migrations = map[int]migrator{
 	// v1 -> v2: index_key is new and optional; a v1 resource is singular, which
 	// is exactly an absent index_key. Nothing to rewrite.
 	1: func(doc map[string]json.RawMessage) (map[string]json.RawMessage, error) { return doc, nil },
+	// v2 -> v3: retired is new and optional.
+	2: func(doc map[string]json.RawMessage) (map[string]json.RawMessage, error) { return doc, nil },
 }
 
 // applyMigrations upgrades doc from version `from` to `to`, applying

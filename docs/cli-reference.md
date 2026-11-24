@@ -430,6 +430,43 @@ This is the stable way to feed deployed ids into other tooling; see
 An empty or missing state prints `No resources in state.` (`"resources": []` in JSON). Showing an
 address that isn't in state is an error.
 
+### `cleanup`
+
+Archive the objects that replaces left in place, once no deployed build uses them. A replace of a
+`roblox_asset` (for example one triggered by
+[`replace_triggered_by`](config-reference.md#replace_triggered_by)) creates a new asset and leaves
+the old one in place, because servers on an older build may still load it. State records each one,
+with when it was replaced, and `cleanup` archives them.
+
+How long an old asset stays in use depends on your deploys, not on time, so `cleanup` decides from
+a keep list:
+
+```console
+$ baseplate cleanup --keep-from prod/MapAssets.luau --keep-from staging/MapAssets.luau
+Will archive 2 object(s) that replaces left in place:
+  roblox_asset.maps["desert"]  id 1234567890 (replaced by 1234567999, 2026-11-20T14:02:11Z)
+  roblox_asset.maps["forest"]  id 1234567891 (replaced by 1234568000, 2026-11-21T09:40:52Z)
+Keeping 3 still in use (in the keep list, or managed by this state).
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--keep-from <file>` | | Keep every id in this file. Every number in it counts as an id, so a generated Luau module or JSON file works as it is. Repeatable. |
+| `--keep <id>` | | Keep this id. Repeatable. |
+| `--older-than <duration>` | `0` | Only archive objects replaced at least this long ago, e.g. `24h`. |
+| `--force` | `false` | Archive without a keep list. |
+| `--auto-approve` / `--yes` | `false` | Skip the confirmation prompt. |
+
+- Without `--keep-from`, `--keep` or `--force`, it only lists what it would archive.
+- Ids the state still manages are always kept.
+- Pass the ids every deployed build uses, in every environment that shares the assets. A
+  Production build that's days behind Staging still needs Staging's old ids.
+- Some asset types can't be archived through Open Cloud. Those are listed for you to archive by
+  hand in Creator Hub, and stay recorded.
+- It takes the state lock, needs `ROBLOX_API_KEY` to archive, and refuses `--state` when the
+  config has a backend block. `--json` returns `archived`, `candidates`, `kept`, `recent` and
+  `not_archivable`.
+
 ## See also
 
 - [Config reference](config-reference.md)

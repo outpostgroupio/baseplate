@@ -289,8 +289,11 @@ Roblox's upload limits (watch the monthly audio cap).
 
 - Changing `asset_type`, or the file extension when `asset_type` is omitted (e.g. `.png` to `.fbx`),
   always replaces: Roblox can't change an existing asset's type.
-- There is no per-asset setting to force a replace for an image. A general, Terraform-compatible
-  `lifecycle { replace_triggered_by = [...] }` that works for any resource is planned.
+- To give an Image or Model a new id whenever its content changes, instead of updating it in place,
+  store a hash of the content in a `baseplate_data` and list it in
+  [`lifecycle { replace_triggered_by }`](../config-reference.md#replace_triggered_by).
+- Old assets that replaces leave in place are recorded in state. Once no deployed build uses them,
+  [`baseplate cleanup`](../cli-reference.md#cleanup) archives them.
 - If Roblox ever stops accepting in-place content updates for a type, `apply` fails with an error
   that says so (nothing is changed); Baseplate then needs an update to replace that type instead.
 - If the source files aren't on the machine running `plan` (e.g. CI), assets already in state keep

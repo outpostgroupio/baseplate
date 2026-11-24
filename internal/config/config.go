@@ -109,6 +109,8 @@ type declaredResource struct {
 	body   hcl.Body             // the body with for_each and lifecycle stripped
 	// preventDestroy is lifecycle.prevent_destroy; it applies to every instance.
 	preventDestroy bool
+	// lifecycle is the block's lifecycle meta-block.
+	lifecycle lifecycle
 }
 
 // loader carries the per-Load state shared by the block handlers.
@@ -208,6 +210,7 @@ func LoadConfig(path string, p provider.Provider) (*Config, error) {
 			return nil, err
 		}
 		decl.preventDestroy = lc.preventDestroy
+		decl.lifecycle = lc
 		if lc.preventDestroy {
 			protected = append(protected, typ+"."+name)
 		}
@@ -274,6 +277,9 @@ func LoadConfig(path string, p provider.Provider) (*Config, error) {
 					return nil, err
 				}
 				dr.PreventDestroy = decl.preventDestroy
+				if dr.ReplaceTriggeredBy, err = l.triggerRefs(decl.lifecycle.replaceTriggeredBy, ictx, dr.Address()); err != nil {
+					return nil, err
+				}
 				out = append(out, dr)
 			}
 		case "import":
