@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRoundTripAndVersionGuard(t *testing.T) {
@@ -21,7 +22,7 @@ func TestRoundTripAndVersionGuard(t *testing.T) {
 	if _, ok := got.Find("mock_thing.a"); !ok {
 		t.Fatal("resource not found after round trip")
 	}
-	if _, err := Unmarshal([]byte(`{"version":3}`)); err == nil {
+	if _, err := Unmarshal([]byte(`{"version":4}`)); err == nil {
 		t.Fatal("expected version guard error")
 	}
 }
@@ -134,13 +135,13 @@ func TestSingularResourceOmitsIndexKey(t *testing.T) {
 	}
 }
 
-func TestV1StateMigratesToV2(t *testing.T) {
+func TestV1StateMigratesToCurrent(t *testing.T) {
 	v1 := `{"version":1,"serial":4,"lineage":"abc","resources":[{"type":"mock_thing","name":"a","id":"9","attributes":{}}]}`
 	got, err := Unmarshal([]byte(v1))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Version != 2 || got.Serial != 4 || got.Lineage != "abc" {
+	if got.Version != CurrentVersion || got.Serial != 4 || got.Lineage != "abc" {
 		t.Fatalf("migrated header wrong: %+v", got)
 	}
 	if r, ok := got.Find("mock_thing.a"); !ok || r.ID != "9" || r.Key != "" {
@@ -190,5 +191,22 @@ func TestFindDoesNotAllocate(t *testing.T) {
 	allocs := testing.AllocsPerRun(20, func() { s.Find(`roblox_asset.sprites["ui/499.png"]`) })
 	if allocs != 0 {
 		t.Fatalf("Find allocated %v times per call, want 0", allocs)
+	}
+}
+
+func TestRetiredRoundTrips(t *testing.T) {
+	s := New()
+	at := time.Date(2026, 11, 24, 10, 0, 0, 0, time.UTC)
+	s.Retired = []Retired{{Type: "roblox_asset", ID: "1", Address: `roblox_asset.maps["a"]`, ReplacedBy: "2", RetiredAt: at}}
+	b, _ := s.Marshal()
+	got, err := Unmarshal(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Retired) != 1 || got.Retired[0] != s.Retired[0] {
+		t.Fatalf("retired = %+v", got.Retired)
+	}
+	if b, _ := New().Marshal(); strings.Contains(string(b), "retired") {
+		t.Fatalf("an empty retired list must be left out:\n%s", b)
 	}
 }

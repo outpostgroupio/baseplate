@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/outpostgroupio/baseplate/internal/provider"
 	"github.com/outpostgroupio/baseplate/internal/provider/mock"
 )
 
@@ -137,7 +138,6 @@ func TestLifecycleRejectsUnsupportedArguments(t *testing.T) {
 	for _, arg := range []string{
 		`ignore_changes = [name]`,
 		`create_before_destroy = true`,
-		`replace_triggered_by = [mock_thing.b]`,
 		`bogus = 1`,
 	} {
 		wantErr(t, `
@@ -148,7 +148,7 @@ resource "mock_thing" "a" {
   }
 }
 `, "mock_thing.a", "not supported", "prevent_destroy",
-			"ignore_changes", "create_before_destroy", "replace_triggered_by")
+			"replace_triggered_by", "ignore_changes", "create_before_destroy")
 	}
 	// Nested blocks (Terraform's precondition/postcondition) are rejected too.
 	wantErr(t, `
@@ -181,4 +181,57 @@ resource "mock_thing" "a" {
   lifecycle "x" { prevent_destroy = true }
 }
 `)
+}
+
+func TestLifecycleReplaceTriggeredBy(t *testing.T) {
+	res, _ := mustLoad(t, `
+resource "mock_thing" "hash" {
+  for_each = toset(["x", "y"])
+  name     = each.key
+}
+resource "mock_thing" "single" {
+  name = "s"
+}
+resource "mock_thing" "map" {
+  for_each = toset(["x", "y"])
+  name     = each.key
+  lifecycle {
+    replace_triggered_by = [mock_thing.hash[each.key], mock_thing.single.name]
+  }
+}
+`)
+	got := byAddr(res)
+	m := got[`mock_thing.map["x"]`]
+	want := []provider.Ref{{Address: `mock_thing.hash["x"]`}, {Address: "mock_thing.single", Attr: "name"}}
+	if !reflect.DeepEqual(m.ReplaceTriggeredBy, want) {
+		t.Fatalf("ReplaceTriggeredBy = %+v, want %+v", m.ReplaceTriggeredBy, want)
+	}
+	// The triggers are dependencies, so they're planned first.
+	if !reflect.DeepEqual(m.DependsOn, []string{`mock_thing.hash["x"]`, "mock_thing.single"}) {
+		t.Fatalf("DependsOn = %v", m.DependsOn)
+	}
+}
+
+func TestLifecycleReplaceTriggeredByRejects(t *testing.T) {
+	for arg, want := range map[string]string{
+		`replace_triggered_by = mock_thing.b`:       "must be a list",
+		`replace_triggered_by = ["mock_thing.b"]`:   "must be a resource reference",
+		`replace_triggered_by = [local.x]`:          "must be a resource reference",
+		`replace_triggered_by = [mock_thing.a]`:     "the resource itself",
+		`replace_triggered_by = [mock_thing.nope]`:  "must be a resource reference",
+		`replace_triggered_by = [mock_thing.b.x.y]`: "whole attribute",
+	} {
+		wantErr(t, `
+locals { x = 1 }
+resource "mock_thing" "b" {
+  name = "b"
+}
+resource "mock_thing" "a" {
+  name = "a"
+  lifecycle {
+    `+arg+`
+  }
+}
+`, "replace_triggered_by", want)
+	}
 }

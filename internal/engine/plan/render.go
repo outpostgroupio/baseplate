@@ -40,6 +40,9 @@ type JSONChange struct {
 	// true when that object is left in place (unmanaged) instead of destroyed.
 	OldID       string `json:"old_id,omitempty"`
 	AbandonsOld bool   `json:"abandons_old,omitempty"`
+	// TriggeredBy lists the lifecycle.replace_triggered_by references that
+	// made this a replace.
+	TriggeredBy []string `json:"triggered_by,omitempty"`
 }
 
 // JSONMove is one state entry a moved {} block relocated.
@@ -66,7 +69,7 @@ func (p *Plan) JSONChanges() []JSONChange {
 	for _, c := range p.Changes {
 		jc := JSONChange{Address: c.Address, Key: c.Key, Action: c.Action.String(), ImportID: c.ImportID, ForcesReplacement: c.Replace}
 		if c.Action == provider.ActionReplace {
-			jc.OldID, jc.AbandonsOld = c.ID, c.AbandonsOld
+			jc.OldID, jc.AbandonsOld, jc.TriggeredBy = c.ID, c.AbandonsOld, c.TriggeredBy
 		}
 		sensitive := map[string]bool{}
 		for _, k := range c.Sensitive {
@@ -183,7 +186,7 @@ func (p *Plan) Warnings() []string {
 // files that CI doesn't have would otherwise print hundreds of lines.
 func (p *Plan) unavailableWarnings() []string {
 	type group struct {
-		n           int
+		n          int
 		first, why string
 	}
 	var order []string
@@ -414,10 +417,16 @@ func renderUpdate(c Change) string {
 
 // oldObjectNote says what a replace does with the object it supersedes.
 func oldObjectNote(c Change) string {
-	if c.AbandonsOld {
-		return fmt.Sprintf("    # old object (id %s) is left in place, no longer managed\n", c.ID)
+	var b strings.Builder
+	if len(c.TriggeredBy) > 0 {
+		fmt.Fprintf(&b, "    # replace_triggered_by: %s changed\n", strings.Join(c.TriggeredBy, ", "))
 	}
-	return fmt.Sprintf("    # old object (id %s) is destroyed after the new one is created\n", c.ID)
+	if c.AbandonsOld {
+		fmt.Fprintf(&b, "    # old object (id %s) is left in place and recorded for `baseplate cleanup`\n", c.ID)
+	} else {
+		fmt.Fprintf(&b, "    # old object (id %s) is destroyed after the new one is created\n", c.ID)
+	}
+	return b.String()
 }
 
 // forcesNote marks the attribute/trigger lines that force a replace.

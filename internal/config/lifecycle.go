@@ -8,16 +8,21 @@ import (
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty"
 	"github.com/zclconf/go-cty/cty/convert"
+
+	"github.com/outpostgroupio/baseplate/internal/provider"
 )
 
 // unsupportedLifecycle is appended to every rejected lifecycle argument, so the
 // error says what Baseplate does support and which Terraform arguments are
 // known but not implemented yet.
-const unsupportedLifecycle = "Baseplate supports only prevent_destroy (ignore_changes, create_before_destroy and replace_triggered_by are not yet supported)"
+const unsupportedLifecycle = "Baseplate supports prevent_destroy and replace_triggered_by (ignore_changes and create_before_destroy are not supported; replaces already create before destroying)"
 
 // lifecycle is what a resource block's `lifecycle` meta-block declares.
 type lifecycle struct {
 	preventDestroy bool
+	// replaceTriggeredBy is the replace_triggered_by list, resolved per
+	// instance (it may use each.key) by triggerRefs.
+	replaceTriggeredBy *hclsyntax.TupleConsExpr
 }
 
 // decodeLifecycle reads the (at most one) `lifecycle` block of a resource. Like
@@ -47,6 +52,14 @@ func (l *loader) decodeLifecycle(blocks hcl.Blocks, base string) (lifecycle, err
 	sort.Strings(names)
 	for _, name := range names {
 		a := syn.Attributes[name]
+		if name == "replace_triggered_by" {
+			list, ok := a.Expr.(*hclsyntax.TupleConsExpr)
+			if !ok {
+				return lc, fmt.Errorf("%s: %s: lifecycle.replace_triggered_by must be a list of resource references, e.g. [baseplate_data.hash]", a.NameRange, base)
+			}
+			lc.replaceTriggeredBy = list
+			continue
+		}
 		if name != "prevent_destroy" {
 			return lc, fmt.Errorf("%s: %s: lifecycle argument %q is not supported; %s", a.NameRange, base, name, unsupportedLifecycle)
 		}
@@ -64,6 +77,36 @@ func (l *loader) decodeLifecycle(blocks hcl.Blocks, base string) (lifecycle, err
 		lc.preventDestroy = bv.True()
 	}
 	return lc, nil
+}
+
+// triggerRefs resolves replace_triggered_by for one instance (ctx carries its
+// each.key and each.value). Each element must be a reference to a declared
+// resource, an instance of one, or one's attribute; a bare reference to a
+// for_each resource stands for all of its instances.
+func (l *loader) triggerRefs(list *hclsyntax.TupleConsExpr, ctx *hcl.EvalContext, inst string) ([]provider.Ref, error) {
+	if list == nil {
+		return nil, nil
+	}
+	var refs []provider.Ref
+	for _, e := range list.Exprs {
+		t, ok, err := l.resolveRef(e, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %s: lifecycle.replace_triggered_by: %w", l.path, inst, err)
+		}
+		if !ok || (t.partial && t.attr == "") {
+			return nil, fmt.Errorf("%s: %s: lifecycle.replace_triggered_by: each element must be a resource reference, such as baseplate_data.hash, baseplate_data.hash[each.key] or baseplate_data.hash.output", e.Range(), inst)
+		}
+		if t.partial {
+			return nil, fmt.Errorf("%s: %s: lifecycle.replace_triggered_by: reference a whole attribute (type.name.attr), not part of one", e.Range(), inst)
+		}
+		for _, a := range t.addresses(l.resources[t.typ][t.name]) {
+			if a == inst {
+				return nil, fmt.Errorf("%s: %s: lifecycle.replace_triggered_by can't reference the resource itself", e.Range(), inst)
+			}
+			refs = append(refs, provider.Ref{Address: a, Attr: t.attr})
+		}
+	}
+	return refs, nil
 }
 
 func describeValue(v cty.Value) string {

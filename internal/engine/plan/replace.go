@@ -225,6 +225,7 @@ func (p *Plan) replanDependents(resources map[string]provider.Resource, s *state
 		if err != nil {
 			return err
 		}
+		p.applyReplaceTriggers(resources[c.Type], d, &nc)
 		*c = nc
 		if isReplace := c.Action == provider.ActionReplace; isReplace != wasReplace {
 			p.pending[c.Address] = isReplace

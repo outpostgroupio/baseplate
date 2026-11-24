@@ -204,6 +204,7 @@ var confirmPrompts = map[string]string{
 	"apply":           "Do you want to perform these actions?",
 	"destroy":         "Do you really want to destroy all resources?",
 	"restart-servers": "Do you want to restart these servers?",
+	"cleanup":         "Do you want to archive these objects? Only do this once no deployed build uses them.",
 }
 
 var cancelLabel = map[string]string{
@@ -211,6 +212,7 @@ var cancelLabel = map[string]string{
 	"apply":           "Apply",
 	"destroy":         "Destroy",
 	"restart-servers": "Restart",
+	"cleanup":         "Cleanup",
 }
 
 // confirm decides whether an apply/destroy may proceed. It auto-approves when
@@ -279,7 +281,6 @@ func run(args []string, s streams) int {
 
 	exit := 0
 	p := newProvider()
-
 
 	root.AddCommand(&cobra.Command{Use: "validate", Short: "Check the config offline, without contacting Roblox or reading state", RunE: func(cmd *cobra.Command, _ []string) error {
 		cmdName = cmd.Name()
@@ -437,6 +438,7 @@ func run(args []string, s streams) int {
 	root.AddCommand(importCmd)
 	root.AddCommand(newRestartServersCmd(p, &cfgPath, &jsonOut, &cmdName, s))
 	root.AddCommand(newForceUnlockCmd(&cfgPath, &statePath, &jsonOut, &cmdName, s))
+	root.AddCommand(newCleanupCmd(p, &cfgPath, &statePath, &jsonOut, &cmdName, s))
 	root.AddCommand(newLoginCmd(&cfgPath, &jsonOut, &cmdName, s))
 	root.AddCommand(newLogoutCmd(&cfgPath, &jsonOut, &cmdName, s))
 	root.AddCommand(&cobra.Command{
