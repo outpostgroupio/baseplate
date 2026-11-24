@@ -14,6 +14,7 @@ func TestGamePassCreateGetUpdateDelete(t *testing.T) {
 	body := `{"gamePassId":1907972157,"name":"VIP","description":"d","isForSale":true,` +
 		`"iconAssetId":9007199254740993,"priceInformation":{"defaultPriceInRobux":100}}`
 	var createHit, getHit, updateHit, deleteOffSale bool
+	var updateIcon string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == base:
@@ -33,6 +34,9 @@ func TestGamePassCreateGetUpdateDelete(t *testing.T) {
 				deleteOffSale = true
 			} else {
 				updateHit = true
+				if fh := r.MultipartForm.File["imageFile"]; len(fh) == 1 {
+					updateIcon = fh[0].Filename
+				}
 			}
 			// PATCH returns an empty body on this API.
 		default:
@@ -63,8 +67,16 @@ func TestGamePassCreateGetUpdateDelete(t *testing.T) {
 	if err := gc.Update(ctx, "42", "1907972157", GamePassUpdate{Name: "VIP2", Price: 100, IsForSale: true}); err != nil {
 		t.Fatal(err)
 	}
-	if !updateHit {
-		t.Fatal("update did not hit PATCH")
+	if !updateHit || updateIcon != "" {
+		t.Fatalf("update must PATCH without an icon (hit=%v, icon=%q)", updateHit, updateIcon)
+	}
+
+	if err := gc.Update(ctx, "42", "1907972157", GamePassUpdate{Name: "VIP2", Price: 100, IsForSale: true,
+		IconData: []byte("PNG"), IconFile: "icon.png", IconType: "image/png"}); err != nil {
+		t.Fatal(err)
+	}
+	if updateIcon != "icon.png" {
+		t.Fatalf("update must send imageFile; got %q", updateIcon)
 	}
 
 	if err := gc.Delete(ctx, "42", "1907972157"); err != nil {

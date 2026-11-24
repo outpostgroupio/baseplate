@@ -37,12 +37,13 @@ func (g *gamePass) Doc() provider.ResourceDoc {
 			"name":        "Game pass name.",
 			"price":       "Price in Robux.",
 			"description": "Game pass description.",
-			"icon_file":   "Path to an icon image (direct upload).",
+			"icon_file":   "Path to an icon image (uploaded directly). Change detected via content hash.",
 			"is_for_sale": "On sale (default `true`).",
 		},
-		Notes:       "Game passes can't be hard-deleted, so `destroy` sets `is_for_sale = false` and unmanages it. Managed pricing isn't exposed, because it requires prior manual acceptance of Roblox's managed-pricing terms in the Creator Dashboard.",
-		Scopes:      []string{"game-pass:read", "game-pass:write"},
-		ExampleFile: "examples/game-pass.bp.hcl",
+		Notes:        "Game passes can't be hard-deleted, so `destroy` sets `is_for_sale = false` and unmanages it. The icon is reconciled via a content-hash trigger and re-uploaded only when its content changes, including when `icon_file` is added to an existing pass. Removing `icon_file` leaves the current icon in place. Managed pricing isn't exposed, because it requires prior manual acceptance of Roblox's managed-pricing terms in the Creator Dashboard.",
+		Scopes:       []string{"game-pass:read", "game-pass:write"},
+		TriggerAttrs: []string{"icon_file"},
+		ExampleFile:  "examples/game-pass.bp.hcl",
 	}
 }
 
@@ -58,13 +59,20 @@ func (g *gamePass) DecodeSpec() hcldec.Spec {
 }
 
 // Computed excludes from diff: the state id; universe_id (create-only, often a
-// resolved reference); and icon_file (a create/update-only upload the API doesn't
-// echo back). name/price/description/is_for_sale diff.
+// resolved reference); and icon_file (reconciled via the content_hash trigger,
+// not readable back). name/price/description/is_for_sale diff.
 func (g *gamePass) Computed() []string {
 	return []string{"id", "universe_id", "icon_file"}
 }
 
 func (g *gamePass) Dependencies(provider.Attributes) []provider.Ref { return nil }
+
+// Triggers forces an Update (icon re-upload) when the icon file content changes.
+// See developerProduct.Triggers for why a pass without icon_file records an
+// empty content_hash.
+func (g *gamePass) Triggers(desired provider.Attributes) (map[string]cty.Value, error) {
+	return iconTriggers("roblox_game_pass", desired)
+}
 
 func (g *gamePass) Create(ctx context.Context, desired provider.Attributes) (string, provider.Attributes, error) {
 	universeID := desired["universe_id"].AsString()
@@ -110,17 +118,30 @@ func (g *gamePass) Read(ctx context.Context, id string) (provider.Attributes, er
 	}, nil
 }
 
+// Update is UpdateWithTriggers without the prior icon hash, so it re-uploads
+// the icon.
 func (g *gamePass) Update(ctx context.Context, id string, desired provider.Attributes) (provider.Attributes, error) {
+	return g.UpdateWithTriggers(ctx, id, desired, nil)
+}
+
+// UpdateWithTriggers updates the pass's settings and sends the icon in the same
+// request only when its content changed (see changedIcon).
+func (g *gamePass) UpdateWithTriggers(ctx context.Context, id string, desired provider.Attributes, prior map[string]cty.Value) (provider.Attributes, error) {
 	uid, gid, ok := splitGamePassID(id)
 	if !ok {
 		return nil, fmt.Errorf("roblox_game_pass: invalid id %q", id)
 	}
-	if err := g.gc.Update(ctx, uid, gid, opencloud.GamePassUpdate{
+	update := opencloud.GamePassUpdate{
 		Name:        desired["name"].AsString(),
 		Description: stringOr(desired, "description"),
 		Price:       numOr(desired, "price"),
 		IsForSale:   boolOr(desired, "is_for_sale", true),
-	}); err != nil {
+	}
+	var err error
+	if update.IconData, update.IconFile, update.IconType, err = changedIcon("roblox_game_pass", desired, prior); err != nil {
+		return nil, err
+	}
+	if err := g.gc.Update(ctx, uid, gid, update); err != nil {
 		return nil, err
 	}
 	return g.stateAttrs(uid, desired), nil

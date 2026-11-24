@@ -115,13 +115,14 @@ Manages a developer product (an in-experience consumable purchase).
 | Attribute | Type | Kind | Description |
 |---|---|---|---|
 | `description` | string | optional, diffable | Product description. |
-| `icon_file` | string | optional, create-only | Path to an icon image (direct upload). |
+| `icon_file` | string | optional, trigger | Path to an icon image (uploaded directly). Change detected via content hash. |
 | `is_for_sale` | bool | optional, diffable | On sale (default `true`). |
+| `is_regional_pricing_enabled` | bool | optional, diffable | Whether Roblox adjusts the price for buyers in different regions. When omitted, Baseplate leaves the setting as it is (Roblox's default for a new product). |
 | `name` | string | required, diffable | Product name. |
 | `price` | number | required, diffable | Price in Robux. |
 | `universe_id` | string | required, create-only | The universe. Often a reference to an experience. |
 
-Developer products can't be hard-deleted, so `destroy` sets `is_for_sale = false` and unmanages it.
+Developer products can't be hard-deleted, so `destroy` sets `is_for_sale = false` and unmanages it. The icon is reconciled via a content-hash trigger and re-uploaded only when its content changes, including when `icon_file` is added to an existing product. Removing `icon_file` leaves the current icon in place.
 
 Requires the `developer-product:read`, `developer-product:write` [scopes](how-to/api-key-scopes.md).
 
@@ -221,13 +222,13 @@ Manages a game pass (a one-time, permanent in-experience purchase).
 | Attribute | Type | Kind | Description |
 |---|---|---|---|
 | `description` | string | optional, diffable | Game pass description. |
-| `icon_file` | string | optional, create-only | Path to an icon image (direct upload). |
+| `icon_file` | string | optional, trigger | Path to an icon image (uploaded directly). Change detected via content hash. |
 | `is_for_sale` | bool | optional, diffable | On sale (default `true`). |
 | `name` | string | required, diffable | Game pass name. |
 | `price` | number | required, diffable | Price in Robux. |
 | `universe_id` | string | required, create-only | The universe. Often a reference to an experience. |
 
-Game passes can't be hard-deleted, so `destroy` sets `is_for_sale = false` and unmanages it. Managed pricing isn't exposed, because it requires prior manual acceptance of Roblox's managed-pricing terms in the Creator Dashboard.
+Game passes can't be hard-deleted, so `destroy` sets `is_for_sale = false` and unmanages it. The icon is reconciled via a content-hash trigger and re-uploaded only when its content changes, including when `icon_file` is added to an existing pass. Removing `icon_file` leaves the current icon in place. Managed pricing isn't exposed, because it requires prior manual acceptance of Roblox's managed-pricing terms in the Creator Dashboard.
 
 Requires the `game-pass:read`, `game-pass:write` [scopes](how-to/api-key-scopes.md).
 

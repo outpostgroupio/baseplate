@@ -47,3 +47,57 @@ func TestDeveloperProductCreateAndGet(t *testing.T) {
 		t.Fatalf("get got %+v (hit=%v)", got2, getHit)
 	}
 }
+
+func TestDeveloperProductUpdateSendsIconAndRegionalPricing(t *testing.T) {
+	var form map[string]string
+	var icon string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPatch && r.URL.Path == "/developer-products/v2/universes/42/developer-products/777":
+			r.ParseMultipartForm(1 << 20)
+			form = map[string]string{}
+			for k, v := range r.MultipartForm.Value {
+				form[k] = v[0]
+			}
+			if fh := r.MultipartForm.File["imageFile"]; len(fh) == 1 {
+				icon = fh[0].Filename
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/developer-products/v2/universes/42/developer-products/777/creator":
+			w.Write([]byte(`{"productId":777,"name":"Gems","universeId":42,"isForSale":true,"priceInformation":{"defaultPriceInRobux":25,"enabledFeatures":["RegionalPricing"]}}`))
+		default:
+			http.Error(w, "unexpected "+r.Method+" "+r.URL.Path, 404)
+		}
+	}))
+	defer srv.Close()
+
+	pc := NewDeveloperProductClient(New("k", srv.URL, WithSleeper(func(time.Duration) {})))
+	ctx := context.Background()
+
+	off := false
+	if _, err := pc.Update(ctx, "42", "777", DeveloperProductUpdate{
+		Name: "Gems", Price: 25, IsForSale: true, RegionalPricing: &off,
+		IconData: []byte("PNG"), IconFile: "icon.png", IconType: "image/png",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if form["isRegionalPricingEnabled"] != "false" || icon != "icon.png" {
+		t.Fatalf("form = %v, icon = %q", form, icon)
+	}
+
+	icon = ""
+	if _, err := pc.Update(ctx, "42", "777", DeveloperProductUpdate{Name: "Gems", Price: 25, IsForSale: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, sent := form["isRegionalPricingEnabled"]; sent || icon != "" {
+		t.Fatalf("unset fields must not be sent; form = %v, icon = %q", form, icon)
+	}
+
+	got, err := pc.Get(ctx, "42", "777")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.RegionalPricingEnabled {
+		t.Fatalf("enabledFeatures RegionalPricing must map to RegionalPricingEnabled; got %+v", got)
+	}
+}
