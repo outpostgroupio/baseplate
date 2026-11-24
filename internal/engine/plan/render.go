@@ -217,16 +217,15 @@ func (p *Plan) unavailableWarnings() []string {
 }
 
 // Summary counts changes by action, matching the RenderText footer. An import
-// counts only as an import, unless it is then replaced. A replace counts as an
-// add, plus a destroy unless the old object is left in place (AbandonsOld).
+// counts as an import, and also as a change or replace when the imported
+// object is then updated or replaced, as Terraform counts it. A replace counts
+// as an add, plus a destroy unless the old object is left in place
+// (AbandonsOld).
 func (p *Plan) Summary() Summary {
 	s := Summary{Move: len(p.Moves)}
 	for _, c := range p.Changes {
 		if c.ImportID != "" {
 			s.Import++
-			if c.Action != provider.ActionReplace {
-				continue
-			}
 		}
 		switch c.Action {
 		case provider.ActionCreate:

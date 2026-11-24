@@ -57,12 +57,14 @@ func TestCountAndAppliedLeaveOutUnchanged(t *testing.T) {
 			{Address: "mock_thing.c", Action: provider.ActionUpdate},
 			{Address: "mock_thing.d", Action: provider.ActionCreate},
 			{Address: "mock_thing.e", Action: provider.ActionNoop, ImportID: "5"},
+			{Address: "mock_thing.f", Action: provider.ActionUpdate, ImportID: "6"},
 		},
 	}
-	if got := pl.Count(); got != 3 {
-		t.Fatalf("Count() = %d, want 3 (unchanged resources aren't changes)", got)
+	if got := pl.Count(); got != 4 {
+		t.Fatalf("Count() = %d, want 4 (unchanged resources aren't changes)", got)
 	}
-	if got, want := pl.Summary().Applied(), "1 imported, 1 added, 1 changed, 0 destroyed, 1 moved"; got != want {
+	// An import that is then updated counts as both, as in Terraform.
+	if got, want := pl.Summary().Applied(), "2 imported, 1 added, 2 changed, 0 destroyed, 1 moved"; got != want {
 		t.Fatalf("Applied() = %q, want %q", got, want)
 	}
 }
