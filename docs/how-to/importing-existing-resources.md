@@ -31,6 +31,9 @@ roblox_experience.main will be imported (id 1234567890)
 Plan: 1 to import, 0 to add, 0 to change, 0 to destroy.
 ```
 
+If the configuration differs from what Roblox has, the plan also shows the update that follows the
+import, and the footer counts that resource under both "to import" and "to change", as Terraform does.
+
 `plan` exits `2` while any import is pending. `apply` runs the imports, or, to fill state without
 applying anything else, run `baseplate import` with no arguments: it runs every pending `import`
 block, changes nothing on Roblox, and writes state once.
