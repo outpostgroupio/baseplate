@@ -173,3 +173,38 @@ func TestForceUnlockLocalBackendExplains(t *testing.T) {
 		t.Fatalf("exit %d:\n%s", code, out.String())
 	}
 }
+
+// plan --refresh=false reads nothing from Roblox, so it runs without
+// ROBLOX_API_KEY, unless an import target has to be read.
+func TestPlanWithoutRefreshNeedsNoKey(t *testing.T) {
+	t.Setenv("ROBLOX_API_KEY", "")
+	dir := t.TempDir()
+	png := filepath.Join(dir, "logo.png")
+	os.WriteFile(png, []byte("png"), 0o644)
+	cfg := filepath.Join(dir, "baseplate.bp.hcl")
+	body := `
+resource "roblox_asset" "logo" {
+  file             = "` + png + `"
+  display_name     = "Logo"
+  description      = "Logo"
+  creator_user_id  = 1
+}
+`
+	os.WriteFile(cfg, []byte(body), 0o644)
+	st := filepath.Join(dir, "s.bpstate")
+
+	var out bytes.Buffer
+	if code := runOut([]string{"plan", "--refresh=false", "--config", cfg, "--state", st}, &out); code != 2 || !strings.Contains(out.String(), "roblox_asset.logo") {
+		t.Fatalf("plan --refresh=false without a key: exit %d\n%s", code, out.String())
+	}
+	out.Reset()
+	if code := runOut([]string{"plan", "--config", cfg, "--state", st}, &out); code != 1 || !strings.Contains(out.String(), "ROBLOX_API_KEY is not set") {
+		t.Fatalf("a refreshing plan still needs the key: exit %d\n%s", code, out.String())
+	}
+
+	os.WriteFile(cfg, []byte(body+"import {\n  to = roblox_asset.logo\n  id = \"123\"\n}\n"), 0o644)
+	out.Reset()
+	if code := runOut([]string{"plan", "--refresh=false", "--config", cfg, "--state", st}, &out); code != 1 || !strings.Contains(out.String(), "needs ROBLOX_API_KEY, even with --refresh=false") {
+		t.Fatalf("an import must still need the key: exit %d\n%s", code, out.String())
+	}
+}

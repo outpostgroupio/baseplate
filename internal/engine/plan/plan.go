@@ -109,7 +109,20 @@ func (p *Plan) HasChanges() bool {
 	return p.Count() > 0
 }
 
+// BuildOptions tunes Build.
+type BuildOptions struct {
+	// SkipRefresh compares the config with the attributes state recorded at
+	// the last apply, instead of reading each resource from the platform. It
+	// makes a plan quick and cheap, but it can't see changes made outside
+	// Baseplate. Import targets are still read.
+	SkipRefresh bool
+}
+
 func Build(ctx context.Context, p provider.Provider, s *state.State, desired []DesiredResource) (*Plan, error) {
+	return BuildWithOptions(ctx, p, s, desired, BuildOptions{})
+}
+
+func BuildWithOptions(ctx context.Context, p provider.Provider, s *state.State, desired []DesiredResource, opts BuildOptions) (*Plan, error) {
 	resources := p.Resources()
 	if err := checkMixedKeys(desired); err != nil {
 		return nil, err
@@ -177,8 +190,14 @@ func Build(ctx context.Context, p provider.Provider, s *state.State, desired []D
 			})
 			continue
 		}
-		actual, err := resources[d.Type].Read(ctx, st.ID)
-		err = provider.ResourceError(addr, d.Type, resources[d.Type], err)
+		var actual provider.Attributes
+		var err error
+		if opts.SkipRefresh {
+			actual = decodeAttrs(st.Attributes)
+		} else {
+			actual, err = resources[d.Type].Read(ctx, st.ID)
+			err = provider.ResourceError(addr, d.Type, resources[d.Type], err)
+		}
 		if errors.Is(err, provider.ErrNotFound) {
 			newID[addr] = true
 			pl.Changes = append(pl.Changes, Change{

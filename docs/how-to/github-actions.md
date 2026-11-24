@@ -40,6 +40,10 @@ Copy `examples/github-actions/plan-on-pr.yml` to `.github/workflows/`. On each p
 `baseplate plan` and posts the result as a comment, updating the same comment on later pushes.
 `plan` exits with `2` when there are changes; the action counts that as success.
 
+With many assets, reading every one from Roblox makes the plan slow. Add `args: --refresh=false` to
+compare the pull request's config with state instead. That shows what the pull request changes,
+though not changes made outside Baseplate; the apply on merge still reads everything.
+
 Pull requests from forks are skipped, because they get no secrets and a read-only token. The comment
 shows attribute values. Secret values are redacted, but everything else is visible to anyone who
 can read the pull request.

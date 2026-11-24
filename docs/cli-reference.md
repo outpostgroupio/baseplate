@@ -93,6 +93,12 @@ provider but mutates nothing. It holds the state lock while it runs, so it never
 an `apply` is rewriting; `--lock=false` skips the lock. Exits `2` if there are changes, `0` if
 converged.
 
+`--refresh=false` compares the config with what state recorded at the last apply, instead of
+reading every resource from Roblox. It's much faster for a config with many assets, and needs no
+`ROBLOX_API_KEY`, but it can't see changes made outside Baseplate (in Creator Hub, say), and an
+`import` block whose target isn't in state yet still needs the key. `apply` always reads from
+Roblox first.
+
 ```console
 $ baseplate plan
 + roblox_developer_product.gems_100 (create)
