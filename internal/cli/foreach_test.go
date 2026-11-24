@@ -171,7 +171,8 @@ func writeShowState(t *testing.T, path string) {
 		Attributes: map[string]json.RawMessage{
 			"display_name": enc(cty.StringVal("sprite/ui/gem")),
 			"asset_type":   enc(cty.StringVal("Image")),
-		}})
+		},
+		Triggers: map[string]json.RawMessage{"content_hash": enc(cty.StringVal("9f86d081"))}})
 	s.Upsert(state.Resource{Type: "mock_secret", Name: "api", ID: "mock_secret/1",
 		Attributes: map[string]json.RawMessage{
 			"name":  enc(cty.StringVal("API_KEY")),

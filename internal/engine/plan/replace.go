@@ -2,7 +2,6 @@ package plan
 
 import (
 	"errors"
-	"fmt"
 	"sort"
 
 	"github.com/zclconf/go-cty/cty"
@@ -33,7 +32,7 @@ func planInState(res provider.Resource, d DesiredResource, st *state.Resource, a
 	forcing := replaceKeys(res, effective, actual)
 	diffs := diffAttrs(actual, effective, res.Computed())
 	diffs = append(diffs, pendingRefDiffs(d.Refs, pending, resolved, diffs)...)
-	td, backfill, warning, err := triggerDiffs(res, address, resolved, st, forcing)
+	td, backfill, unavailable, err := triggerDiffs(res, resolved, st, forcing)
 	if err != nil {
 		return Change{}, err
 	}
@@ -44,7 +43,7 @@ func planInState(res provider.Resource, d DesiredResource, st *state.Resource, a
 		Desired: d.Attributes, Actual: actual, AttrDiffs: diffs, DependsOn: d.DependsOn, Refs: d.Refs,
 		Sensitive: sensitiveAttrs(res), Replace: replace,
 		AbandonsOld:      action == provider.ActionReplace && abandons(res),
-		BackfillTriggers: backfill, Warning: warning,
+		BackfillTriggers: backfill, Unavailable: unavailable,
 	}, nil
 }
 
@@ -157,8 +156,8 @@ func classify(diffs []AttrDiff, forcing map[string]bool) (provider.ChangeAction,
 //
 // When an input is missing (provider.TriggerUnavailableError, e.g. a source
 // file absent on this machine), the triggers that couldn't be computed keep
-// their recorded values (no change detected) and a warning is returned.
-func triggerDiffs(res provider.Resource, address string, desired provider.Attributes, st *state.Resource, forcing map[string]bool) (diffs []AttrDiff, backfill []string, warning string, err error) {
+// their recorded values (no change detected) and the reason is returned.
+func triggerDiffs(res provider.Resource, desired provider.Attributes, st *state.Resource, forcing map[string]bool) (diffs []AttrDiff, backfill []string, unavailableReason string, err error) {
 	t, ok := res.(provider.Triggerable)
 	if !ok {
 		return nil, nil, "", nil
@@ -166,7 +165,7 @@ func triggerDiffs(res provider.Resource, address string, desired provider.Attrib
 	want, err := t.Triggers(desired)
 	var unavailable *provider.TriggerUnavailableError
 	if errors.As(err, &unavailable) {
-		warning = fmt.Sprintf("%s: %s; content changes can't be detected until it is available.", address, unavailable.Reason)
+		unavailableReason = unavailable.Reason
 		err = nil
 	}
 	if err != nil {
@@ -188,7 +187,7 @@ func triggerDiffs(res provider.Resource, address string, desired provider.Attrib
 			diffs = append(diffs, AttrDiff{Name: k, Old: o, New: want[k]})
 		}
 	}
-	return diffs, backfill, warning, nil
+	return diffs, backfill, unavailableReason, nil
 }
 
 // replanDependents re-plans, in dependency order, every in-state change that

@@ -132,13 +132,35 @@ func TestBackendSendsTokenFromEnv(t *testing.T) {
 	}
 }
 
-func TestStateFlagRejectedWithBackend(t *testing.T) {
-	srv := httptest.NewServer(&stateServer{})
+// --state with a backend: apply and destroy refuse it, and other commands use
+// the local file instead of the backend, without contacting it.
+func TestStateFlagWithBackend(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("the backend must not be contacted, got %s %s", r.Method, r.URL)
+	}))
 	defer srv.Close()
+	cfg := remoteCfg(t, srv)
+	st := filepath.Join(t.TempDir(), "local.bpstate")
+
+	for _, cmd := range []string{"apply", "destroy"} {
+		var out bytes.Buffer
+		code := runOut([]string{cmd, "--auto-approve", "--config", cfg, "--state", st}, &out)
+		if code != 1 || !strings.Contains(out.String(), "--state can't be used with "+cmd) {
+			t.Fatalf("%s --state with a backend must be refused, exit %d:\n%s", cmd, code, out.String())
+		}
+	}
+
 	var out bytes.Buffer
-	code := runOut([]string{"plan", "--config", remoteCfg(t, srv), "--state", "x.bpstate"}, &out)
-	if code != 1 || !strings.Contains(out.String(), "--state can't be used") {
-		t.Fatalf("--state with a backend must be refused, exit %d:\n%s", code, out.String())
+	if code := runOut([]string{"plan", "--config", cfg, "--state", st}, &out); code == 1 {
+		t.Fatalf("plan --state: exit %d\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "note: using the local state "+st) {
+		t.Fatalf("missing the override note:\n%s", out.String())
+	}
+	writeShowState(t, st)
+	out.Reset()
+	if code := runOut([]string{"show", "--config", cfg, "--state", st}, &out); code != 0 || !strings.Contains(out.String(), "mock_thing.solo") {
+		t.Fatalf("show --state should read the local file: exit %d\n%s", code, out.String())
 	}
 }
 

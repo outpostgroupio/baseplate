@@ -13,8 +13,9 @@ baseplate <command> [flags]
 | `--target` | *(none)* | Limit `plan`/`apply`/`destroy` to one resource (`roblox_asset.icon`; for a `for_each` resource, every instance) or one instance (`'roblox_asset.sprites["ui/gem.png"]'`). See [Addresses](#addresses). A malformed address is an error. |
 | `--json` | `false` | Emit machine-readable output. Works on every command. Results are a versioned envelope `{ "format_version": 1, "command": ..., "result": ... }` on stdout; errors are `{ "format_version": 1, "command": ..., "error": { "message": ... } }` on stderr. |
 
-State can also be stored remotely with a `backend "http"` block; see [State](state.md). `--state`
-is refused when the config has one.
+State can also be stored remotely with a `backend "http"` block; see [State](state.md). With one,
+`--state` makes `plan`, `import` and `show` use that local file instead, without touching the
+backend, and `apply` and `destroy` refuse it.
 
 ### Approval flags (`apply` / `destroy` / `restart-servers`)
 
@@ -388,7 +389,9 @@ roblox_asset.sprites["ui/gem.png"]
 ```
 
 `--json` returns the inventory sorted by address. `key` is present only for `for_each` instances,
-and `attributes` are plain JSON values. Sensitive attributes are never included.
+and `attributes` are plain JSON values. Sensitive attributes are never included. `triggers` holds
+the values Baseplate records to detect changes it can't read back from Roblox, such as a file's
+`content_hash`; it's left out for resources that have none.
 
 ```json
 {
@@ -404,7 +407,8 @@ and `attributes` are plain JSON values. Sensitive attributes are never included.
         "name": "sprites",
         "key": "ui/gem.png",
         "id": "2233445566",
-        "attributes": { "asset_type": "Image", "display_name": "sprite/ui/gem", "texture_id": "2233445566" }
+        "attributes": { "asset_type": "Image", "display_name": "sprite/ui/gem", "texture_id": "2233445566" },
+        "triggers": { "content_hash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08" }
       }
     ]
   }

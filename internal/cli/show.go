@@ -22,6 +22,9 @@ type showResource struct {
 	Key        string                     `json:"key,omitempty"`
 	ID         string                     `json:"id"`
 	Attributes map[string]json.RawMessage `json:"attributes"`
+	// Triggers are the change-detection values recorded for the resource,
+	// such as roblox_asset's content_hash.
+	Triggers map[string]json.RawMessage `json:"triggers,omitempty"`
 }
 
 type showResult struct {
@@ -97,7 +100,14 @@ func toShowResource(r state.Resource, sensitive map[string]bool) showResource {
 		}
 		attrs[k] = plainJSON(raw)
 	}
-	return showResource{Address: r.Address(), Type: r.Type, Name: r.Name, Key: r.Key, ID: r.ID, Attributes: attrs}
+	var trigs map[string]json.RawMessage
+	for k, raw := range r.Triggers {
+		if trigs == nil {
+			trigs = map[string]json.RawMessage{}
+		}
+		trigs[k] = plainJSON(raw)
+	}
+	return showResource{Address: r.Address(), Type: r.Type, Name: r.Name, Key: r.Key, ID: r.ID, Attributes: attrs, Triggers: trigs}
 }
 
 // plainJSON unwraps a state attribute ({"value":…,"type":…}) to its bare JSON

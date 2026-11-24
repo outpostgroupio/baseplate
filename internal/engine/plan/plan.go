@@ -64,9 +64,10 @@ type Change struct {
 	// BackfillTriggers names triggers with no value recorded in state that
 	// plan adopted as a baseline instead of diffing; apply records them.
 	BackfillTriggers []string
-	// Warning, when set, is a plan warning about this change (e.g. a trigger
-	// input that is missing, so changes to it can't be detected).
-	Warning string
+	// Unavailable, when set, says why a trigger input is missing (e.g. a
+	// source file absent on this machine), so changes to it can't be
+	// detected. Warnings reports it, once per resource block.
+	Unavailable string
 }
 
 type Plan struct {

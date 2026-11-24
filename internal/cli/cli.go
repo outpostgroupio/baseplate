@@ -79,7 +79,11 @@ func loadConfig(path string, p provider.Provider) (*config.Config, error) {
 // openBackend selects the state backend from the config's `backend` block,
 // falling back to the local file backend when there is none. The bool is true
 // when the local fallback was used (so destroy can warn on a remote-shaped setup).
+// With --state overriding a backend (localStateOverride), it is the local file.
 func openBackend(cfgPath, statePath string) (backend.Backend, bool, error) {
+	if localStateOverride {
+		return backend.NewLocal(statePath), false, nil
+	}
 	bc, err := config.LoadBackend(cfgPath)
 	if err != nil {
 		return nil, false, err
@@ -268,8 +272,9 @@ func run(args []string, s streams) int {
 	root.SetOut(s.out)
 	root.SetErr(s.err)
 	root.SetArgs(args)
+	localStateOverride = false
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
-		return rejectStateWithBackend(cmd, cfgPath)
+		return stateWithBackend(cmd, cfgPath, statePath, s.err)
 	}
 
 	exit := 0
