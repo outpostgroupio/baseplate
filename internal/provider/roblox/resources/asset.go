@@ -41,6 +41,7 @@ func (a *asset) Doc() provider.ResourceDoc {
 		Summary: "Uploads a user- or group-owned image, decal, audio or model asset.",
 		Attributes: map[string]string{
 			"file":             "Path to the file to upload: `.png`/`.jpg`/`.bmp`/`.tga` for images and decals, `.mp3`/`.ogg`/`.wav`/`.flac` for audio, `.fbx`/`.gltf`/`.glb`/`.rbxm`/`.rbxmx` for models. A change to the file's content is detected by hash: an Image or Model takes the new content in place (same id); a Decal, Audio or Video asset is replaced (a new upload with a new id; the old asset is left in place).",
+			"source_hash":      "Optional. A value that changes when the asset's source changes, used instead of the hash of `file` to detect a content change, e.g. `filesha256(\"art/logo.svg\")` for a PNG generated from an SVG. Then regenerating `file` with different bytes from the same source (a new converter version, say) doesn't upload it again, and a plan doesn't need `file` to exist. Adding it to an existing asset doesn't upload anything.",
 			"display_name":     "Asset name.",
 			"description":      "Asset description.",
 			"asset_type":       "Asset type: `Image`, `Decal`, `Audio` or `Model`. Defaults to `Audio` for audio files, `Model` for model files and `Image` otherwise. Changing it (including the default, by changing the file's extension) replaces the asset, because Roblox can't change an existing asset's type. Use `Image` for anything the game shows in an `ImageLabel` or `Decal`.",
@@ -62,6 +63,7 @@ func (a *asset) DecodeSpec() hcldec.Spec {
 		"display_name":     &hcldec.AttrSpec{Name: "display_name", Type: cty.String, Required: true},
 		"description":      &hcldec.AttrSpec{Name: "description", Type: cty.String, Required: true},
 		"asset_type":       &hcldec.AttrSpec{Name: "asset_type", Type: cty.String, Required: false},
+		"source_hash":      &hcldec.AttrSpec{Name: "source_hash", Type: cty.String, Required: false},
 		"creator_user_id":  &hcldec.AttrSpec{Name: "creator_user_id", Type: cty.Number, Required: false},
 		"creator_group_id": &hcldec.AttrSpec{Name: "creator_group_id", Type: cty.Number, Required: false},
 	}
@@ -92,7 +94,14 @@ func (a *asset) Outputs() map[string]cty.Type {
 // detected (the API can't read content back). See RequiresReplace for what a
 // change does. A missing file is reported as unavailable, so plan for an asset
 // already in state warns instead of failing (e.g. CI without the images).
+// When source_hash is set, it's recorded instead and the file isn't read. It's
+// a separate trigger from content_hash, so adding source_hash to an asset finds
+// no recorded value to compare with and records it as the baseline rather
+// than uploading.
 func (a *asset) Triggers(desired provider.Attributes) (map[string]cty.Value, error) {
+	if src, ok := sourceHash(desired); ok {
+		return map[string]cty.Value{"source_hash": cty.StringVal(src)}, nil
+	}
 	v, ok := desired["file"]
 	if !ok || v.IsNull() || !v.IsKnown() {
 		return nil, nil
@@ -102,6 +111,15 @@ func (a *asset) Triggers(desired provider.Attributes) (map[string]cty.Value, err
 		return nil, err
 	}
 	return map[string]cty.Value{"content_hash": cty.StringVal(sum)}, nil
+}
+
+// sourceHash returns the declared source_hash, if any.
+func sourceHash(desired provider.Attributes) (string, bool) {
+	v, ok := desired["source_hash"]
+	if !ok || v.IsNull() || !v.IsKnown() {
+		return "", false
+	}
+	return v.AsString(), true
 }
 
 // fileHash hashes an asset's file (see hashFile).
@@ -134,7 +152,7 @@ func (a *asset) Normalize(desired provider.Attributes) (provider.Attributes, err
 func (a *asset) RequiresReplace(desired, actual provider.Attributes) []string {
 	keys := []string{"asset_type"}
 	if !contentInPlace[currentType(desired, actual)] {
-		keys = append(keys, "content_hash")
+		keys = append(keys, "content_hash", "source_hash")
 	}
 	return keys
 }
@@ -174,7 +192,7 @@ func desiredType(desired provider.Attributes) string {
 // tracked by the content_hash trigger instead of its path;
 // display_name/description/asset_type remain diffable.
 func (a *asset) Computed() []string {
-	return []string{"id", "texture_id", "file", "creator_user_id", "creator_group_id"}
+	return []string{"id", "texture_id", "file", "source_hash", "creator_user_id", "creator_group_id"}
 }
 
 func (a *asset) Dependencies(provider.Attributes) []provider.Ref { return nil }
@@ -244,12 +262,11 @@ func (a *asset) UpdateWithTriggers(ctx context.Context, id string, desired provi
 	}
 	if contentInPlace[typ] {
 		path := desired["file"].AsString()
-		sum, err := fileHash(path)
-		var unavailable *provider.TriggerUnavailableError
-		if err != nil && !errors.As(err, &unavailable) {
+		changed, err := assetContentChanged(desired, prior)
+		if err != nil {
 			return nil, err
 		}
-		if err == nil && contentChanged(prior, sum) {
+		if changed {
 			data, err := os.ReadFile(path)
 			if err != nil {
 				return nil, fmt.Errorf("roblox_asset: reading file %q: %w", path, err)
@@ -280,6 +297,27 @@ func (a *asset) UpdateWithTriggers(ctx context.Context, id string, desired provi
 		return nil, err
 	}
 	return a.updatedAttrs(ctx, id, typ, desired), nil
+}
+
+// assetContentChanged reports whether the content differs from what was
+// recorded before this update (prior): by source_hash when it's set and was
+// recorded, otherwise by the file's hash. A missing file means the content
+// can't have been checked, so it reports no change.
+func assetContentChanged(desired provider.Attributes, prior map[string]cty.Value) (bool, error) {
+	if src, ok := sourceHash(desired); ok {
+		if was, ok := prior["source_hash"]; ok && !was.IsNull() && was.IsKnown() && was.Type() == cty.String {
+			return was.AsString() != src, nil
+		}
+	}
+	sum, err := fileHash(desired["file"].AsString())
+	var unavailable *provider.TriggerUnavailableError
+	if errors.As(err, &unavailable) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return contentChanged(prior, sum), nil
 }
 
 // updatedAttrs is stateAttrs plus texture_id for an updated asset of type typ.

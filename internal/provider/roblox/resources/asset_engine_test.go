@@ -185,3 +185,49 @@ func TestAssetImportMatchingTypeDoesNotReplace(t *testing.T) {
 		t.Fatalf("want a plain import, got %s", c.Action)
 	}
 }
+
+func withSourceHash(d []plan.DesiredResource, src string) []plan.DesiredResource {
+	d[0].Attributes["source_hash"] = cty.StringVal(src)
+	return d
+}
+
+// With source_hash, the file's bytes don't matter: adding it uploads nothing,
+// regenerating the file from the same source uploads nothing, a plan works
+// without the file, and a new source_hash uploads the file in place.
+func TestAssetSourceHash(t *testing.T) {
+	h := newAssetHarness(t)
+	fp := writeFile(t, "a.png", "v1")
+	h.apply(h.plan(assetDesired(fp)))
+	id := h.s.Resources[0].ID
+
+	pl := h.plan(withSourceHash(assetDesired(fp), "svg-1"))
+	if pl.HasChanges() {
+		t.Fatalf("adding source_hash must not plan an upload:\n%s", pl.RenderText(false))
+	}
+	h.apply(pl)
+	if st, _ := h.s.Find("roblox_asset.x"); st.Triggers["source_hash"] == nil {
+		t.Fatal("apply must record source_hash")
+	}
+
+	os.WriteFile(fp, []byte("v1, from a newer converter"), 0o600)
+	if pl := h.plan(withSourceHash(assetDesired(fp), "svg-1")); pl.HasChanges() {
+		t.Fatalf("a regenerated file with the same source must not change:\n%s", pl.RenderText(false))
+	}
+	os.Remove(fp)
+	if pl := h.plan(withSourceHash(assetDesired(fp), "svg-1")); pl.HasChanges() || len(pl.Warnings()) != 0 {
+		t.Fatalf("a missing file doesn't matter with source_hash: %v\n%s", pl.Warnings(), pl.RenderText(false))
+	}
+
+	if len(h.f.content) != 0 {
+		t.Fatalf("nothing may be uploaded until the source changes, got %v", h.f.content)
+	}
+	os.WriteFile(fp, []byte("v2"), 0o600)
+	pl = h.plan(withSourceHash(assetDesired(fp), "svg-2"))
+	if c := pl.Changes[0]; c.Action != provider.ActionUpdate {
+		t.Fatalf("a new source_hash must update the Image in place, got %s", c.Action)
+	}
+	h.apply(pl)
+	if string(h.f.content[id]) != "v2" {
+		t.Fatalf("want v2 uploaded in place to %s, got %q", id, h.f.content[id])
+	}
+}

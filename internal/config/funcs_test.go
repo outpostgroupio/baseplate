@@ -144,3 +144,18 @@ func TestPathAndStdlibFunctions(t *testing.T) {
 		t.Errorf("contains over a set = %#v, %v", v, err)
 	}
 }
+
+func TestFilesha256(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "a.svg")
+	os.WriteFile(p, []byte("test"), 0o644)
+	v, err := evalFn(t, `filesha256("`+filepath.ToSlash(p)+`")`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := v.AsString(); got != "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08" {
+		t.Fatalf("filesha256 = %s", got)
+	}
+	if _, err := evalFn(t, `filesha256("`+filepath.ToSlash(p)+`.missing")`); err == nil {
+		t.Fatal("a missing file must be an error")
+	}
+}

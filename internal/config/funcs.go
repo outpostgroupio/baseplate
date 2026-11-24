@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -53,10 +55,11 @@ func functions() map[string]function.Function {
 		"jsondecode": stdlib.JSONDecodeFunc,
 		"jsonencode": stdlib.JSONEncodeFunc,
 
-		"fileset":  filesetFunc(),
-		"file":     fileFunc(),
-		"basename": basenameFunc(),
-		"dirname":  dirnameFunc(),
+		"fileset":    filesetFunc(),
+		"file":       fileFunc(),
+		"filesha256": filesha256Func(),
+		"basename":   basenameFunc(),
+		"dirname":    dirnameFunc(),
 	}
 }
 
@@ -102,6 +105,23 @@ func filesetFunc() function.Function {
 				vals[i] = cty.StringVal(m)
 			}
 			return cty.SetVal(vals), nil
+		},
+	})
+}
+
+// filesha256Func implements filesha256(path): the hex SHA-256 of the file's
+// contents, as in Terraform.
+func filesha256Func() function.Function {
+	return function.New(&function.Spec{
+		Params: []function.Parameter{{Name: "path", Type: cty.String}},
+		Type:   function.StaticReturnType(cty.String),
+		Impl: func(args []cty.Value, _ cty.Type) (cty.Value, error) {
+			b, err := os.ReadFile(args[0].AsString())
+			if err != nil {
+				return cty.NilVal, err
+			}
+			sum := sha256.Sum256(b)
+			return cty.StringVal(hex.EncodeToString(sum[:])), nil
 		},
 	})
 }
