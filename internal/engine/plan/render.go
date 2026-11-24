@@ -2,6 +2,7 @@ package plan
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -165,6 +166,14 @@ func (p *Plan) Warnings() []string {
 			b, n.del, n.add, from, to))
 	}
 	out = append(out, p.unavailableWarnings()...)
+	for _, c := range p.Changes {
+		for _, d := range c.Censored {
+			if slices.Contains(c.Sensitive, d.Name) {
+				continue
+			}
+			out = append(out, fmt.Sprintf("%s: %s reads back as %q, which is the config's text with words hidden by the platform's text filter. It's treated as matching the config; reword it, or set it to the filtered text, to stop this warning.", c.Address, d.Name, d.Old.AsString()))
+		}
+	}
 	out = append(out, p.ProviderWarnings...)
 	return out
 }

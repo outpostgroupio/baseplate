@@ -30,7 +30,7 @@ func planInState(res provider.Resource, d DesiredResource, st *state.Resource, a
 	// once the new value is in the outputs map.
 	effective := withPendingRefs(resolved, d.Refs, pending)
 	forcing := replaceKeys(res, effective, actual)
-	diffs := diffAttrs(actual, effective, res.Computed())
+	diffs, censored := dropCensored(res, diffAttrs(actual, effective, res.Computed()))
 	diffs = append(diffs, pendingRefDiffs(d.Refs, pending, resolved, diffs)...)
 	td, backfill, unavailable, err := triggerDiffs(res, resolved, st, forcing)
 	if err != nil {
@@ -43,7 +43,7 @@ func planInState(res provider.Resource, d DesiredResource, st *state.Resource, a
 		Desired: d.Attributes, Actual: actual, AttrDiffs: diffs, DependsOn: d.DependsOn, Refs: d.Refs,
 		Sensitive: sensitiveAttrs(res), Replace: replace,
 		AbandonsOld:      action == provider.ActionReplace && abandons(res),
-		BackfillTriggers: backfill, Unavailable: unavailable,
+		BackfillTriggers: backfill, Unavailable: unavailable, Censored: censored,
 	}, nil
 }
 

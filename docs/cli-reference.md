@@ -170,6 +170,10 @@ with an example `moved` block that keeps the existing object instead.
 When a `for_each` resource declares zero instances while state still holds some, it warns that all
 of them will be destroyed. `--json` lists both under `result.warnings`. See
 [managing many assets](how-to/many-assets.md#renaming-or-moving-a-file).
+Roblox's text filter replaces each character of a word it rejects with `#`. When a name or
+description reads back as the config's text with only that change, `plan` treats it as unchanged,
+since writing it again would be filtered the same way, and prints a `Warning:` with the filtered
+text.
 Resources can add warnings of their own, about something that didn't stop the plan (for example a
 `roblox_asset` Decal whose `texture_id` lookup failed). They're printed and listed the same way.
 `apply` prints those reported while it runs after `Apply complete:`, and `apply --json` and

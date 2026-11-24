@@ -68,6 +68,10 @@ type Change struct {
 	// source file absent on this machine), so changes to it can't be
 	// detected. Warnings reports it, once per resource block.
 	Unavailable string
+	// Censored lists attributes that read back as the platform filtered the
+	// config's text (provider.Censoring). They aren't diffed; Warnings
+	// reports them.
+	Censored []AttrDiff
 }
 
 type Plan struct {
@@ -257,6 +261,23 @@ func mergeRefs(d DesiredResource, s *state.State, importIDs map[string]string) p
 // a resource's many optional/unset fields don't produce spurious drift. Drift
 // on a declared attribute is still detected (it's in desired). Computed attrs
 // are excluded even if present in desired (e.g. after an import round-trip).
+// dropCensored removes the diffs whose remote value is the config's text as the
+// platform filtered it (provider.Censoring), and returns them separately.
+func dropCensored(res provider.Resource, diffs []AttrDiff) (kept, censored []AttrDiff) {
+	c, ok := res.(provider.Censoring)
+	if !ok {
+		return diffs, nil
+	}
+	for _, d := range diffs {
+		if c.Censored(d.Name, d.New, d.Old) {
+			censored = append(censored, d)
+			continue
+		}
+		kept = append(kept, d)
+	}
+	return kept, censored
+}
+
 func diffAttrs(actual, desired provider.Attributes, computed []string) []AttrDiff {
 	skip := map[string]bool{}
 	for _, c := range computed {

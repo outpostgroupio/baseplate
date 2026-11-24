@@ -111,7 +111,7 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 			return err
 		}
 		effective := withPendingRefs(resolved, c.Refs, pending)
-		diffs := diffAttrs(actual, effective, r.Computed())
+		diffs, censored := dropCensored(r, diffAttrs(actual, effective, r.Computed()))
 		ud, err := unverifiedDiffs(r, resolved)
 		if err != nil {
 			return err
@@ -121,6 +121,7 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 		c.ID = id
 		c.Actual = actual
 		c.AttrDiffs = diffs
+		c.Censored = censored
 		c.Action, c.Replace = classify(diffs, replaceKeys(r, effective, actual))
 		c.AbandonsOld = c.Action == provider.ActionReplace && abandons(r)
 		replaced := c.Action == provider.ActionReplace

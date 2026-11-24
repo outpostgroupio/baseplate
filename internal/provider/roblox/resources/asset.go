@@ -17,6 +17,7 @@ import (
 )
 
 type asset struct {
+	filteredText
 	ac opencloud.AssetClient
 	// tc resolves a Decal's texture id (texture_id). Optional: nil leaves
 	// texture_id unset for Decals.

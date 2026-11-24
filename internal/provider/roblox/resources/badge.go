@@ -16,6 +16,7 @@ import (
 )
 
 type badge struct {
+	filteredText
 	bc opencloud.BadgeClient
 }
 

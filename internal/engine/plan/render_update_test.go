@@ -85,3 +85,29 @@ func TestUnavailableWarningsGroupByResource(t *testing.T) {
 		t.Fatalf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
+
+type censoringThing struct{ provider.Resource }
+
+func (censoringThing) Censored(attr string, desired, actual cty.Value) bool {
+	return attr == "description" && actual.AsString() == "####"
+}
+
+// Text the platform filtered isn't a change, but is reported.
+func TestCensoredTextIsNotAChange(t *testing.T) {
+	diffs := []AttrDiff{
+		{Name: "description", Old: cty.StringVal("####"), New: cty.StringVal("darn")},
+		{Name: "name", Old: cty.StringVal("a"), New: cty.StringVal("b")},
+	}
+	kept, censored := dropCensored(censoringThing{}, diffs)
+	if len(kept) != 1 || kept[0].Name != "name" || len(censored) != 1 || censored[0].Name != "description" {
+		t.Fatalf("kept %v, censored %v", kept, censored)
+	}
+	pl := &Plan{Changes: []Change{{Address: "x_thing.a", Censored: censored}}}
+	if w := strings.Join(pl.Warnings(), "\n"); !strings.Contains(w, `x_thing.a: description reads back as "####"`) {
+		t.Fatalf("missing the filtered-text warning: %s", w)
+	}
+	pl.Changes[0].Sensitive = []string{"description"}
+	if w := pl.Warnings(); len(w) != 0 {
+		t.Fatalf("a sensitive value must not be printed: %v", w)
+	}
+}

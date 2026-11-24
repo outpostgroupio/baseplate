@@ -13,9 +13,9 @@ import (
 
 type fakePlace struct {
 	universeID, placeID, versionType, contentType string
-	data                                           []byte
-	version                                        int64
-	calls                                          int
+	data                                          []byte
+	version                                       int64
+	calls                                         int
 }
 
 func (f *fakePlace) Publish(_ context.Context, u, p, vt, ct string, data []byte) (int64, error) {
