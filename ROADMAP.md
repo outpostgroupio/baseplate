@@ -12,8 +12,8 @@ Feature requests and bug reports go in [GitHub issues](https://github.com/outpos
 - `plan`, `apply`, `destroy`, `import`, `show`, `output`, `validate`, `restart-servers` and
   `cleanup`, with `--json` output and `--target`.
 - `import` and `moved` blocks, `lifecycle { prevent_destroy, replace_triggered_by }` with
-  `baseplate_data`, `for_each`, `locals` and file functions, `output` blocks, and
-  `plan --generate-config` for imported resources.
+  `baseplate_data`, `for_each`, `locals` and file functions, `output` blocks and the
+  `baseplate_remote_state` data source, and `plan --generate-config` for imported resources.
 - Local state with locking, and a remote HTTP backend compatible with Terraform's.
 - A reference state server for Cloudflare (R2 storage, Durable Object locks), with
   `baseplate login` through GitHub and GitHub Actions OIDC for CI, plus `force-unlock`.

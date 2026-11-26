@@ -163,10 +163,11 @@ func universeFromConfig(cfgPath string, p provider.Provider) (string, error) {
 	if _, err := os.Stat(cfgPath); err != nil {
 		return "", fmt.Errorf("no --universe given and config %s could not be read (%v); pass --universe", cfgPath, err)
 	}
-	_, desired, _, err := config.Load(cfgPath, p)
+	cfg, err := config.LoadConfigWith(cfgPath, p, config.LoadOptions{RemoteState: remoteStateReader()})
 	if err != nil {
 		return "", err
 	}
+	desired := cfg.Resources
 	seen := map[string]bool{}
 	var ids []string
 	for _, d := range desired {

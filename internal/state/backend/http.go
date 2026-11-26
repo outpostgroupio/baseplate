@@ -135,6 +135,38 @@ func (h *HTTP) Get() (*state.State, error) {
 	}
 }
 
+// Outputs reads only the state's output values, from a server that
+// advertises outputs.v1: GET <address>?outputs returns {"outputs": {...}}
+// (docs/state-server-protocol.md). It returns nil when there is no state yet.
+func (h *HTTP) Outputs() (map[string]state.Output, error) {
+	u, err := url.Parse(h.cfg.Address)
+	if err != nil {
+		return nil, err
+	}
+	q := u.Query()
+	q.Set("outputs", "")
+	u.RawQuery = q.Encode()
+	resp, err := h.request(http.MethodGet, u.String(), nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var doc struct {
+			Outputs map[string]state.Output `json:"outputs"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+			return nil, fmt.Errorf("http backend: read outputs: %w", err)
+		}
+		return doc.Outputs, nil
+	case http.StatusNoContent, http.StatusNotFound:
+		return nil, nil
+	default:
+		return nil, statusError("read outputs", resp)
+	}
+}
+
 func (h *HTTP) Put(s *state.State) error {
 	b, err := s.Marshal()
 	if err != nil {

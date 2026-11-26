@@ -333,7 +333,7 @@ func (l *loader) indexed(t refTarget, decl *declaredResource, key string, rest h
 	if !decl.keyed {
 		return refTarget{}, false, fmt.Errorf("%s does not have for_each, so it can't be indexed; reference it as %s.<attr>", base, base)
 	}
-	if !decl.keySet[key] {
+	if !decl.keySet[key] && !decl.unknownKeys {
 		return refTarget{}, false, fmt.Errorf("no instance %s of %s (declared: %s)", addr.Quote(key), base, keyPreview(decl.keys))
 	}
 	t.key = key

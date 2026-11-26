@@ -12,7 +12,8 @@ There are three parts:
    the only required part.
 2. [Authentication](#authentication): how Baseplate sends credentials.
 3. [Discovery and sign-in](#discovery-and-sign-in): `/.well-known/baseplate.json`, `login.v1`
-   (`baseplate login`) and `oidc.v1` (GitHub Actions).
+   (`baseplate login`), `oidc.v1` (GitHub Actions) and `outputs.v1` (reading only a state's
+   outputs).
 
 ## State and locking
 
@@ -102,7 +103,8 @@ you don't support. A `404` means neither.
   },
   "oidc.v1": {
     "issuers": ["https://token.actions.githubusercontent.com"]
-  }
+  },
+  "outputs.v1": {}
 }
 ```
 
@@ -167,3 +169,24 @@ To accept one, verify:
 
 Tokens from pull requests from forks are never issued, since those workflows can't get
 `id-token: write`.
+
+### `outputs.v1`: reading a state's outputs
+
+A [`baseplate_remote_state`](config-reference.md#data-baseplate_remote_state) data source reads
+another state's [output values](config-reference.md#output). Against a server that advertises
+`outputs.v1`, it sends `GET <address>?outputs` (with the usual credentials) instead of reading the
+whole state. The server replies `200` with only the state's `outputs` object, or `{"outputs": {}}`
+when it has none, and `204` or `404` when there is no state:
+
+```json
+{
+  "outputs": {
+    "store_icon": { "value": "106681856624842", "type": "string" }
+  }
+}
+```
+
+This lets a server give an identity the outputs without the rest of the state, which holds
+everything read from Roblox. The reference Worker's `OIDC_OUTPUT_REPOSITORIES` are GitHub
+repositories whose workflows may make this request and no other. Without `outputs.v1`, Baseplate
+reads the whole state and takes its outputs, as Terraform's `terraform_remote_state` does.

@@ -87,6 +87,7 @@ var rootSchema = &hcl.BodySchema{
 		{Type: "locals"},
 		{Type: "moved"},
 		{Type: "output", LabelNames: []string{"name"}},
+		{Type: "data", LabelNames: []string{"type", "name"}},
 		{Type: "backend", LabelNames: []string{"type"}},
 	},
 }
@@ -112,12 +113,19 @@ type declaredResource struct {
 	preventDestroy bool
 	// lifecycle is the block's lifecycle meta-block.
 	lifecycle lifecycle
+	// unknownKeys is set when for_each uses a data source that wasn't read
+	// (validate): the instances aren't known, so none is decoded and a
+	// reference to any key is accepted.
+	unknownKeys bool
 }
 
 // loader carries the per-Load state shared by the block handlers.
 type loader struct {
 	path      string
 	resources map[string]map[string]*declaredResource // type -> name -> block
+	// dataUnknown is set when the data sources weren't read (validate), so
+	// values that use them are unknown and not an error.
+	dataUnknown bool
 }
 
 // Config is everything Load extracts from a config file.
@@ -155,9 +163,15 @@ func Load(path string, p provider.Provider) (ProviderConfig, []plan.DesiredResou
 	return cfg.Provider, cfg.Resources, cfg.Imports, nil
 }
 
-// LoadConfig parses and evaluates a config file: locals, for_each expansion,
-// references and import blocks.
+// LoadConfig is LoadConfigWith without reading data sources, as validate
+// loads a config: values that use them are unknown.
 func LoadConfig(path string, p provider.Provider) (*Config, error) {
+	return LoadConfigWith(path, p, LoadOptions{})
+}
+
+// LoadConfigWith parses and evaluates a config file: data sources, locals,
+// for_each expansion, references and import blocks.
+func LoadConfigWith(path string, p provider.Provider, opts LoadOptions) (*Config, error) {
 	src, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -191,12 +205,23 @@ func LoadConfig(path string, p provider.Provider) (*Config, error) {
 		l.resources[typ][name] = &declaredResource{}
 	}
 
-	locals, err := l.evalLocals(content.Blocks)
+	data, dataKnown, err := l.evalData(content.Blocks, opts.RemoteState)
+	if err != nil {
+		return nil, err
+	}
+	l.dataUnknown = !dataKnown
+	for _, b := range content.Blocks {
+		if err := l.checkDataRefs(data, bodyTraversals(b.Body)); err != nil {
+			return nil, err
+		}
+	}
+	locals, err := l.evalLocals(content.Blocks, data)
 	if err != nil {
 		return nil, err
 	}
 	vars := buildRefObject(content.Blocks)
 	vars["local"] = cty.ObjectVal(locals)
+	vars["data"] = data
 	vars["path"] = pathObject(path)
 	ctx := &hcl.EvalContext{Variables: vars, Functions: functions()}
 
@@ -224,6 +249,12 @@ func LoadConfig(path string, p provider.Provider) (*Config, error) {
 			protected = append(protected, typ+"."+name)
 		}
 		if a, ok := fe.Attributes["for_each"]; ok {
+			if l.dataUnknown && usesData(a.Expr, l.resources) {
+				if v, d := a.Expr.Value(ctx); !d.HasErrors() && !v.IsWhollyKnown() {
+					decl.keyed, decl.unknownKeys = true, true
+					continue
+				}
+			}
 			keys, values, err := l.evalForEach(a, ctx, typ+"."+name)
 			if err != nil {
 				return nil, err
@@ -277,6 +308,9 @@ func LoadConfig(path string, p provider.Provider) (*Config, error) {
 			keys := []string{""}
 			if decl.keyed {
 				keys = decl.keys
+			}
+			if decl.unknownKeys {
+				keys = nil
 			}
 			for _, key := range keys {
 				ictx := ctx
@@ -334,7 +368,7 @@ func LoadConfig(path string, p provider.Provider) (*Config, error) {
 	sort.Strings(protected)
 	return &Config{
 		Provider: pc, Resources: out, Imports: imports, EmptyForEach: empty, PreventDestroy: protected, Moved: moved,
-		Outputs: outputs, vars: map[string]cty.Value{"local": vars["local"], "path": vars["path"]}, resources: l.resources,
+		Outputs: outputs, vars: map[string]cty.Value{"local": vars["local"], "path": vars["path"], "data": data}, resources: l.resources,
 	}, nil
 }
 
@@ -388,6 +422,9 @@ func (l *loader) decodeInstance(body, remain hcl.Body, r provider.Resource, typ,
 			}
 			ref, ok := matchNested(nested[k], p)
 			if !ok {
+				if l.dataUnknown && attrUsesData(body, k) {
+					return false, nil // a data source that wasn't read (validate)
+				}
 				return false, fmt.Errorf("%s: %s: attribute %q references another resource in an unsupported way; use a reference like type.name.attr, on its own or as an element of a list or object", l.path, inst, k)
 			}
 			prs = append(prs, plan.PathRef{Path: p.Copy(), Ref: ref})

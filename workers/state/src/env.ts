@@ -21,6 +21,11 @@ export interface Env {
 
   /** Comma-separated owner/repo list allowed to use GitHub Actions OIDC tokens. */
   OIDC_REPOSITORIES?: string;
+  /**
+   * Comma-separated owner/repo list whose GitHub Actions OIDC tokens may only
+   * read states' outputs (GET <state>?outputs), for baseplate_remote_state.
+   */
+  OIDC_OUTPUT_REPOSITORIES?: string;
 
   TOKEN_TTL_DAYS?: string;
   KEEP_HISTORY?: string;
