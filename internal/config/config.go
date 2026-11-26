@@ -86,6 +86,7 @@ var rootSchema = &hcl.BodySchema{
 		{Type: "import"},
 		{Type: "locals"},
 		{Type: "moved"},
+		{Type: "output", LabelNames: []string{"name"}},
 		{Type: "backend", LabelNames: []string{"type"}},
 	},
 }
@@ -134,6 +135,14 @@ type Config struct {
 	// Moved lists the expanded moved {} blocks (one per for_each instance), in
 	// declaration order. plan.ApplyMoves applies them to state before planning.
 	Moved []plan.MovedBlock
+	// Outputs lists the output {} blocks, sorted by name; EvalOutputs
+	// evaluates them.
+	Outputs []OutputBlock
+
+	// vars and resources are what EvalOutputs evaluates outputs with: the
+	// variables other than resources (local, path), and the resource blocks.
+	vars      map[string]cty.Value
+	resources map[string]map[string]*declaredResource
 }
 
 // Load is LoadConfig for callers that only need the provider config, the
@@ -237,6 +246,8 @@ func LoadConfig(path string, p provider.Provider) (*Config, error) {
 	var imports []plan.ImportBlock
 	var moved []plan.MovedBlock
 	var movedAt []hcl.Range // the declaring block of each moved entry
+	var outputs []OutputBlock
+	outputAt := map[string]hcl.Range{}
 	importSeen := map[string]bool{}
 	for _, b := range content.Blocks {
 		switch b.Type {
@@ -303,14 +314,28 @@ func LoadConfig(path string, p provider.Provider) (*Config, error) {
 			for range ms {
 				movedAt = append(movedAt, b.DefRange)
 			}
+		case "output":
+			o, err := l.decodeOutput(b, ctx)
+			if err != nil {
+				return nil, err
+			}
+			if prev, dup := outputAt[o.Name]; dup {
+				return nil, fmt.Errorf("%s: duplicate output %q (also defined at %s)", b.DefRange, o.Name, prev)
+			}
+			outputAt[o.Name] = b.DefRange
+			outputs = append(outputs, o)
 		}
 	}
+	sort.Slice(outputs, func(i, j int) bool { return outputs[i].Name < outputs[j].Name })
 	if err := l.checkMovedSet(moved, movedAt); err != nil {
 		return nil, err
 	}
 	sort.Strings(empty)
 	sort.Strings(protected)
-	return &Config{Provider: pc, Resources: out, Imports: imports, EmptyForEach: empty, PreventDestroy: protected, Moved: moved}, nil
+	return &Config{
+		Provider: pc, Resources: out, Imports: imports, EmptyForEach: empty, PreventDestroy: protected, Moved: moved,
+		Outputs: outputs, vars: map[string]cty.Value{"local": vars["local"], "path": vars["path"]}, resources: l.resources,
+	}, nil
 }
 
 // decodeInstance decodes one resource instance (the whole resource, for a

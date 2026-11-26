@@ -108,6 +108,10 @@ type Plan struct {
 	// failed). Set by the caller from its provider.Warnings collector;
 	// Warnings lists them after the plan's own.
 	ProviderWarnings []string
+	// Outputs are the changes to the recorded output values (see
+	// OutputChanges). Set by the caller. Like Moves, they are changes in their
+	// own right: apply records them even when nothing else changes.
+	Outputs []OutputChange
 
 	// desired and pending carry Build's inputs to ResolveImports, which
 	// re-plans dependents of import targets (see replanDependents).
@@ -116,7 +120,7 @@ type Plan struct {
 }
 
 func (p *Plan) HasChanges() bool {
-	if len(p.Moves) > 0 {
+	if len(p.Moves) > 0 || len(p.Outputs) > 0 {
 		return true
 	}
 	return p.Count() > 0

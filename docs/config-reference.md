@@ -1,7 +1,7 @@
 # Config reference
 
 A Baseplate config is an HCL file (default `baseplate.bp.hcl`). This page covers the language:
-blocks, `for_each`, `moved`, `lifecycle`, references, `locals` and functions. The attributes of each `roblox_*` resource
+blocks, `for_each`, `moved`, `lifecycle`, references, `locals`, `output` and functions. The attributes of each `roblox_*` resource
 are in the [resource reference](resource-reference.md).
 
 ## Blocks
@@ -13,6 +13,7 @@ are in the [resource reference](resource-reference.md).
 | `import { to = ..., id = ... }` | Adopt an existing remote resource into state on the next `apply`. See [importing existing resources](how-to/importing-existing-resources.md). |
 | `moved { from = ..., to = ... }` | Record that a resource or instance changed address, so state follows it instead of destroying and re-creating it. See [`moved`](#moved). |
 | `locals { ... }` | Named values computed once at load time. |
+| `output "<name>" { value = ... }` | A value recorded in state on `apply`, for `baseplate output` and other tools. See [`output`](#output). |
 | `backend "http" { ... }` | Remote state. See [State](state.md#remote-state-http-backend). |
 
 ## `for_each`
@@ -319,6 +320,36 @@ locals {
 - Locals can use other locals (in any order, cycles are an error), `path.config`, `env()` and
   functions. They can't reference resources, so every local is known at load time.
 - Read a local with `local.<name>`.
+
+## `output`
+
+An output block publishes a value in state, as in Terraform:
+
+```hcl
+output "store_icon" {
+  value       = roblox_asset.store["icon.png"].id
+  description = "The store icon's asset id"
+}
+
+output "thumbnail_ids" {
+  value = [for k, a in roblox_asset.thumbs : a.id]
+}
+```
+
+| Argument | Description |
+|---|---|
+| `value` | Required. Any expression, including references to resources (in any form: inside lists, templates, function calls or `for` expressions), locals and functions. Not `each`. |
+| `description` | Optional literal string, for whoever reads the config. |
+| `sensitive` | Optional literal `true` or `false`. A sensitive value is shown as `(sensitive value)` in `plan` and `<sensitive>` after `apply` and in `baseplate output`, but it is still written to state in plain text, and `baseplate output <name>` prints it. |
+
+`plan` lists changes to outputs after the resources, under `Changes to Outputs:`, and an output
+that uses a resource the plan creates or replaces shows as `(known after apply)`. An output-only
+change is still a change: `plan` exits `2`, and `apply` records it. `apply` evaluates the outputs
+against the state it just wrote, prints them after the summary, and records them in state.
+`destroy` removes them. With `--target`, an output that uses a resource the apply skipped keeps
+the value recorded before.
+
+`depends_on` and `precondition` aren't supported.
 
 ## `path.config`
 

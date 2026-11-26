@@ -367,6 +367,7 @@ func (p *Plan) RenderText(color bool) string {
 			b.WriteString(oldObjectNote(c))
 		}
 	}
+	b.WriteString(p.renderOutputs())
 	for _, w := range p.Warnings() {
 		fmt.Fprintf(&b, "\nWarning: %s\n", w)
 	}

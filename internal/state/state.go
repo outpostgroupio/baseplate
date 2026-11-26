@@ -31,6 +31,17 @@ type State struct {
 	// ReplaceAbandons), no longer managed, for `baseplate cleanup` to remove
 	// once nothing uses them.
 	Retired []Retired `json:"retired,omitempty"`
+	// Outputs are the config's output values as of the last apply, by name.
+	// Another config reads them with a baseplate_remote_state data source.
+	Outputs map[string]Output `json:"outputs,omitempty"`
+}
+
+// Output is one recorded output value, in Terraform's state format: the value
+// as JSON with its cty type alongside.
+type Output struct {
+	Value     json.RawMessage `json:"value"`
+	Type      json.RawMessage `json:"type"`
+	Sensitive bool            `json:"sensitive,omitempty"`
 }
 
 // Retired is an object a replace left in place.
@@ -54,7 +65,9 @@ type Retired struct {
 //
 // Version 3 added Retired. An older binary would drop the list when it
 // rewrote the state, losing track of objects waiting for cleanup.
-const CurrentVersion = 3
+//
+// Version 4 added Outputs, which an older binary would likewise drop.
+const CurrentVersion = 4
 
 func New() *State {
 	return &State{Version: CurrentVersion, Lineage: newLineage()}
@@ -71,6 +84,8 @@ var migrations = map[int]migrator{
 	1: func(doc map[string]json.RawMessage) (map[string]json.RawMessage, error) { return doc, nil },
 	// v2 -> v3: retired is new and optional.
 	2: func(doc map[string]json.RawMessage) (map[string]json.RawMessage, error) { return doc, nil },
+	// v3 -> v4: outputs is new and optional.
+	3: func(doc map[string]json.RawMessage) (map[string]json.RawMessage, error) { return doc, nil },
 }
 
 // applyMigrations upgrades doc from version `from` to `to`, applying
