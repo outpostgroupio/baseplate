@@ -67,7 +67,7 @@ resources and the key is missing.
 | Code | Meaning |
 |---|---|
 | `0` | Success, no changes. |
-| `2` | (`plan` only) Success, and there are changes to apply. |
+| `2` | (`plan` only) Success, and there are changes to apply, including changes to outputs only. |
 | `1` | Error. |
 
 The `2` code lets CI branch on "is there drift?" without parsing output. `apply`/`destroy`/
@@ -110,7 +110,8 @@ Plan: 0 to import, 1 to add, 0 to change, 0 to destroy.
 
 `--json` emits the plan as structured JSON instead of the text diff. Sensitive attribute values
 (e.g. a secret's `value`) are redacted in both formats. Each change has an `address` and, for a
-`for_each` instance, its `key`.
+`for_each` instance, its `key`. Changes to [outputs](config-reference.md#output) are listed in
+`output_changes`, each with a `name`, `action` (`create`, `update` or `delete`) and `old`/`new`.
 
 Each change is a create (`+`), update (`~`), delete (`-`) or replace (`-/+`). An update lists only
 the attributes and triggers that change, as `old => new`, and counts the declared attributes it
@@ -204,6 +205,17 @@ The counts match the plan's `Plan:` line; resources that were already up to date
 `--json` gives the same counts as `result.summary`, and the number of resources that changed as
 `result.applied`.
 `result.changes` lists every declared resource, including unchanged ones (`"action": "noop"`).
+
+When the config has [outputs](config-reference.md#output), apply records them in state and lists
+them after the summary (`result.outputs` in JSON, shaped like `baseplate output --json`):
+
+```console
+Apply complete: 0 imported, 1 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+store_icon = "106681856624842"
+```
 
 On a terminal it prompts before mutating; pass `--auto-approve` (or `--yes`) to skip the prompt in
 scripts. CI (no TTY) skips it automatically.
@@ -429,6 +441,24 @@ This is the stable way to feed deployed ids into other tooling; see
 [managing many assets](how-to/many-assets.md#3-read-the-ids-back-show---json) for a Luau generator.
 An empty or missing state prints `No resources in state.` (`"resources": []` in JSON). Showing an
 address that isn't in state is an error.
+
+### `output [name]`
+
+Print the [output values](config-reference.md#output) the last apply recorded in state. Like
+`show`, it reads state through the configured backend without the lock and needs no
+`ROBLOX_API_KEY`.
+
+```console
+$ baseplate output
+store_icon = "106681856624842"
+thumbnail_ids = ["73372008425730", "84691374123373"]
+universe_token = <sensitive>
+```
+
+With a name it prints that value, even a sensitive one. `--raw` prints a string without quotes,
+for scripts. `--json` gives each output's `value`, `type` (a cty type) and `sensitive`, as
+`terraform output -json` does: an object of them by name, or the one output's. A name that isn't
+in state is an error.
 
 ### `cleanup`
 

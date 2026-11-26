@@ -24,6 +24,7 @@ import (
 	"github.com/outpostgroupio/baseplate/internal/provider"
 	"github.com/outpostgroupio/baseplate/internal/provider/mock"
 	"github.com/outpostgroupio/baseplate/internal/provider/roblox"
+	"github.com/outpostgroupio/baseplate/internal/state"
 	"github.com/outpostgroupio/baseplate/internal/state/backend"
 	"github.com/outpostgroupio/baseplate/internal/version"
 )
@@ -166,10 +167,11 @@ type validateResult struct {
 }
 
 type planResult struct {
-	Moves    []plan.JSONMove   `json:"moves,omitempty"`
-	Changes  []plan.JSONChange `json:"changes"`
-	Summary  plan.Summary      `json:"summary"`
-	Warnings []string          `json:"warnings,omitempty"`
+	Moves         []plan.JSONMove         `json:"moves,omitempty"`
+	Changes       []plan.JSONChange       `json:"changes"`
+	OutputChanges []plan.JSONOutputChange `json:"output_changes,omitempty"`
+	Summary       plan.Summary            `json:"summary"`
+	Warnings      []string                `json:"warnings,omitempty"`
 }
 
 type importResult struct {
@@ -192,6 +194,8 @@ type applyResult struct {
 	Changes []plan.JSONChange `json:"changes"`
 	// Restarts lists the server restarts requested by apply --restart-servers.
 	Restarts []restartResult `json:"restarts,omitempty"`
+	// Outputs are the output values recorded by the apply.
+	Outputs map[string]outputResult `json:"outputs,omitempty"`
 	// Warnings are the provider warnings reported while planning and
 	// applying (see provider.Warn).
 	Warnings []string `json:"warnings,omitempty"`
@@ -379,6 +383,9 @@ func run(args []string, s streams) int {
 		if err := pl.CheckPreventDestroy(); err != nil {
 			return err
 		}
+		if err := planOutputs(pl, cfg, st); err != nil {
+			return err
+		}
 		if generateConfigOut != "" {
 			if err := generateConfig(context.Background(), p, imports, declared, generateConfigOut, s.out); err != nil {
 				return err
@@ -386,7 +393,7 @@ func run(args []string, s streams) int {
 		}
 		if err := output.Emit(s.out, fmtOf(jsonOut), "plan",
 			pl.RenderText(true),
-			planResult{Moves: pl.JSONMoves(), Changes: pl.JSONChanges(), Summary: pl.Summary(), Warnings: pl.Warnings()}); err != nil {
+			planResult{Moves: pl.JSONMoves(), Changes: pl.JSONChanges(), OutputChanges: pl.JSONOutputs(), Summary: pl.Summary(), Warnings: pl.Warnings()}); err != nil {
 			return err
 		}
 		if pl.HasChanges() {
@@ -448,6 +455,7 @@ func run(args []string, s streams) int {
 	root.AddCommand(newCleanupCmd(p, &cfgPath, &statePath, &jsonOut, &cmdName, s))
 	root.AddCommand(newLoginCmd(&cfgPath, &jsonOut, &cmdName, s))
 	root.AddCommand(newLogoutCmd(&cfgPath, &jsonOut, &cmdName, s))
+	root.AddCommand(newOutputCmd(&cfgPath, &statePath, &jsonOut, &cmdName, s))
 	root.AddCommand(&cobra.Command{
 		Use:   "show [address]",
 		Short: "Print the resources recorded in state",
@@ -481,6 +489,21 @@ func run(args []string, s streams) int {
 	return exit
 }
 
+// planOutputs sets pl.Outputs from the config's output values as they will be
+// after pl (none when cfg is nil, i.e. destroy).
+func planOutputs(pl *plan.Plan, cfg *config.Config, st *state.State) error {
+	var values map[string]plan.OutputValue
+	if cfg != nil {
+		var err error
+		if values, err = cfg.EvalOutputs(pl.InstanceValues(st)); err != nil {
+			return err
+		}
+	}
+	var err error
+	pl.Outputs, err = plan.OutputChanges(st.Outputs, values)
+	return err
+}
+
 // restart, when non-nil (apply --restart-servers), restarts the servers of any
 // roblox_place the apply published, only after the apply fully succeeds.
 func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, autoApprove bool, format output.Format, s streams, restart *applyRestart) error {
@@ -501,9 +524,9 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 	var imports []plan.ImportBlock
 	var emptyForEach, protected []string
 	var moved []plan.MovedBlock
+	var cfg *config.Config
 	if !destroy {
-		cfg, err := loadConfig(cfgPath, p)
-		if err != nil {
+		if cfg, err = loadConfig(cfgPath, p); err != nil {
 			return err
 		}
 		desired, imports, emptyForEach, protected, moved = cfg.Resources, cfg.Imports, cfg.EmptyForEach, cfg.PreventDestroy, cfg.Moved
@@ -563,6 +586,9 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 	if err := pl.CheckPreventDestroy(); err != nil {
 		return err
 	}
+	if err := planOutputs(pl, cfg, st); err != nil {
+		return err
+	}
 
 	shown := map[string]bool{} // warnings already printed with the plan
 	if pl.HasChanges() {
@@ -587,6 +613,15 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 	if err := apply.Apply(ctx, p, b, st, pl); err != nil {
 		return err
 	}
+	var outputs map[string]plan.OutputValue
+	if cfg != nil {
+		if outputs, err = cfg.EvalOutputs(plan.StateInstanceValues(st)); err != nil {
+			return fmt.Errorf("apply succeeded, but evaluating the outputs failed: %w", err)
+		}
+	}
+	if err := apply.RecordOutputs(b, st, outputs); err != nil {
+		return fmt.Errorf("apply succeeded, but recording the outputs failed: %w", err)
+	}
 	text := fmt.Sprintf("%s complete: %s.\n", cancelLabel[verb], pl.Summary().Applied())
 	for _, w := range warns.List() {
 		if !shown[w] {
@@ -608,8 +643,9 @@ func applyRun(p provider.Provider, cfgPath, statePath, target string, destroy, a
 		}
 		text += restartText(restarts)
 	}
+	text += outputsText(st.Outputs)
 	return output.Emit(s.out, format, verb, text,
-		applyResult{Applied: pl.Count(), Summary: pl.Summary(), Moves: pl.JSONMoves(), Changes: pl.JSONChanges(), Restarts: restarts, Warnings: warns.List()})
+		applyResult{Applied: pl.Count(), Summary: pl.Summary(), Moves: pl.JSONMoves(), Changes: pl.JSONChanges(), Restarts: restarts, Outputs: outputResults(st.Outputs), Warnings: warns.List()})
 }
 
 // importRun adopts an existing resource (declared in config) into state by id,

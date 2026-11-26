@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zclconf/go-cty/cty"
 )
 
 func TestRoundTripAndVersionGuard(t *testing.T) {
@@ -22,7 +24,7 @@ func TestRoundTripAndVersionGuard(t *testing.T) {
 	if _, ok := got.Find("mock_thing.a"); !ok {
 		t.Fatal("resource not found after round trip")
 	}
-	if _, err := Unmarshal([]byte(`{"version":4}`)); err == nil {
+	if _, err := Unmarshal([]byte(`{"version":5}`)); err == nil {
 		t.Fatal("expected version guard error")
 	}
 }
@@ -208,5 +210,38 @@ func TestRetiredRoundTrips(t *testing.T) {
 	}
 	if b, _ := New().Marshal(); strings.Contains(string(b), "retired") {
 		t.Fatalf("an empty retired list must be left out:\n%s", b)
+	}
+}
+
+func TestOutputsRoundTripAndChange(t *testing.T) {
+	s := New()
+	v := cty.ObjectVal(map[string]cty.Value{"id": cty.StringVal("1"), "n": cty.NumberIntVal(2)})
+	o, err := NewOutput(v, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.SetOutputs(map[string]Output{"x": o}) {
+		t.Fatal("adding an output is a change")
+	}
+	b, err := s.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Unmarshal(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gv, err := got.Outputs["x"].CtyValue()
+	if err != nil || !gv.RawEquals(v) || !got.Outputs["x"].Sensitive {
+		t.Fatalf("round trip = %#v, %v", gv, err)
+	}
+	if got.SetOutputs(map[string]Output{"x": o}) {
+		t.Fatal("the same output again is not a change")
+	}
+	if !got.SetOutputs(nil) || got.Outputs != nil {
+		t.Fatal("removing every output is a change, and leaves none")
+	}
+	if b, _ := New().Marshal(); strings.Contains(string(b), "outputs") {
+		t.Fatalf("no outputs must be left out:\n%s", b)
 	}
 }
