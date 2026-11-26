@@ -80,8 +80,9 @@ func TestRenderStructuralValuesAsJSON(t *testing.T) {
 	if jc[0].Attrs[0].Old != "{}" || jc[0].Attrs[0].New != want {
 		t.Fatalf("json changes = %+v", jc[0].Attrs)
 	}
-	partly := cty.ObjectVal(map[string]cty.Value{"a": cty.UnknownVal(cty.String)})
-	if got := ctyString(partly); got != "(known after apply)" {
+	// A reference inside an object: only that field is unknown.
+	partly := cty.ObjectVal(map[string]cty.Value{"a": cty.UnknownVal(cty.String), "b": cty.StringVal("x"), "c": cty.ListVal([]cty.Value{cty.StringVal("y")})})
+	if got := ctyString(partly); got != `{"a":(known after apply),"b":"x","c":["y"]}` {
 		t.Fatalf("partially unknown = %q", got)
 	}
 }

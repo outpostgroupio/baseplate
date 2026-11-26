@@ -27,6 +27,10 @@ type DesiredResource struct {
 	// (e.g. "icon" -> roblox_asset.gem_icon.id). Referenced attributes are
 	// resolved at apply time and are NOT present in Attributes.
 	Refs map[string]provider.Ref
+	// PathRefs maps an attribute name to the references inside its value (e.g.
+	// "thumbnails" -> thumbnails[0].asset_id = roblox_asset.a.id). Unlike Refs,
+	// the attribute IS in Attributes, with an unknown at each reference's path.
+	PathRefs map[string][]PathRef
 	// PreventDestroy is the resource block's lifecycle.prevent_destroy. It is
 	// known only from config (never persisted to state), so removing the block
 	// or its lifecycle setting removes the protection, as in Terraform.
@@ -59,6 +63,7 @@ type Change struct {
 	AttrDiffs []AttrDiff
 	DependsOn []string
 	Refs      map[string]provider.Ref
+	PathRefs  map[string][]PathRef
 	Sensitive []string
 	// Replace names the attributes and/or triggers whose change forces this
 	// replace (Action == ActionReplace); see provider.Replacer.
@@ -193,7 +198,7 @@ func BuildWithOptions(ctx context.Context, p provider.Provider, s *state.State, 
 		if !inState {
 			newID[addr] = true
 			pl.Changes = append(pl.Changes, Change{
-				Address: addr, Type: d.Type, Name: d.Name, Key: d.Key, Action: provider.ActionCreate, Desired: d.Attributes, DependsOn: d.DependsOn, Refs: d.Refs,
+				Address: addr, Type: d.Type, Name: d.Name, Key: d.Key, Action: provider.ActionCreate, Desired: d.Attributes, DependsOn: d.DependsOn, Refs: d.Refs, PathRefs: d.PathRefs,
 				Sensitive: sensitiveAttrs(resources[d.Type]),
 			})
 			continue
@@ -209,7 +214,7 @@ func BuildWithOptions(ctx context.Context, p provider.Provider, s *state.State, 
 		if errors.Is(err, provider.ErrNotFound) {
 			newID[addr] = true
 			pl.Changes = append(pl.Changes, Change{
-				Address: addr, Type: d.Type, Name: d.Name, Key: d.Key, Action: provider.ActionCreate, Desired: d.Attributes, DependsOn: d.DependsOn, Refs: d.Refs,
+				Address: addr, Type: d.Type, Name: d.Name, Key: d.Key, Action: provider.ActionCreate, Desired: d.Attributes, DependsOn: d.DependsOn, Refs: d.Refs, PathRefs: d.PathRefs,
 				Sensitive: sensitiveAttrs(resources[d.Type]),
 			})
 			continue
@@ -312,25 +317,43 @@ func mergeRefs(d DesiredResource, s *state.State, importIDs map[string]string) p
 	for k, v := range d.Attributes {
 		out[k] = v
 	}
+	lookup := func(ref provider.Ref) (cty.Value, bool) { return stateRef(ref, s, importIDs) }
 	for attr, ref := range d.Refs {
-		target, ok := s.Find(ref.Address)
-		if !ok {
-			if id, imported := importIDs[ref.Address]; imported && ref.Attr == "id" {
-				out[attr] = cty.StringVal(id)
-			}
-			continue
+		if v, ok := lookup(ref); ok {
+			out[attr] = v
 		}
-		if ref.Attr == "id" {
-			out[attr] = cty.StringVal(target.ID)
-			continue
-		}
-		if raw, ok := target.Attributes[ref.Attr]; ok {
-			if v, err := ctyjson.Unmarshal(raw, cty.DynamicPseudoType); err == nil {
-				out[attr] = v
+	}
+	// A reference inside a value that can't be resolved stays unknown, so the
+	// attribute diffs as "known after apply" there.
+	for attr, refs := range d.PathRefs {
+		if v, ok := out[attr]; ok {
+			if filled, err := FillRefs(v, refs, lookup); err == nil {
+				out[attr] = filled
 			}
 		}
 	}
 	return out
+}
+
+// stateRef resolves ref from state, or from importIDs for the id of an import
+// target that isn't in state yet.
+func stateRef(ref provider.Ref, s *state.State, importIDs map[string]string) (cty.Value, bool) {
+	target, ok := s.Find(ref.Address)
+	if !ok {
+		if id, imported := importIDs[ref.Address]; imported && ref.Attr == "id" {
+			return cty.StringVal(id), true
+		}
+		return cty.NilVal, false
+	}
+	if ref.Attr == "id" {
+		return cty.StringVal(target.ID), true
+	}
+	if raw, ok := target.Attributes[ref.Attr]; ok {
+		if v, err := ctyjson.Unmarshal(raw, cty.DynamicPseudoType); err == nil {
+			return v, true
+		}
+	}
+	return cty.NilVal, false
 }
 
 // diffAttrs compares actual vs desired over ONLY the attributes the config

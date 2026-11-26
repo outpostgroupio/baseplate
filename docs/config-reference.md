@@ -290,6 +290,22 @@ during `apply`, after the referenced resource has been reconciled. Until then `p
 A reference to a key that isn't declared is a load error that lists the declared keys.
 `type.name.attr` on a `for_each` resource is an error too: pick an instance.
 
+A reference can also be an element of a list or a value in an object or map, at any depth:
+
+```hcl
+resource "roblox_place_media" "lobby" {
+  place_id = "1234567890"
+  thumbnails = [
+    { asset_id = "106681856624842", alt_text = "Three empires" },
+    { asset_id = roblox_asset.store["thumb-2.jpg"].id, alt_text = "A storm of nukes" },
+  ]
+}
+```
+
+The rest of the value is kept as written, and `plan` shows only the referenced fields as
+`(known after apply)`. A reference inside any other expression, such as a string template
+(`"${type.name.id}"`), a function call or a `for` expression, is a load error.
+
 ## `locals`
 
 ```hcl

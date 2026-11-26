@@ -25,7 +25,7 @@ Feature requests and bug reports go in [GitHub issues](https://github.com/outpos
 - An S3-compatible state backend, for teams that already have S3 or R2 credentials.
 - A `--debug` flag that logs Open Cloud requests with credentials redacted.
 - Managed pricing for game passes.
-- References inside lists and objects (e.g. `thumbnails = [{ asset_id = roblox_asset.hero.id }]`).
+- References in `for` expressions (e.g. `[for k, a in roblox_asset.store : { asset_id = a.id }]`).
 - Possibly: homepage thumbnails (thumbnail personalization) and translated icons and thumbnails,
   which have their own API-key endpoints.
 - Possibly: collaborators and permissions, Creator Store products, localization tables, and
