@@ -198,8 +198,11 @@ APIs, and several are marked experimental or beta.
   that way until the next write. So apply waits for three consecutive matching reads and re-sends
   the PATCH (up to three times) when they don't come.
 - Uploading a Video asset through Open Cloud returns `Actual price (2000 Robux) is larger than
-  expected price (0 Robux)`, and video thumbnails can only be added for a public experience, so
-  video in `previews` is untested.
+  expected price (0 Robux)`, and video thumbnails can only be added for a public experience. A
+  video added in Creator Dashboard reads back in `previews` as an ordinary entry
+  (`{"assetId": …, "altText": ""}`) in its place in the order, and a PATCH that sends it back keeps
+  it there (tested on a public universe, 2026-11-25). Not tested: alt text on a video entry, or a
+  video still in moderation.
 
 ### Developer products, game passes, badges
 
