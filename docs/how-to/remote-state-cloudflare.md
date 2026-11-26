@@ -52,6 +52,7 @@ Set who may sign in, and which repositories' workflows may use it, in `wrangler.
   "GITHUB_ORG": "openfrontio",
   "GITHUB_TEAM": "",                         // optional: a team slug in that org
   "OIDC_REPOSITORIES": "openfrontio/roblox", // comma-separated owner/repo
+  "OIDC_OUTPUT_REPOSITORIES": "",           // optional: repos that may only read outputs
   "TOKEN_TTL_DAYS": "30",
   "KEEP_HISTORY": "true"
 }
@@ -131,6 +132,11 @@ steps:
 
 Pull requests from forks don't get `id-token: write`, so they can't read or write state. Run
 `validate` for those instead; it needs neither the state nor an API key.
+
+Workflows in `OIDC_OUTPUT_REPOSITORIES` may only read states' [outputs](../config-reference.md#output),
+for a [`baseplate_remote_state`](../config-reference.md#data-baseplate_remote_state) data source:
+they can't read the rest of any state, write it or lock it. Use this for a repository that consumes
+another's outputs but manages nothing in this server.
 
 For CI elsewhere, set `BASEPLATE_STATE_TOKEN` to a token from `baseplate login`, or to the admin
 token.

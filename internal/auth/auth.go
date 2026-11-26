@@ -40,7 +40,14 @@ const DiscoveryPath = "/.well-known/baseplate.json"
 type Discovery struct {
 	Login *LoginV1 `json:"login.v1,omitempty"`
 	OIDC  *OIDCV1  `json:"oidc.v1,omitempty"`
+	// Outputs, when present, says GET <state address>?outputs returns only
+	// the state's output values, for baseplate_remote_state. A server can let
+	// an identity read outputs without reading the whole state.
+	Outputs *OutputsV1 `json:"outputs.v1,omitempty"`
 }
+
+// OutputsV1 has no fields yet.
+type OutputsV1 struct{}
 
 // LoginV1 describes an OAuth 2.0 authorization-code flow with PKCE, with the
 // same fields as Terraform's login.v1 service.

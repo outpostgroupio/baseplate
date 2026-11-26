@@ -41,11 +41,18 @@ export function resetKeys(): void {
   jwks = null;
 }
 
+/** A verified GitHub Actions token: who it is, and the repository it names (lowercase). */
+export interface ActionsIdentity {
+  /** "github-actions:owner/repo@ref" */
+  identity: string;
+  repository: string;
+}
+
 /**
- * Verifies a GitHub Actions OIDC token for this Worker. Returns the
- * identity ("github-actions:owner/repo@ref") or null.
+ * Verifies a GitHub Actions OIDC token for this Worker from one of
+ * repositories, or returns null.
  */
-export async function verifyActionsToken(token: string, audience: string, repositories: string[]): Promise<string | null> {
+export async function verifyActionsToken(token: string, audience: string, repositories: string[]): Promise<ActionsIdentity | null> {
   const parts = token.split(".");
   if (parts.length !== 3) return null;
   let header: { alg?: string; kid?: string };
@@ -75,5 +82,5 @@ export async function verifyActionsToken(token: string, audience: string, reposi
   if (typeof claims.nbf === "number" && claims.nbf > t + SKEW) return null;
   const repo = claims.repository?.toLowerCase();
   if (!repo || !repositories.includes(repo)) return null;
-  return `github-actions:${claims.repository}@${claims.ref ?? ""}`;
+  return { identity: `github-actions:${claims.repository}@${claims.ref ?? ""}`, repository: repo };
 }

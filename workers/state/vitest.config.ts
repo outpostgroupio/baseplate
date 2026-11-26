@@ -13,6 +13,7 @@ export default defineConfig({
           GITHUB_CLIENT_SECRET: "gh-secret",
           GITHUB_ORG: "acme",
           OIDC_REPOSITORIES: "acme/game",
+          OIDC_OUTPUT_REPOSITORIES: "acme/reader",
         },
       },
     }),

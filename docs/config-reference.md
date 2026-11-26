@@ -1,7 +1,7 @@
 # Config reference
 
 A Baseplate config is an HCL file (default `baseplate.bp.hcl`). This page covers the language:
-blocks, `for_each`, `moved`, `lifecycle`, references, `locals`, `output` and functions. The attributes of each `roblox_*` resource
+blocks, `for_each`, `moved`, `lifecycle`, references, `locals`, `output`, `data` and functions. The attributes of each `roblox_*` resource
 are in the [resource reference](resource-reference.md).
 
 ## Blocks
@@ -13,7 +13,8 @@ are in the [resource reference](resource-reference.md).
 | `import { to = ..., id = ... }` | Adopt an existing remote resource into state on the next `apply`. See [importing existing resources](how-to/importing-existing-resources.md). |
 | `moved { from = ..., to = ... }` | Record that a resource or instance changed address, so state follows it instead of destroying and re-creating it. See [`moved`](#moved). |
 | `locals { ... }` | Named values computed once at load time. |
-| `output "<name>" { value = ... }` | A value recorded in state on `apply`, for `baseplate output` and other tools. See [`output`](#output). |
+| `output "<name>" { value = ... }` | A value recorded in state on `apply`, for `baseplate output` and other configs. See [`output`](#output). |
+| `data "baseplate_remote_state" "<name>" { ... }` | Read another config's outputs from its state. See [`data "baseplate_remote_state"`](#data-baseplate_remote_state). |
 | `backend "http" { ... }` | Remote state. See [State](state.md#remote-state-http-backend). |
 
 ## `for_each`
@@ -350,6 +351,59 @@ against the state it just wrote, prints them after the summary, and records them
 the value recorded before.
 
 `depends_on` and `precondition` aren't supported.
+
+## `data "baseplate_remote_state"`
+
+Reads the [outputs](#output) another config recorded in its state, as Terraform's
+`terraform_remote_state` does. Use it to share values between configs with their own state, for
+example assets uploaded once and shown by several environments:
+
+```hcl
+# assets.bp.hcl, with its state at /states/roblox/assets
+output "store_icon" {
+  value = roblox_asset.store["icon.png"].id
+}
+
+# production.bp.hcl
+data "baseplate_remote_state" "assets" {
+  backend = "http"
+  config = {
+    address = "https://state.example.com/states/roblox/assets"
+  }
+}
+
+resource "roblox_place_media" "lobby" {
+  place_id = "1234567890"
+  icon     = data.baseplate_remote_state.assets.outputs.store_icon
+}
+```
+
+| Argument | Description |
+|---|---|
+| `backend` | Required. `"http"` or `"local"`. |
+| `config` | The backend's settings: for `http`, the attributes of a [`backend "http"`](state.md#remote-state-http-backend) block (`address`, `username`, `password`, …); for `local`, `{ path = "<state file>" }` (relative to the working directory, or use `path.config`). |
+| `defaults` | Optional object of values for outputs the state doesn't have, e.g. before the other config's first apply. |
+
+`data.baseplate_remote_state.<name>.outputs` is an object of the state's outputs, with `defaults`
+filling in the ones it lacks. The state is read when the config loads, before anything else, so
+its values are known in `plan` and can go anywhere a [local](#locals) can: in attributes, inside
+lists, in `for_each`, in locals and in outputs. A data block's arguments may use `path.config`,
+`env()` and functions, but not locals, resources or other data sources.
+
+- **Credentials:** the same as a `backend "http"` block with that address: `username` and
+  `password` from `config`, or else `BASEPLATE_STATE_TOKEN`, a GitHub Actions OIDC token, or the
+  token from `baseplate login` (see [authentication](state-server-protocol.md#authentication)).
+- **Reading:** read-only, without taking the other state's lock. A server that supports
+  [`outputs.v1`](state-server-protocol.md#outputsv1-reading-a-states-outputs), such as the
+  reference Worker, is asked for the outputs only; any other http backend serves the whole state.
+- **Missing values:** referencing an output the state doesn't have is a load error that lists
+  the ones it has. A state that doesn't exist yet has no outputs.
+- **`validate`** doesn't read the state: values that use a data source are unknown there, and a
+  `for_each` over one declares no instances.
+- `--refresh=false` doesn't change anything here; there's nothing on Roblox to read.
+
+Each data source is read once per command. Values change only when the other config is applied,
+so a `plan` here shows the change after that apply.
 
 ## `path.config`
 

@@ -79,3 +79,26 @@ describe("GitHub Actions OIDC", () => {
     expect(await status(await jwt(claims(), "k1", other.privateKey))).toBe(401);
   });
 });
+
+describe("outputs-only repositories", () => {
+  it("may read a state's outputs and nothing else", async () => {
+    serveKeys();
+    const state = JSON.stringify({ version: 4, serial: 1, lineage: "x", resources: [], outputs: { a: { value: "1", type: "string" } } });
+    expect((await call("/states/shared", { method: "POST", headers: { Authorization: "Bearer test-admin-token" }, body: state })).status).toBe(200);
+
+    const reader = { Authorization: `Bearer ${await jwt(claims({ repository: "acme/reader" }))}` };
+    const outputs = await call("/states/shared?outputs", { headers: reader });
+    expect(outputs.status).toBe(200);
+    expect(await outputs.json()).toEqual({ outputs: { a: { value: "1", type: "string" } } });
+
+    expect((await call("/states/shared", { headers: reader })).status).toBe(403);
+    expect((await call("/states/shared", { method: "POST", headers: reader, body: state })).status).toBe(403);
+    expect((await call("/states/shared", { method: "LOCK", headers: reader, body: JSON.stringify({ ID: "x" }) })).status).toBe(403);
+    expect((await call("/states/shared/lock?outputs", { headers: reader })).status).toBe(403);
+  });
+
+  it("leaves full-access repositories as they were", async () => {
+    serveKeys();
+    expect((await call("/states/shared2", { headers: { Authorization: `Bearer ${await jwt(claims())}` } })).status).toBe(204);
+  });
+});

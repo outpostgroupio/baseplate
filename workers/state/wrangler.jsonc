@@ -20,6 +20,9 @@
     // GitHub Actions OIDC: comma-separated owner/repo list whose workflows may use
     // the state without a stored secret. Empty disables OIDC.
     "OIDC_REPOSITORIES": "",
+    // Comma-separated owner/repo list whose workflows may only read the outputs of
+    // states (for baseplate_remote_state), not the states themselves.
+    "OIDC_OUTPUT_REPOSITORIES": "",
     // How long a token from baseplate login lasts.
     "TOKEN_TTL_DAYS": "30",
     // Keep a copy of every state version under history/ in the bucket.

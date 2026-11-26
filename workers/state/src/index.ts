@@ -6,7 +6,8 @@
 // on <state>/lock). State is stored in R2; each state's lock lives in a
 // Durable Object. Users sign in with `baseplate login` (GitHub by default; see
 // provider.ts), CI uses GitHub Actions OIDC, and ADMIN_TOKEN is for
-// emergencies. docs/state-server-protocol.md in the Baseplate repo describes
+// emergencies. GET <state>?outputs returns only the state's output values,
+// which some CI identities may read without reading the rest. docs/state-server-protocol.md in the Baseplate repo describes
 // the protocol.
 
 import type { Env } from "./env";
@@ -78,7 +79,8 @@ function discovery(env: Env): Response {
       ports: PORTS,
     };
   }
-  if (repositories(env).length > 0) doc["oidc.v1"] = { issuers: [ISSUER] };
+  if (repositories(env).length > 0 || outputRepositories(env).length > 0) doc["oidc.v1"] = { issuers: [ISSUER] };
+  doc["outputs.v1"] = {};
   return json(200, doc);
 }
 
@@ -169,8 +171,14 @@ function oauthError(error: string, description?: string): Response {
 
 // --- Authentication of state requests ---
 
+/** A caller. outputsOnly limits it to reading states' outputs. */
+export interface Caller {
+  who: string;
+  outputsOnly: boolean;
+}
+
 /** Returns who is calling, or null. Accepts a bearer token, or the password of HTTP Basic auth (for Terraform/OpenTofu clients). */
-export async function authenticate(request: Request, env: Env): Promise<string | null> {
+export async function authenticate(request: Request, env: Env): Promise<Caller | null> {
   const header = request.headers.get("Authorization") ?? "";
   let tok = "";
   if (/^bearer /i.test(header)) tok = header.slice(7).trim();
@@ -183,21 +191,31 @@ export async function authenticate(request: Request, env: Env): Promise<string |
     }
   }
   if (!tok) return null;
-  if (env.ADMIN_TOKEN && safeEqual(tok, env.ADMIN_TOKEN)) return "admin";
+  if (env.ADMIN_TOKEN && safeEqual(tok, env.ADMIN_TOKEN)) return { who: "admin", outputsOnly: false };
   if (tok.startsWith(TOKEN_PREFIX)) {
     const access = await unseal<AccessToken>(env.SESSION_SECRET, tok.slice(TOKEN_PREFIX.length), "access");
     if (!access || !(await identityProvider.check(env, access.session))) return null;
-    return access.session.subject;
+    return { who: access.session.subject, outputsOnly: false };
   }
-  const repos = repositories(env);
-  if (repos.length > 0 && tok.split(".").length === 3) {
-    return verifyActionsToken(tok, new URL(request.url).origin, repos);
+  const full = repositories(env);
+  const outputs = outputRepositories(env);
+  if (full.length + outputs.length > 0 && tok.split(".").length === 3) {
+    const id = await verifyActionsToken(tok, new URL(request.url).origin, [...full, ...outputs]);
+    return id && { who: id.identity, outputsOnly: !full.includes(id.repository) };
   }
   return null;
 }
 
 function repositories(env: Env): string[] {
-  return (env.OIDC_REPOSITORIES ?? "")
+  return repoList(env.OIDC_REPOSITORIES);
+}
+
+function outputRepositories(env: Env): string[] {
+  return repoList(env.OIDC_OUTPUT_REPOSITORIES);
+}
+
+function repoList(raw: string | undefined): string[] {
+  return (raw ?? "")
     .split(",")
     .map((r) => r.trim().toLowerCase())
     .filter(Boolean);
@@ -206,8 +224,9 @@ function repositories(env: Env): string[] {
 // --- State (the http backend protocol) ---
 
 async function states(request: Request, env: Env, rest: string): Promise<Response> {
-  const who = await authenticate(request, env);
-  if (!who) return new Response("unauthorized\n", { status: 401, headers: { "WWW-Authenticate": 'Bearer realm="baseplate-state"' } });
+  const caller = await authenticate(request, env);
+  if (!caller) return new Response("unauthorized\n", { status: 401, headers: { "WWW-Authenticate": 'Bearer realm="baseplate-state"' } });
+  const who = caller.who;
 
   // <name> is the state; <name>/lock also accepts POST (lock) and DELETE
   // (unlock), for clients configured GitLab-style.
@@ -221,6 +240,8 @@ async function states(request: Request, env: Env, rest: string): Promise<Respons
   const obj = env.STATE_OBJECTS.get(env.STATE_OBJECTS.idFromName(name));
 
   const method = request.method.toUpperCase();
+  const outputsRead = method === "GET" && !lockPath && new URL(request.url).searchParams.has("outputs");
+  if (caller.outputsOnly && !outputsRead) return text(403, "this identity may only read outputs (GET <state>?outputs)");
   if (method === "LOCK" || (lockPath && method === "POST")) {
     const info = await lockBody(request);
     if (!info) return text(400, "lock body must be JSON with an ID");
@@ -237,7 +258,9 @@ async function states(request: Request, env: Env, rest: string): Promise<Respons
   if (lockPath) return text(405, "method not allowed");
   if (method === "GET") {
     const body = await obj.getState(name);
-    return body === null ? new Response(null, { status: 204 }) : new Response(body, { headers: { "Content-Type": "application/json" } });
+    if (body === null) return new Response(null, { status: 204 });
+    if (outputsRead) return json(200, { outputs: (JSON.parse(body) as { outputs?: unknown }).outputs ?? {} });
+    return new Response(body, { headers: { "Content-Type": "application/json" } });
   }
   if (method === "POST" || method === "PUT") {
     const body = await request.text();

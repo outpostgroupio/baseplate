@@ -10,10 +10,10 @@ import (
 )
 
 // evalLocals evaluates every `locals {}` block. Locals may reference other
-// locals (evaluated in dependency order; cycles are an error), `path.config`,
-// env() and the function library, but not resources, so every local is known
-// at load time (which for_each needs). Names must be unique across blocks.
-func (l *loader) evalLocals(blocks hcl.Blocks) (map[string]cty.Value, error) {
+// locals (evaluated in dependency order; cycles are an error), data sources,
+// `path.config`, env() and the function library, but not resources, so every
+// local is known at load time (which for_each needs). Names must be unique across blocks.
+func (l *loader) evalLocals(blocks hcl.Blocks, data cty.Value) (map[string]cty.Value, error) {
 	attrs := map[string]*hcl.Attribute{}
 	for _, b := range blocks {
 		if b.Type != "locals" {
@@ -62,7 +62,7 @@ func (l *loader) evalLocals(blocks hcl.Blocks) (map[string]cty.Value, error) {
 	pathVal := pathObject(l.path)
 	for _, name := range order {
 		ctx := &hcl.EvalContext{
-			Variables: map[string]cty.Value{"local": cty.ObjectVal(values), "path": pathVal},
+			Variables: map[string]cty.Value{"local": cty.ObjectVal(values), "path": pathVal, "data": data},
 			Functions: funcs,
 		}
 		v, d := attrs[name].Expr.Value(ctx)

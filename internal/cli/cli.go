@@ -67,11 +67,12 @@ func withRobloxSchemas(p provider.Provider) provider.Provider {
 // which doesn't know those types). If the config doesn't load against the
 // Roblox schemas either, that error is the one reported.
 func loadConfig(path string, p provider.Provider) (*config.Config, error) {
-	cfg, err := config.LoadConfig(path, p)
+	opts := config.LoadOptions{RemoteState: remoteStateReader()}
+	cfg, err := config.LoadConfigWith(path, p, opts)
 	if err == nil || os.Getenv("ROBLOX_API_KEY") != "" {
 		return cfg, err
 	}
-	if _, serr := config.LoadConfig(path, withRobloxSchemas(p)); serr != nil {
+	if _, serr := config.LoadConfigWith(path, withRobloxSchemas(p), opts); serr != nil {
 		return nil, serr
 	}
 	return nil, errors.New("ROBLOX_API_KEY is not set: it is needed to plan or apply roblox_* resources (`baseplate validate` works without it)")
@@ -94,21 +95,7 @@ func openBackend(cfgPath, statePath string) (backend.Backend, bool, error) {
 	}
 	switch bc.Type {
 	case "http":
-		hc, err := httpConfigFromAttrs(bc.Attributes)
-		if err != nil {
-			return nil, false, err
-		}
-		hc.Version = version.Version
-		if hc.Username == "" && hc.Password == "" {
-			host, err := auth.HostOf(hc.Address)
-			if err != nil {
-				return nil, false, err
-			}
-			if hc.Token, err = auth.Token(context.Background(), http.DefaultClient, host); err != nil {
-				return nil, false, fmt.Errorf("http backend: finding a token for %s: %w", host, err)
-			}
-		}
-		h, err := backend.NewHTTP(hc)
+		h, err := httpBackend(bc.Attributes)
 		if err != nil {
 			return nil, false, err
 		}
@@ -116,6 +103,26 @@ func openBackend(cfgPath, statePath string) (backend.Backend, bool, error) {
 	default:
 		return nil, false, fmt.Errorf("unsupported backend type %q", bc.Type)
 	}
+}
+
+// httpBackend makes an http backend from its block's attributes, with the
+// token for its host (see auth.Token) unless they set a username and password.
+func httpBackend(attrs map[string]cty.Value) (*backend.HTTP, error) {
+	hc, err := httpConfigFromAttrs(attrs)
+	if err != nil {
+		return nil, err
+	}
+	hc.Version = version.Version
+	if hc.Username == "" && hc.Password == "" {
+		host, err := auth.HostOf(hc.Address)
+		if err != nil {
+			return nil, err
+		}
+		if hc.Token, err = auth.Token(context.Background(), http.DefaultClient, host); err != nil {
+			return nil, fmt.Errorf("http backend: finding a token for %s: %w", host, err)
+		}
+	}
+	return backend.NewHTTP(hc)
 }
 
 var httpBackendAttrs = map[string]bool{

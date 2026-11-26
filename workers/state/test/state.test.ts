@@ -72,3 +72,24 @@ describe("state protocol", () => {
     expect((await call("/states/bad", { method: "POST", headers: ADMIN, body: "not json" })).status).toBe(400);
   });
 });
+
+describe("outputs", () => {
+  it("advertises outputs.v1", async () => {
+    const d = (await (await call("/.well-known/baseplate.json")).json()) as Record<string, unknown>;
+    expect(d["outputs.v1"]).toEqual({});
+  });
+
+  it("returns only a state's outputs for GET ?outputs", async () => {
+    expect((await call("/states/out?outputs", { headers: ADMIN })).status).toBe(204);
+    const outputs = { icon: { value: "42", type: "string" } };
+    const state = JSON.stringify({ version: 4, serial: 1, lineage: "x", resources: [{ type: "t", name: "n", id: "1" }], outputs });
+    expect((await call("/states/out", { method: "POST", headers: ADMIN, body: state })).status).toBe(200);
+    const got = await call("/states/out?outputs", { headers: ADMIN });
+    expect(got.status).toBe(200);
+    expect(await got.json()).toEqual({ outputs });
+
+    const none = JSON.stringify({ version: 3, serial: 1, lineage: "x", resources: [] });
+    expect((await call("/states/out", { method: "POST", headers: ADMIN, body: none })).status).toBe(200);
+    expect(await (await call("/states/out?outputs", { headers: ADMIN })).json()).toEqual({ outputs: {} });
+  });
+});
