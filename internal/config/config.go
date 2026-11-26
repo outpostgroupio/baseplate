@@ -296,7 +296,7 @@ func LoadConfigWith(path string, p provider.Provider, opts LoadOptions) (*Config
 				if vd.HasErrors() {
 					return nil, vd
 				}
-				pc.Attributes[k] = v
+				pc.Attributes[k], _ = v.UnmarkDeep()
 			}
 		case "resource":
 			typ, name := b.Labels[0], b.Labels[1]
@@ -408,6 +408,17 @@ func (l *loader) decodeInstance(body, remain hcl.Body, r provider.Resource, typ,
 			delete(attrs, k)
 		}
 	}
+	// A value computed from a sensitive one carries plan.SensitiveMark.
+	// Providers and state take plain values, so record which attributes had
+	// it, for plan to redact and state to remember, and remove it.
+	var sensitive []string
+	for k, v := range attrs {
+		if v.ContainsMarked() {
+			attrs[k], _ = v.UnmarkDeep()
+			sensitive = append(sensitive, k)
+		}
+	}
+	sort.Strings(sensitive)
 	// After removing bare references, each remaining unknown must be a
 	// reference inside a list or object (nested), which stays in place and is
 	// filled in at apply. Any other unknown is a reference used in an
@@ -442,7 +453,7 @@ func (l *loader) decodeInstance(body, remain hcl.Body, r provider.Resource, typ,
 	}
 	return plan.DesiredResource{
 		Type: typ, Name: name, Key: key, Attributes: attrs,
-		DependsOn: deps, Refs: refAttrs, PathRefs: pathRefs,
+		DependsOn: deps, Refs: refAttrs, PathRefs: pathRefs, SensitiveAttrs: sensitive,
 	}, nil
 }
 
@@ -487,6 +498,7 @@ func (l *loader) expandImport(b *hcl.Block, ctx *hcl.EvalContext) ([]plan.Import
 		if vd.HasErrors() {
 			return nil, vd
 		}
+		idv, _ = idv.UnmarkDeep()
 		// Accept a number too: id maps decoded from JSON often hold numeric ids.
 		if !idv.IsNull() && idv.IsKnown() && idv.Type() == cty.Number {
 			idv, _ = convert.Convert(idv, cty.String)
@@ -588,6 +600,10 @@ func (l *loader) evalForEach(a *hcl.Attribute, ctx *hcl.EvalContext, what string
 	}
 	if v.IsNull() {
 		return nil, nil, fmt.Errorf("%s: %s: for_each must not be null", l.path, what)
+	}
+	// Instance keys are shown in addresses and in every plan, as in Terraform.
+	if v.ContainsMarked() {
+		return nil, nil, fmt.Errorf("%s: %s: for_each value is sensitive, and instance keys are shown in every plan; use nonsensitive() if the keys may be shown", l.path, what)
 	}
 	if !v.IsWhollyKnown() {
 		return nil, nil, fmt.Errorf("%s: %s: for_each value must be known when the config loads", l.path, what)

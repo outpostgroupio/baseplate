@@ -341,7 +341,7 @@ output "thumbnail_ids" {
 |---|---|
 | `value` | Required. Any expression, including references to resources (in any form: inside lists, templates, function calls or `for` expressions), locals and functions. Not `each`. |
 | `description` | Optional literal string, for whoever reads the config. |
-| `sensitive` | Optional literal `true` or `false`. A sensitive value is shown as `(sensitive value)` in `plan` and `<sensitive>` after `apply` and in `baseplate output`, but it is still written to state in plain text, and `baseplate output <name>` prints it. |
+| `sensitive` | Optional literal `true` or `false`. A sensitive value is shown as `(sensitive value)` in `plan` and `<sensitive>` after `apply` and in `baseplate output`, but it is still written to state in plain text, and `baseplate output <name>` prints it. Required when the value is [sensitive](#sensitive-values). |
 
 `plan` lists changes to outputs after the resources, under `Changes to Outputs:`, and an output
 that uses a resource the plan creates or replaces shows as `(known after apply)`. An output-only
@@ -402,8 +402,28 @@ lists, in `for_each`, in locals and in outputs. A data block's arguments may use
   `for_each` over one declares no instances.
 - `--refresh=false` doesn't change anything here; there's nothing on Roblox to read.
 
-Each data source is read once per command. Values change only when the other config is applied,
+A sensitive output stays [sensitive](#sensitive-values) here. Each data source is read once per
+command. Values change only when the other config is applied,
 so a `plan` here shows the change after that apply.
+
+## Sensitive values
+
+A value is sensitive when it comes from a sensitive output read with
+[`baseplate_remote_state`](#data-baseplate_remote_state), or is passed to `sensitive()`. As in
+Terraform, anything computed from it is sensitive too: a local, a string template, a list that
+holds it. Then:
+
+- A resource attribute set from it is shown as `(sensitive value)` in `plan` and `apply`, old and
+  new values alike. State records it in the resource's `sensitive_attributes`, so `show` leaves it
+  out and later plans keep hiding it. The whole attribute is hidden, even when only part of it is
+  sensitive.
+- An `output` that uses it must say `sensitive = true`. An attribute recorded as sensitive counts
+  too, so a secret can't be re-published through a plain output by accident.
+- It can't be used in `for_each`, because instance keys appear in addresses and in every plan.
+
+`nonsensitive(value)` removes the mark, for a value that may be shown (a hash of a secret, say).
+Sensitive values are still stored in state in plain text and sent to Roblox as they are: this keeps
+them out of what Baseplate prints, not out of state.
 
 ## `path.config`
 
@@ -421,6 +441,7 @@ in plans like any other value.
 | Function | Description |
 |---|---|
 | `env(name)` | The environment variable `name`, or `""` if unset. Read when the config loads. |
+| `sensitive(value)`, `nonsensitive(value)` | Make a value [sensitive](#sensitive-values), or stop it being sensitive. |
 | `fileset(dir, pattern)` | Set of files (not directories) under `dir` matching a glob; `**` crosses directories. Paths are relative to `dir` and use `/`. A missing `dir` is an error. |
 | `file(path)` | The file's contents as a string. The file must be UTF-8. |
 | `filesha256(path)` | The hex SHA-256 of the file's contents, for `roblox_asset`'s `source_hash`. |

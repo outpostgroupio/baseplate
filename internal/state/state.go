@@ -18,6 +18,11 @@ type Resource struct {
 	Attributes   map[string]json.RawMessage `json:"attributes"`
 	Triggers     map[string]json.RawMessage `json:"triggers,omitempty"`
 	Dependencies []string                   `json:"dependencies,omitempty"`
+	// SensitiveAttributes names the attributes whose value came from a
+	// sensitive value in the config (e.g. a sensitive output read with
+	// baseplate_remote_state). They're stored like any other attribute, but
+	// show and plan redact them.
+	SensitiveAttributes []string `json:"sensitive_attributes,omitempty"`
 }
 
 func (r Resource) Address() string { return addr.Format(r.Type, r.Name, r.Key) }
@@ -66,7 +71,8 @@ type Retired struct {
 // Version 3 added Retired. An older binary would drop the list when it
 // rewrote the state, losing track of objects waiting for cleanup.
 //
-// Version 4 added Outputs, which an older binary would likewise drop.
+// Version 4 added Outputs and Resource.SensitiveAttributes, which an older
+// binary would likewise drop (the second would then show sensitive values).
 const CurrentVersion = 4
 
 func New() *State {

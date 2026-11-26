@@ -411,7 +411,8 @@ roblox_asset.sprites["ui/gem.png"]
 ```
 
 `--json` returns the inventory sorted by address. `key` is present only for `for_each` instances,
-and `attributes` are plain JSON values. Sensitive attributes are never included. `triggers` holds
+and `attributes` are plain JSON values. Sensitive attributes, including ones set from a
+[sensitive value](config-reference.md#sensitive-values), are never included. `triggers` holds
 the values Baseplate records to detect changes it can't read back from Roblox, such as a file's
 `content_hash`; it's left out for resources that have none.
 

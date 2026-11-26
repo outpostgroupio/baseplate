@@ -60,6 +60,7 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 			if err := commit(b, s, state.Resource{
 				Type: c.Type, Name: c.Name, Key: c.Key, ID: c.ImportID,
 				Attributes: encodeValues(actual), Triggers: trigs, Dependencies: c.DependsOn,
+				SensitiveAttributes: c.SensitiveAttrs,
 			}); err != nil {
 				return err
 			}
@@ -80,7 +81,8 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 				outputs[c.Address] = withID(actual, c.ID)
 			}
 			// Nothing changed remotely, but the dependency edges may have (e.g. a
-			// for_each dependency lost an instance), a trigger may have no
+			// for_each dependency lost an instance), so may the sensitive
+			// attributes, a trigger may have no
 			// recorded baseline yet (state written before the resource had it;
 			// plan skips such replace-forcing triggers), and Read may report a
 			// computed output that state doesn't have yet (provider.Outputter).
@@ -94,6 +96,12 @@ func Apply(ctx context.Context, p provider.Provider, b backend.Backend, s *state
 			changed := recordOutputs(r, c.Actual, st)
 			if !sameSet(st.Dependencies, c.DependsOn) {
 				st.Dependencies = c.DependsOn
+				changed = true
+			}
+			// The config can make an attribute sensitive without changing
+			// its value; show must hide it from then on.
+			if !sameSet(st.SensitiveAttributes, c.SensitiveAttrs) {
+				st.SensitiveAttributes = c.SensitiveAttrs
 				changed = true
 			}
 			if len(c.BackfillTriggers) > 0 && backfillTriggers(r, c, outputs, st) {
@@ -484,6 +492,7 @@ func stateResource(c plan.Change, id string, attrs provider.Attributes, triggers
 	return state.Resource{
 		Type: c.Type, Name: c.Name, Key: c.Key, ID: id,
 		Attributes: encodeValues(attrs), Triggers: triggers, Dependencies: c.DependsOn,
+		SensitiveAttributes: c.SensitiveAttrs,
 	}
 }
 
@@ -603,6 +612,9 @@ func adopt(ctx context.Context, p provider.Provider, s *state.State, address, id
 		Attributes:   encodeValues(actual),
 		Triggers:     trigs,
 		Dependencies: d.DependsOn,
+		// The import's attributes are read back, but they still show what the
+		// config's sensitive values set.
+		SensitiveAttributes: d.SensitiveAttrs,
 	}, nil
 }
 

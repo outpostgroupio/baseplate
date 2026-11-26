@@ -44,7 +44,8 @@ func (l *loader) decodeOutput(b *hcl.Block, ctx *hcl.EvalContext) (OutputBlock, 
 	if err := noEach(o.value.Variables()); err != nil {
 		return OutputBlock{}, err
 	}
-	if _, d := o.value.Value(ctx); d.HasErrors() {
+	v, d := o.value.Value(ctx)
+	if d.HasErrors() {
 		return OutputBlock{}, d
 	}
 	if a, ok := content.Attributes["description"]; ok {
@@ -61,7 +62,20 @@ func (l *loader) decodeOutput(b *hcl.Block, ctx *hcl.EvalContext) (OutputBlock, 
 		}
 		o.Sensitive = v.True()
 	}
+	if err := o.checkSensitive(v); err != nil {
+		return OutputBlock{}, err
+	}
 	return o, nil
+}
+
+// checkSensitive rejects a sensitive value (plan.SensitiveMark) in an
+// output that doesn't say sensitive = true, as Terraform does, so a secret
+// isn't published in plain sight by accident.
+func (o OutputBlock) checkSensitive(v cty.Value) error {
+	if o.Sensitive || !v.ContainsMarked() {
+		return nil
+	}
+	return fmt.Errorf("output %q refers to sensitive values; set sensitive = true in it, or use nonsensitive() if the value may be shown", o.Name)
 }
 
 // EvalOutputs evaluates the output blocks. instances maps an instance address
@@ -97,6 +111,10 @@ func (c *Config) EvalOutputs(instances map[string]cty.Value) (map[string]plan.Ou
 		if d.HasErrors() {
 			return nil, fmt.Errorf("output %q: %w", o.Name, d)
 		}
+		if err := o.checkSensitive(v); err != nil {
+			return nil, err
+		}
+		v, _ = v.UnmarkDeep()
 		out[o.Name] = plan.OutputValue{Value: v, Sensitive: o.Sensitive}
 	}
 	return out, nil

@@ -76,7 +76,7 @@ The state file has a `version` field. This release writes version 4.
 | 1 | Initial format. |
 | 2 | Resources can carry an `index_key`, the key of a `for_each` instance. Version 1 files are upgraded when read. |
 | 3 | A `retired` list of objects a replace left in place, for `baseplate cleanup`. Older files are upgraded when read. |
-| 4 | An `outputs` object of [output values](config-reference.md#output), each `{ "value", "type", "sensitive" }` as in Terraform's state. Older files are upgraded when read. |
+| 4 | An `outputs` object of [output values](config-reference.md#output), each `{ "value", "type", "sensitive" }` as in Terraform's state, and each resource's `sensitive_attributes`, the attributes set from [sensitive values](config-reference.md#sensitive-values). Older files are upgraded when read. |
 
 Baseplate refuses a state file written by a newer version, so an old binary can't damage it.
 Upgrade Baseplate instead. Future format changes will come with an automatic upgrade on read. Both

@@ -90,13 +90,13 @@ func (p *Plan) Pending() map[string]bool {
 // creates, replaces or destroys is left out, so it reads as unknown.
 func (p *Plan) InstanceValues(s *state.State) map[string]cty.Value {
 	skip := p.Pending()
-	desired := map[string]provider.Attributes{}
+	desired := map[string]Change{}
 	for _, c := range p.Changes {
 		switch c.Action {
 		case provider.ActionDelete:
 			skip[c.Address] = true
 		case provider.ActionUpdate:
-			desired[c.Address] = c.Desired
+			desired[c.Address] = c
 		}
 	}
 	out := map[string]cty.Value{}
@@ -105,7 +105,12 @@ func (p *Plan) InstanceValues(s *state.State) map[string]cty.Value {
 		if skip[a] {
 			continue
 		}
-		out[a] = instanceValue(r, desired[a])
+		if c, ok := desired[a]; ok {
+			r.SensitiveAttributes = append(append([]string{}, r.SensitiveAttributes...), c.SensitiveAttrs...)
+			out[a] = instanceValue(r, c.Desired)
+			continue
+		}
+		out[a] = instanceValue(r, nil)
 	}
 	return out
 }
@@ -119,6 +124,9 @@ func StateInstanceValues(s *state.State) map[string]cty.Value {
 	return out
 }
 
+// instanceValue is r's attributes and id as an object, each of its
+// SensitiveAttributes marked sensitive (SensitiveMark), so an output that
+// uses one must be sensitive too.
 func instanceValue(r state.Resource, overlay provider.Attributes) cty.Value {
 	attrs := map[string]cty.Value{}
 	for k, raw := range r.Attributes {
@@ -129,6 +137,11 @@ func instanceValue(r state.Resource, overlay provider.Attributes) cty.Value {
 	for k, v := range overlay {
 		if v.IsWhollyKnown() {
 			attrs[k] = v
+		}
+	}
+	for _, k := range r.SensitiveAttributes {
+		if v, ok := attrs[k]; ok {
+			attrs[k] = v.Mark(SensitiveMark)
 		}
 	}
 	attrs["id"] = cty.StringVal(r.ID)

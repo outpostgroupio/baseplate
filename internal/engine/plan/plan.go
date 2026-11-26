@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/zclconf/go-cty/cty"
@@ -40,7 +41,20 @@ type DesiredResource struct {
 	// reference with no Attr), or when the referenced attribute changes. The
 	// referenced addresses are also in DependsOn, so they're planned first.
 	ReplaceTriggeredBy []provider.Ref
+	// SensitiveAttrs names the attributes whose value is sensitive because of
+	// the config (SensitiveMark): it comes from a sensitive output, or passes
+	// through sensitive(). Plan redacts them, and state records them.
+	SensitiveAttrs []string
 }
+
+// SensitiveMark marks a cty value as sensitive while a config is evaluated:
+// a value read from a sensitive output (baseplate_remote_state), anything
+// computed from one, or a value passed to sensitive(). Expressions carry it
+// through; config loading records the attributes that have it
+// (DesiredResource.SensitiveAttrs) and removes it.
+const SensitiveMark = sensitiveMark("sensitive")
+
+type sensitiveMark string
 
 func (d DesiredResource) Address() string { return addr.Format(d.Type, d.Name, d.Key) }
 
@@ -64,7 +78,12 @@ type Change struct {
 	DependsOn []string
 	Refs      map[string]provider.Ref
 	PathRefs  map[string][]PathRef
+	// Sensitive names the attributes plan and apply redact: the resource
+	// type's (provider.Sensitive), and SensitiveAttrs.
 	Sensitive []string
+	// SensitiveAttrs are the attributes sensitive because of the config
+	// (DesiredResource.SensitiveAttrs), which state records.
+	SensitiveAttrs []string
 	// Replace names the attributes and/or triggers whose change forces this
 	// replace (Action == ActionReplace); see provider.Replacer.
 	Replace []string
@@ -188,7 +207,7 @@ func BuildWithOptions(ctx context.Context, p provider.Provider, s *state.State, 
 			pl.Changes = append(pl.Changes, Change{
 				Address: addr, Type: r.Type, Name: r.Name, Key: r.Key, ID: r.ID, Action: provider.ActionDelete,
 				Actual:    decodeAttrs(r.Attributes),
-				Sensitive: sensitiveAttrs(resources[r.Type]),
+				Sensitive: sensitiveAttrs(resources[r.Type], r.SensitiveAttributes),
 			})
 			continue
 		}
@@ -203,7 +222,7 @@ func BuildWithOptions(ctx context.Context, p provider.Provider, s *state.State, 
 			newID[addr] = true
 			pl.Changes = append(pl.Changes, Change{
 				Address: addr, Type: d.Type, Name: d.Name, Key: d.Key, Action: provider.ActionCreate, Desired: d.Attributes, DependsOn: d.DependsOn, Refs: d.Refs, PathRefs: d.PathRefs,
-				Sensitive: sensitiveAttrs(resources[d.Type]),
+				Sensitive: sensitiveAttrs(resources[d.Type], d.SensitiveAttrs), SensitiveAttrs: d.SensitiveAttrs,
 			})
 			continue
 		}
@@ -219,7 +238,7 @@ func BuildWithOptions(ctx context.Context, p provider.Provider, s *state.State, 
 			newID[addr] = true
 			pl.Changes = append(pl.Changes, Change{
 				Address: addr, Type: d.Type, Name: d.Name, Key: d.Key, Action: provider.ActionCreate, Desired: d.Attributes, DependsOn: d.DependsOn, Refs: d.Refs, PathRefs: d.PathRefs,
-				Sensitive: sensitiveAttrs(resources[d.Type]),
+				Sensitive: sensitiveAttrs(resources[d.Type], d.SensitiveAttrs), SensitiveAttrs: d.SensitiveAttrs,
 			})
 			continue
 		}
@@ -461,9 +480,19 @@ func decodeAttrs(m map[string]json.RawMessage) provider.Attributes {
 	return out
 }
 
-func sensitiveAttrs(res provider.Resource) []string {
+// sensitiveAttrs returns the resource type's sensitive attributes
+// (provider.Sensitive) and the names in each of more, sorted and once each.
+func sensitiveAttrs(res provider.Resource, more ...[]string) []string {
+	var names []string
 	if s, ok := res.(provider.Sensitive); ok {
-		return s.Sensitive()
+		names = append(names, s.Sensitive()...)
 	}
-	return nil
+	for _, m := range more {
+		names = append(names, m...)
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	sort.Strings(names)
+	return slices.Compact(names)
 }
