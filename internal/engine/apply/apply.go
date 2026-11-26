@@ -301,20 +301,47 @@ func resolveRefs(c plan.Change, outputs map[string]provider.Attributes, resource
 		desired[k] = v
 	}
 	for attr, ref := range c.Refs {
-		out, ok := outputs[ref.Address]
-		if !ok {
-			return nil, fmt.Errorf("%s: reference %s.%s cannot be resolved (dependency not applied)", c.Address, ref.Address, ref.Attr)
-		}
-		v, ok := out[ref.Attr]
-		if !ok {
-			if isOutput(resources, ref) {
-				return nil, fmt.Errorf("%s: references %s.%s, which is not set: the provider couldn't determine it for this object, or it doesn't apply to it (see the warnings, and the resource reference for when it is set)", c.Address, ref.Address, ref.Attr)
-			}
-			return nil, fmt.Errorf("%s: referenced attribute %s.%s not found in applied output", c.Address, ref.Address, ref.Attr)
+		v, err := outputRef(c.Address, ref, outputs, resources)
+		if err != nil {
+			return nil, err
 		}
 		desired[attr] = v
 	}
+	for attr, refs := range c.PathRefs {
+		var lookupErr error
+		filled, err := plan.FillRefs(desired[attr], refs, func(ref provider.Ref) (cty.Value, bool) {
+			v, err := outputRef(c.Address, ref, outputs, resources)
+			if err != nil && lookupErr == nil {
+				lookupErr = err
+			}
+			return v, err == nil
+		})
+		if lookupErr != nil {
+			return nil, lookupErr
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%s: attribute %q: %w", c.Address, attr, err)
+		}
+		desired[attr] = filled
+	}
 	return desired, nil
+}
+
+// outputRef returns the value of ref from the outputs of resources already
+// applied; address is the referencing resource, for the error.
+func outputRef(address string, ref provider.Ref, outputs map[string]provider.Attributes, resources map[string]provider.Resource) (cty.Value, error) {
+	out, ok := outputs[ref.Address]
+	if !ok {
+		return cty.NilVal, fmt.Errorf("%s: reference %s.%s cannot be resolved (dependency not applied)", address, ref.Address, ref.Attr)
+	}
+	v, ok := out[ref.Attr]
+	if !ok {
+		if isOutput(resources, ref) {
+			return cty.NilVal, fmt.Errorf("%s: references %s.%s, which is not set: the provider couldn't determine it for this object, or it doesn't apply to it (see the warnings, and the resource reference for when it is set)", address, ref.Address, ref.Attr)
+		}
+		return cty.NilVal, fmt.Errorf("%s: referenced attribute %s.%s not found in applied output", address, ref.Address, ref.Attr)
+	}
+	return v, nil
 }
 
 // isOutput reports whether ref names a computed output (provider.Outputter)

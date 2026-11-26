@@ -28,10 +28,13 @@ func planInState(res provider.Resource, d DesiredResource, st *state.Resource, a
 	// value that only exists after apply (e.g. a re-uploaded asset's new id),
 	// so diff against an unknown: the dependent is updated in the same apply,
 	// once the new value is in the outputs map.
-	effective := withPendingRefs(resolved, d.Refs, pending)
+	effective, err := withPendingRefs(resolved, d.Refs, d.PathRefs, pending)
+	if err != nil {
+		return Change{}, err
+	}
 	forcing := replaceKeys(res, effective, actual)
 	diffs, censored := dropCensored(res, diffAttrs(actual, effective, res.Computed()))
-	diffs = append(diffs, pendingRefDiffs(d.Refs, pending, resolved, diffs)...)
+	diffs = append(diffs, pendingRefDiffs(d.Refs, d.PathRefs, pending, resolved, effective, diffs)...)
 	td, backfill, unavailable, err := triggerDiffs(res, resolved, st, forcing)
 	if err != nil {
 		return Change{}, err
@@ -40,17 +43,18 @@ func planInState(res provider.Resource, d DesiredResource, st *state.Resource, a
 	action, replace := classify(diffs, forcing)
 	return Change{
 		Address: address, Type: d.Type, Name: d.Name, Key: d.Key, ID: st.ID, Action: action,
-		Desired: d.Attributes, Actual: actual, AttrDiffs: diffs, DependsOn: d.DependsOn, Refs: d.Refs,
+		Desired: d.Attributes, Actual: actual, AttrDiffs: diffs, DependsOn: d.DependsOn, Refs: d.Refs, PathRefs: d.PathRefs,
 		Sensitive: sensitiveAttrs(res), Replace: replace,
 		AbandonsOld:      action == provider.ActionReplace && abandons(res),
 		BackfillTriggers: backfill, Unavailable: unavailable, Censored: censored,
 	}, nil
 }
 
-// withPendingRefs returns desired with every referenced attribute whose target
-// gets a new remote object in this plan (pending) replaced by an unknown value.
+// withPendingRefs returns desired with every reference whose target gets a new
+// remote object in this plan (pending) replaced by an unknown value: the whole
+// attribute for a reference in refs, the value at its path for one in pathRefs.
 // desired is not mutated.
-func withPendingRefs(desired provider.Attributes, refs map[string]provider.Ref, pending map[string]bool) provider.Attributes {
+func withPendingRefs(desired provider.Attributes, refs map[string]provider.Ref, pathRefs map[string][]PathRef, pending map[string]bool) (provider.Attributes, error) {
 	var hit bool
 	for _, ref := range refs {
 		if pending[ref.Address] {
@@ -58,8 +62,11 @@ func withPendingRefs(desired provider.Attributes, refs map[string]provider.Ref, 
 			break
 		}
 	}
+	for _, prs := range pathRefs {
+		hit = hit || pathRefTargets(prs, pending)
+	}
 	if !hit {
-		return desired
+		return desired, nil
 	}
 	out := make(provider.Attributes, len(desired)+len(refs))
 	for k, v := range desired {
@@ -70,7 +77,21 @@ func withPendingRefs(desired provider.Attributes, refs map[string]provider.Ref, 
 			out[attr] = cty.UnknownVal(cty.DynamicPseudoType)
 		}
 	}
-	return out
+	unknown := func(ref provider.Ref) (cty.Value, bool) {
+		return cty.UnknownVal(cty.DynamicPseudoType), pending[ref.Address]
+	}
+	for attr, prs := range pathRefs {
+		v, ok := out[attr]
+		if !ok || !pathRefTargets(prs, pending) {
+			continue
+		}
+		filled, err := FillRefs(v, prs, unknown)
+		if err != nil {
+			return nil, err
+		}
+		out[attr] = filled
+	}
+	return out, nil
 }
 
 // pendingRefDiffs returns a diff for every referenced attribute whose target is
@@ -78,7 +99,7 @@ func withPendingRefs(desired provider.Attributes, refs map[string]provider.Ref, 
 // create-only input). The dependent must still be planned, at least as an
 // update, so the new value reaches state; when the attribute forces
 // replacement it is replaced instead.
-func pendingRefDiffs(refs map[string]provider.Ref, pending map[string]bool, resolved provider.Attributes, have []AttrDiff) []AttrDiff {
+func pendingRefDiffs(refs map[string]provider.Ref, pathRefs map[string][]PathRef, pending map[string]bool, resolved, effective provider.Attributes, have []AttrDiff) []AttrDiff {
 	seen := map[string]bool{}
 	for _, d := range have {
 		seen[d.Name] = true
@@ -89,10 +110,15 @@ func pendingRefDiffs(refs map[string]provider.Ref, pending map[string]bool, reso
 			names = append(names, attr)
 		}
 	}
+	for attr, prs := range pathRefs {
+		if pathRefTargets(prs, pending) && !seen[attr] {
+			names = append(names, attr)
+		}
+	}
 	sort.Strings(names)
 	var out []AttrDiff
 	for _, n := range names {
-		out = append(out, AttrDiff{Name: n, Old: valOr(resolved, n), New: cty.UnknownVal(cty.DynamicPseudoType)})
+		out = append(out, AttrDiff{Name: n, Old: valOr(resolved, n), New: valOr(effective, n)})
 	}
 	return out
 }
@@ -211,6 +237,9 @@ func (p *Plan) replanDependents(resources map[string]provider.Resource, s *state
 				touched = true
 				break
 			}
+		}
+		for _, prs := range c.PathRefs {
+			touched = touched || pathRefTargets(prs, flipped)
 		}
 		if !touched {
 			continue

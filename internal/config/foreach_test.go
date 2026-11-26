@@ -520,3 +520,17 @@ resource "mock_ref" "r" {
 }
 `, `attribute "target" references another resource in an unsupported way`)
 }
+
+// A for expression in a resource attribute loads. Dependency collection used to
+// panic on it: its ChildScope node can't be a map key.
+func TestForExpressionInAttribute(t *testing.T) {
+	res, _ := mustLoad(t, `
+resource "mock_ref" "r" {
+  name   = "r"
+  target = join(",", [for x in ["a", "b"] : upper(x)])
+}
+`)
+	if got := res[0].Attributes["target"].AsString(); got != "A,B" {
+		t.Fatalf("target = %q", got)
+	}
+}

@@ -469,14 +469,34 @@ func ctyString(v cty.Value) string {
 			return "[" + strings.Join(parts, ", ") + "]"
 		}
 		// Maps/objects (e.g. a config map): render as compact JSON, which reads
-		// like the HCL the user wrote. A partially-unknown value can't be
-		// marshaled; it is only "known after apply" anyway.
+		// like the HCL the user wrote. A partially-unknown value (a reference
+		// inside it) can't be marshaled, so it is rendered field by field,
+		// each unknown field as "(known after apply)".
 		if !v.IsWhollyKnown() {
-			return "(known after apply)"
+			if !v.Type().IsObjectType() && !v.Type().IsMapType() {
+				return "(known after apply)"
+			}
+			parts := []string{}
+			for it := v.ElementIterator(); it.Next(); {
+				k, e := it.Element()
+				parts = append(parts, strconv.Quote(k.AsString())+":"+jsonString(e))
+			}
+			return "{" + strings.Join(parts, ",") + "}"
 		}
 		if b, err := ctyjson.Marshal(v, v.Type()); err == nil {
 			return string(b)
 		}
 		return v.GoString()
 	}
+}
+
+// jsonString renders a field of a partially-unknown object: compact JSON when
+// it is wholly known, ctyString otherwise.
+func jsonString(v cty.Value) string {
+	if v.IsWhollyKnown() {
+		if b, err := ctyjson.Marshal(v, v.Type()); err == nil {
+			return string(b)
+		}
+	}
+	return ctyString(v)
 }

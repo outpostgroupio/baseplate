@@ -323,7 +323,7 @@ func (l *loader) decodeInstance(body, remain hcl.Body, r provider.Resource, typ,
 	// unknown placeholder after decoding; move them out of literal Attributes
 	// into Refs (resolved at apply time). 2-part resource refs (used purely as
 	// a dependency) are dropped from literal attrs entirely.
-	refAttrs, refNames, deps, err := l.bodyRefs(body, ctx, inst)
+	refAttrs, refNames, nested, deps, err := l.bodyRefs(body, ctx, inst)
 	if err != nil {
 		return plan.DesiredResource{}, err
 	}
@@ -349,20 +349,38 @@ func (l *loader) decodeInstance(body, remain hcl.Body, r provider.Resource, typ,
 			delete(attrs, k)
 		}
 	}
-	// After removing bare references, any remaining unknown attribute is a
-	// reference used in an unsupported form (e.g. inside a string template
-	// or a function call). Reject it loudly rather than silently dropping it.
+	// After removing bare references, each remaining unknown must be a
+	// reference inside a list or object (nested), which stays in place and is
+	// filled in at apply. Any other unknown is a reference used in an
+	// unsupported form (e.g. inside a string template or a function call).
+	// Reject it loudly rather than silently dropping it.
+	var pathRefs map[string][]plan.PathRef
 	for k, v := range attrs {
-		// IsWhollyKnown, not IsKnown: a reference nested inside a map/object
-		// attribute (e.g. entries = { id = type.name.id }) leaves the container
-		// known but an element unknown.
-		if !v.IsWhollyKnown() {
-			return plan.DesiredResource{}, fmt.Errorf("%s: %s: attribute %q references another resource in an unsupported way; use a bare reference like type.name.attr", l.path, inst, k)
+		var prs []plan.PathRef
+		err := cty.Walk(v, func(p cty.Path, ev cty.Value) (bool, error) {
+			if ev.IsKnown() {
+				return true, nil
+			}
+			ref, ok := matchNested(nested[k], p)
+			if !ok {
+				return false, fmt.Errorf("%s: %s: attribute %q references another resource in an unsupported way; use a reference like type.name.attr, on its own or as an element of a list or object", l.path, inst, k)
+			}
+			prs = append(prs, plan.PathRef{Path: p.Copy(), Ref: ref})
+			return false, nil
+		})
+		if err != nil {
+			return plan.DesiredResource{}, err
+		}
+		if len(prs) > 0 {
+			if pathRefs == nil {
+				pathRefs = map[string][]plan.PathRef{}
+			}
+			pathRefs[k] = prs
 		}
 	}
 	return plan.DesiredResource{
 		Type: typ, Name: name, Key: key, Attributes: attrs,
-		DependsOn: deps, Refs: refAttrs,
+		DependsOn: deps, Refs: refAttrs, PathRefs: pathRefs,
 	}, nil
 }
 

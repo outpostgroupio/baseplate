@@ -41,29 +41,6 @@ resource "roblox_experience_config" "flags" {
 	}
 }
 
-// A reference nested inside a map attribute leaves the container known but an
-// element unknown; Load must reject it rather than pass an unknown to apply.
-func TestLoadRejectsReferenceNestedInMap(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "c.bp.hcl")
-	os.WriteFile(p, []byte(`
-resource "roblox_developer_product" "gems" {
-  universe_id = "1"
-  name        = "Gems"
-  price       = 10
-}
-resource "roblox_experience_config" "flags" {
-  universe_id = "1"
-  entries = {
-    product = roblox_developer_product.gems.id
-  }
-}
-`), 0o644)
-	_, _, _, err := Load(p, roblox.SchemaProvider())
-	if err == nil || !strings.Contains(err.Error(), "unsupported way") {
-		t.Fatalf("err = %v, want an unsupported-reference error", err)
-	}
-}
-
 func TestLoadBackendParsesHTTPBlock(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "c.bp.hcl")

@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty"
+	"github.com/zclconf/go-cty/cty/convert"
 
 	"github.com/outpostgroupio/baseplate/internal/addr"
 	"github.com/outpostgroupio/baseplate/internal/provider"
@@ -54,26 +55,37 @@ func (e *dynamicKeyError) Error() string { return e.msg }
 //   - refNames: every attr name whose value is a pure resource reference
 //     (including dependency-only `type.name` / `type.name["k"]`), which the
 //     caller drops from literal attributes.
+//   - nested: attr name -> the attribute references inside its list and
+//     object constructors (see nestedRefs), for an attribute that isn't
+//     itself a reference.
 //   - deps: the sorted instance addresses referenced anywhere in the body. A
 //     bare reference to a for_each resource depends on all of its instances.
-func (l *loader) bodyRefs(body hcl.Body, ctx *hcl.EvalContext, inst string) (map[string]provider.Ref, map[string]bool, []string, error) {
+func (l *loader) bodyRefs(body hcl.Body, ctx *hcl.EvalContext, inst string) (map[string]provider.Ref, map[string]bool, map[string][]nestedRef, []string, error) {
 	refAttrs := map[string]provider.Ref{}
 	refNames := map[string]bool{}
+	nested := map[string][]nestedRef{}
 	syn, ok := body.(*hclsyntax.Body)
 	if !ok {
-		return refAttrs, refNames, nil, nil
+		return refAttrs, refNames, nested, nil, nil
 	}
 	seen := map[string]bool{}
 	if err := l.collectDeps(syn, ctx, inst, seen); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	for name, attr := range syn.Attributes {
 		if name == "for_each" {
 			continue
 		}
 		t, ok, err := l.resolveRef(attr.Expr, ctx)
+		if err == nil && !ok {
+			var refs []nestedRef
+			err = l.nestedRefs(attr.Expr, ctx, nil, &refs)
+			if len(refs) > 0 {
+				nested[name] = refs
+			}
+		}
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("%s: %s: attribute %q: %w", l.path, inst, name, err)
+			return nil, nil, nil, nil, fmt.Errorf("%s: %s: attribute %q: %w", l.path, inst, name, err)
 		}
 		if !ok || t.partial {
 			continue
@@ -91,7 +103,87 @@ func (l *loader) bodyRefs(body hcl.Body, ctx *hcl.EvalContext, inst string) (map
 	if len(deps) == 0 {
 		deps = nil
 	}
-	return refAttrs, refNames, deps, nil
+	return refAttrs, refNames, nested, deps, nil
+}
+
+// nestedRef is a reference to another resource's attribute inside a list or
+// object constructor, at path within the attribute's value. The path is
+// syntactic: an element's index is a number, an object key a string.
+type nestedRef struct {
+	path cty.Path
+	ref  provider.Ref
+}
+
+// nestedRefs appends to out the attribute references (type.name.attr,
+// type.name[key].attr) found in the list and object constructors of expr, at
+// any depth. Anything else, including a reference in some other expression,
+// isn't recorded, so the unknown it decodes to is rejected by decodeInstance.
+func (l *loader) nestedRefs(expr hclsyntax.Expression, ctx *hcl.EvalContext, path cty.Path, out *[]nestedRef) error {
+	switch e := expr.(type) {
+	case *hclsyntax.TupleConsExpr:
+		for i, x := range e.Exprs {
+			if err := l.nestedRefs(x, ctx, append(path.Copy(), cty.IndexStep{Key: cty.NumberIntVal(int64(i))}), out); err != nil {
+				return err
+			}
+		}
+		return nil
+	case *hclsyntax.ObjectConsExpr:
+		for _, item := range e.Items {
+			k, d := item.KeyExpr.Value(ctx)
+			if d.HasErrors() || !k.IsKnown() || k.IsNull() {
+				continue
+			}
+			k, err := convert.Convert(k, cty.String)
+			if err != nil {
+				continue
+			}
+			if err := l.nestedRefs(item.ValueExpr, ctx, append(path.Copy(), cty.IndexStep{Key: k}), out); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if len(path) == 0 {
+		return nil
+	}
+	t, ok, err := l.resolveRef(expr, ctx)
+	if err != nil {
+		return err
+	}
+	if ok && !t.partial && t.attr != "" {
+		*out = append(*out, nestedRef{path: path, ref: provider.Ref{Address: addr.Format(t.typ, t.name, t.key), Attr: t.attr}})
+	}
+	return nil
+}
+
+// matchNested returns the reference whose syntactic path is the decoded
+// value's path p. Decoding turns an object key into an attribute step when the
+// attribute's type is an object, so a string key matches either.
+func matchNested(refs []nestedRef, p cty.Path) (provider.Ref, bool) {
+	for _, r := range refs {
+		if len(r.path) != len(p) {
+			continue
+		}
+		same := true
+		for i, step := range p {
+			want := r.path[i].(cty.IndexStep).Key
+			switch st := step.(type) {
+			case cty.GetAttrStep:
+				same = want.Type() == cty.String && want.AsString() == st.Name
+			case cty.IndexStep:
+				same = st.Key.IsKnown() && want.Type() == st.Key.Type() && want.RawEquals(st.Key)
+			default:
+				same = false
+			}
+			if !same {
+				break
+			}
+		}
+		if same {
+			return r.ref, true
+		}
+	}
+	return provider.Ref{}, false
 }
 
 // collectDeps walks every expression in a body (attributes and nested blocks)
@@ -104,10 +196,12 @@ func (l *loader) collectDeps(syn *hclsyntax.Body, ctx *hcl.EvalContext, inst str
 		// An IndexExpr's collection is itself a ScopeTraversalExpr; once the
 		// index is handled, skip the collection so it doesn't also count as a
 		// bare (all-instances) reference.
-		handled := map[hclsyntax.Node]bool{}
+		// Keyed by pointer: some nodes (a for expression's ChildScope) are
+		// unhashable values, so the map can't take any hclsyntax.Node.
+		handled := map[*hclsyntax.ScopeTraversalExpr]bool{}
 		var walkErr error
 		hclsyntax.VisitAll(attr.Expr, func(n hclsyntax.Node) hcl.Diagnostics {
-			if walkErr != nil || handled[n] {
+			if st, ok := n.(*hclsyntax.ScopeTraversalExpr); walkErr != nil || ok && handled[st] {
 				return nil
 			}
 			var t refTarget

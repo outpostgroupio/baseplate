@@ -108,12 +108,15 @@ func ResolveImports(ctx context.Context, p provider.Provider, s *state.State, pl
 		}
 		r := resources[c.Type]
 		actual := actuals[c.Address]
-		d := DesiredResource{Type: c.Type, Name: c.Name, Key: c.Key, Attributes: c.Desired, Refs: c.Refs}
+		d := DesiredResource{Type: c.Type, Name: c.Name, Key: c.Key, Attributes: c.Desired, Refs: c.Refs, PathRefs: c.PathRefs}
 		resolved, err := normalize(r, c.Address, mergeRefs(d, s, importIDs))
 		if err != nil {
 			return err
 		}
-		effective := withPendingRefs(resolved, c.Refs, pending)
+		effective, err := withPendingRefs(resolved, c.Refs, c.PathRefs, pending)
+		if err != nil {
+			return err
+		}
 		if si, ok := r.(provider.StateImporter); ok {
 			if actual, err = si.ImportState(id, effective); err != nil {
 				return fmt.Errorf("import %s: %w", c.Address, err)
