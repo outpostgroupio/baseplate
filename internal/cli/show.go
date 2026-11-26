@@ -62,6 +62,16 @@ func showRun(p provider.Provider, cfgPath, statePath, address string, format out
 			sens = sensitiveFor(p, r.Type)
 			sensitive[r.Type] = sens
 		}
+		if len(r.SensitiveAttributes) > 0 {
+			merged := map[string]bool{}
+			for k := range sens {
+				merged[k] = true
+			}
+			for _, k := range r.SensitiveAttributes {
+				merged[k] = true
+			}
+			sens = merged
+		}
 		res.Resources = append(res.Resources, toShowResource(r, sens))
 	}
 	sort.Slice(res.Resources, func(i, j int) bool { return res.Resources[i].Address < res.Resources[j].Address })

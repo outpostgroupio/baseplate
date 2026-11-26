@@ -44,7 +44,9 @@ func planInState(res provider.Resource, d DesiredResource, st *state.Resource, a
 	return Change{
 		Address: address, Type: d.Type, Name: d.Name, Key: d.Key, ID: st.ID, Action: action,
 		Desired: d.Attributes, Actual: actual, AttrDiffs: diffs, DependsOn: d.DependsOn, Refs: d.Refs, PathRefs: d.PathRefs,
-		Sensitive: sensitiveAttrs(res), Replace: replace,
+		// An attribute sensitive before (st) stays redacted, so its old value
+		// isn't shown when it stops being sensitive.
+		Sensitive: sensitiveAttrs(res, d.SensitiveAttrs, st.SensitiveAttributes), SensitiveAttrs: d.SensitiveAttrs, Replace: replace,
 		AbandonsOld:      action == provider.ActionReplace && abandons(res),
 		BackfillTriggers: backfill, Unavailable: unavailable, Censored: censored,
 	}, nil

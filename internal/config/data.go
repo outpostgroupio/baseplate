@@ -24,7 +24,8 @@ type RemoteStateSource struct {
 }
 
 // RemoteStateReader returns the output values recorded in the state src
-// names, or nil when that state doesn't exist yet.
+// names, or nil when that state doesn't exist yet. The value of a sensitive
+// output is marked plan.SensitiveMark.
 type RemoteStateReader func(src RemoteStateSource) (map[string]cty.Value, error)
 
 // LoadOptions tunes LoadConfigWith.

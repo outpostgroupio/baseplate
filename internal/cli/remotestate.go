@@ -12,6 +12,7 @@ import (
 
 	"github.com/outpostgroupio/baseplate/internal/auth"
 	"github.com/outpostgroupio/baseplate/internal/config"
+	"github.com/outpostgroupio/baseplate/internal/engine/plan"
 	"github.com/outpostgroupio/baseplate/internal/state"
 	"github.com/outpostgroupio/baseplate/internal/state/backend"
 )
@@ -35,6 +36,11 @@ func remoteStateReader() config.RemoteStateReader {
 		values, err := state.OutputValues(outputs)
 		if err != nil {
 			return nil, err
+		}
+		for name, o := range outputs {
+			if o.Sensitive {
+				values[name] = values[name].Mark(plan.SensitiveMark)
+			}
 		}
 		cache[key] = values
 		return values, nil

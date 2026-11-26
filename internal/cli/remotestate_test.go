@@ -13,6 +13,7 @@ import (
 	"github.com/outpostgroupio/baseplate/internal/auth"
 	"github.com/outpostgroupio/baseplate/internal/config"
 	"github.com/outpostgroupio/baseplate/internal/state"
+	"github.com/outpostgroupio/baseplate/internal/state/backend"
 )
 
 // One config's outputs feed another's resources through
@@ -120,5 +121,75 @@ func TestRemoteStateBadBackend(t *testing.T) {
 	}
 	if _, err := read(config.RemoteStateSource{Backend: "http", Config: map[string]cty.Value{"address": cty.StringVal("http://example.com/s")}}); err == nil || !strings.Contains(err.Error(), "must use https") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// A sensitive output read from another state stays sensitive: plan redacts
+// the attribute it sets, state records it as sensitive, show hides it, and an
+// output that re-exports it must be sensitive itself.
+func TestRemoteStateSensitiveOutput(t *testing.T) {
+	sharedMock(t)
+	dir := t.TempDir()
+	assets, assetsState := filepath.Join(dir, "assets.bp.hcl"), filepath.Join(dir, "assets.bpstate")
+	prod, prodState := filepath.Join(dir, "prod.bp.hcl"), filepath.Join(dir, "prod.bpstate")
+	os.WriteFile(assets, []byte(`
+output "token" {
+  value     = "s3cret"
+  sensitive = true
+}
+`), 0o644)
+	mustRun(t, 0, "apply", "--auto-approve", "--config", assets, "--state", assetsState)
+	data := `
+data "baseplate_remote_state" "assets" {
+  backend = "local"
+  config  = { path = "` + filepath.ToSlash(assetsState) + `" }
+}
+resource "mock_ref" "r" {
+  name   = "r"
+  target = "t-${data.baseplate_remote_state.assets.outputs.token}"
+}
+`
+	os.WriteFile(prod, []byte(data), 0o644)
+	if out := mustRun(t, 2, "plan", "--config", prod, "--state", prodState); strings.Contains(out, "s3cret") || !strings.Contains(out, "target = (sensitive value)") {
+		t.Fatalf("plan should redact the value:\n%s", out)
+	}
+	if out := mustRun(t, 0, "apply", "--auto-approve", "--config", prod, "--state", prodState); strings.Contains(out, "s3cret") {
+		t.Fatalf("apply printed the value:\n%s", out)
+	}
+	s, err := backend.NewLocal(prodState).Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := s.Find("mock_ref.r"); strings.Join(r.SensitiveAttributes, ",") != "target" {
+		t.Fatalf("sensitive_attributes = %v", r.SensitiveAttributes)
+	}
+	if out := mustRun(t, 0, "show", "mock_ref.r", "--json", "--config", prod, "--state", prodState); strings.Contains(out, "s3cret") {
+		t.Fatalf("show printed the value:\n%s", out)
+	}
+	if out := mustRun(t, 0, "plan", "--config", prod, "--state", prodState); strings.Contains(out, "s3cret") {
+		t.Fatalf("re-plan printed the value:\n%s", out)
+	}
+
+	// A new secret is an update whose old and new values are both redacted.
+	os.WriteFile(assets, []byte(`
+output "token" {
+  value     = "n3wsecret"
+  sensitive = true
+}
+`), 0o644)
+	mustRun(t, 0, "apply", "--auto-approve", "--config", assets, "--state", assetsState)
+	for _, args := range [][]string{
+		{"plan", "--config", prod, "--state", prodState},
+		{"plan", "--json", "--config", prod, "--state", prodState},
+	} {
+		out := mustRun(t, 2, args...)
+		if strings.Contains(out, "s3cret") || strings.Contains(out, "n3wsecret") || !strings.Contains(out, "(sensitive value)") {
+			t.Fatalf("%v should redact both values:\n%s", args, out)
+		}
+	}
+
+	os.WriteFile(prod, []byte(data+`output "leak" { value = mock_ref.r.target }`), 0o644)
+	if out := mustRun(t, 1, "plan", "--config", prod, "--state", prodState); !strings.Contains(out, `output "leak" refers to sensitive values`) {
+		t.Fatalf("re-exporting the value needs sensitive = true:\n%s", out)
 	}
 }

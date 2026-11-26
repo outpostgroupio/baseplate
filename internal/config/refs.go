@@ -361,6 +361,7 @@ func (l *loader) evalKey(expr hcl.Expression, ctx *hcl.EvalContext, what string)
 	if d.HasErrors() {
 		return "", &dynamicKeyError{msg: fmt.Sprintf("%s: evaluating instance key: %s", what, d.Error())}
 	}
+	v, _ = v.UnmarkDeep()
 	if v.IsNull() || !v.IsKnown() || v.Type() != cty.String {
 		return "", fmt.Errorf("%s: instance key must be a known string", what)
 	}

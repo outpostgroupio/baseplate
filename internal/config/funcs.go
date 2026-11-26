@@ -15,6 +15,8 @@ import (
 	"github.com/zclconf/go-cty/cty"
 	"github.com/zclconf/go-cty/cty/function"
 	"github.com/zclconf/go-cty/cty/function/stdlib"
+
+	"github.com/outpostgroupio/baseplate/internal/engine/plan"
 )
 
 // functions is the function library available to every config expression
@@ -26,6 +28,9 @@ import (
 func functions() map[string]function.Function {
 	return map[string]function.Function{
 		"env": envFunc(),
+
+		"sensitive":    sensitiveFunc,
+		"nonsensitive": nonsensitiveFunc,
 
 		"toset":  stdlib.MakeToFunc(cty.Set(cty.DynamicPseudoType)),
 		"tomap":  stdlib.MakeToFunc(cty.Map(cty.DynamicPseudoType)),
@@ -169,3 +174,25 @@ func envFunc() function.Function {
 		},
 	})
 }
+
+// sensitiveFunc marks its argument sensitive (plan.SensitiveMark), as
+// Terraform's sensitive() does.
+var sensitiveFunc = function.New(&function.Spec{
+	Params: []function.Parameter{{Name: "value", Type: cty.DynamicPseudoType, AllowUnknown: true, AllowNull: true, AllowMarked: true, AllowDynamicType: true}},
+	Type:   func(args []cty.Value) (cty.Type, error) { return args[0].Type(), nil },
+	Impl: func(args []cty.Value, _ cty.Type) (cty.Value, error) {
+		return args[0].Mark(plan.SensitiveMark), nil
+	},
+})
+
+// nonsensitiveFunc removes the sensitive mark from its argument and from
+// everything in it, for a value derived from a secret that may be shown, as
+// Terraform's nonsensitive() does.
+var nonsensitiveFunc = function.New(&function.Spec{
+	Params: []function.Parameter{{Name: "value", Type: cty.DynamicPseudoType, AllowUnknown: true, AllowNull: true, AllowMarked: true, AllowDynamicType: true}},
+	Type:   func(args []cty.Value) (cty.Type, error) { return args[0].Type(), nil },
+	Impl: func(args []cty.Value, _ cty.Type) (cty.Value, error) {
+		v, _ := args[0].UnmarkDeep()
+		return v, nil
+	},
+})
